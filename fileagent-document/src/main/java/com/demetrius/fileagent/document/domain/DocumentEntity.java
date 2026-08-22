@@ -39,6 +39,24 @@ public class DocumentEntity {
     /** 本地存储相对路径 */
     private String storagePath;
 
+    /** 解析切分出的 chunk 数量，解析成功后回填 */
+    @Column(name = "chunk_count")
+    private Integer chunkCount = 0;
+
+    /** 内容级元数据：文档标题（解析时抽取） */
+    private String title;
+
+    /** 内容级元数据：作者（解析时抽取） */
+    private String author;
+
+    /** 内容级元数据：页数（PDF/Word 解析时抽取） */
+    @Column(name = "page_count")
+    private Integer pageCount;
+
+    /** 内容级元数据：工作表数（Excel 解析时抽取） */
+    @Column(name = "sheet_count")
+    private Integer sheetCount;
+
     /** 解析状态 */
     @Enumerated(EnumType.STRING)
     private ParseStatus parseStatus = ParseStatus.PENDING;

@@ -55,7 +55,7 @@
 
 ## 4. Git 规则（代理提交时）
 
-1. **不直接提交到 `main`**。工作分支必须是 `feat/<milestone>-<功能>` 或 `fix/`。
+1. **不直接提交到 `master`**。工作分支必须是 `feat/<milestone>-<功能>` 或 `fix/`；CI/CD 配置改动走 `ci-cd` 分支。
 2. 提交信息遵循 Conventional Commits：
    - `feat(chat): 新增 RAG 问答` / `fix(parse): 修复 xlsx 解析 NPE`
    - scope：`chat` `document` `parse` `session` `repo` `pom` `docs` 等
@@ -75,6 +75,7 @@
 
 - `docs/PRD.md` 需求 · `docs/API.md` 接口 · `docs/SKELETON.md` 分包
 - `docs/CODE-STYLE.md` 代码 · `docs/COMMENT-STYLE.md` 注释 · `docs/TESTING.md` 测试 · `docs/GIT-WORKFLOW.md` Git
+- `docs/CICD.md` CI/CD 流水线说明
 - 新增/变更接口时**同步更新** `docs/API.md`；新增依赖时更新 `docs/SKELETON.md §3`。
 
 ## 7. 里程碑分工（谁来做什么）

@@ -47,6 +47,7 @@ mvn spring-boot:run -pl fileagent-starter
 | `docs/GIT-WORKFLOW.md` | Git 分支 / 提交 / PR 流程 |
 | `docs/TESTING.md` | 测试规范 |
 | `docs/SECURITY.md` | 安全与敏感信息规范 |
+| `docs/CICD.md` | CI/CD 流水线说明（GitHub Actions） |
 | `AGENTS.md` | AI 编码代理协作规范（Cursor/Claude Code 等读取） |
 | `CONTRIBUTING.md` | 协作者贡献指南 |
 
@@ -60,6 +61,6 @@ mvn spring-boot:run -pl fileagent-starter
 
 ## 仓库规范
 
-- 两人协作，`main` 受保护，开发走 `feat/<里程碑>-<功能>` 分支 + PR 合入
+- 两人协作，`master` 受保护，开发走 `feat/<里程碑>-<功能>` 分支 + PR 合入；CI/CD 配置走 `ci-cd` 分支
 - 业务逻辑实现由协作者完成，骨架与契约已就位
 - 提交信息遵循 Conventional Commits（见 `docs/GIT-WORKFLOW.md`）

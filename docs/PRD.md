@@ -51,7 +51,7 @@
 - **F2.1** 统一解析入口，按 MIME 路由到不同解析器。
 - **F2.2** 文本/MD/TXT：直接读取。
 - **F2.3** PDF：Apache PDFBox 抽取文本层；扫描件走 OCR（Tess4J）兜底；识别表格结构。
-- **F2.4** Office：Apache POI 解析 docx/xlsx/pptx，保留段落、表格、sheet、slide 结构。
+- **F2.4** Office：EasyExcel 解析 docx/xlsx/pptx，保留段落、表格、sheet、slide 结构。
 - **F2.5** 图片：OCR 抽取文字（必要时调用多模态模型理解）。
 - **F2.6** 解析输出统一为 Chunk 列表，Chunk 字段：`{id, docId, content, type(text/table/title), page, position, metadata}`。
 - **F2.7** 分块策略：按语义/标题切分，带重叠窗口，单块 token 受控。
@@ -168,17 +168,17 @@ business_db_connectors(id, name, type, jdbc_url, username, encrypted_pwd, query_
 
 ## 6. 技术选型
 
-| 层 | 选型 |
-|---|---|
-| 框架 | Spring Boot 3.x + Spring AI |
-| LLM 编排 | Spring AI（Function Calling / RAG / ChatMemory） |
-| 文档解析 | Apache Tika（统一入口）+ PDFBox + POI + Tess4J(OCR) |
-| 向量库 | MVP: SimpleVectorStore；演进: Redis Stack / pgvector |
-| Embedding | 可切换（OpenAI / 通义 / Ollama 本地） |
-| 代码沙箱 | GraalVM Polyglot（JS/Python） |
-| 存储 | H2/SQLite（元数据）+ 本地文件系统（文件/产物） |
-| 构建 | Maven |
-| Java | 21（虚拟线程 + GraalVM 友好） |
+| 层 | 选型                                                  |
+|---|-----------------------------------------------------|
+| 框架 | Spring Boot 3.x + Spring AI                         |
+| LLM 编排 | Spring AI（Function Calling / RAG / ChatMemory）      |
+| 文档解析 | Apache Tika（统一入口）+ PDFBox + EasyExcel + Tess4J(OCR) |
+| 向量库 | MVP: SimpleVectorStore；演进: Redis Stack / pgvector   |
+| Embedding | 可切换（OpenAI / 通义 / Ollama 本地）                        |
+| 代码沙箱 | GraalVM Polyglot（JS/Python）                         |
+| 存储 | MySQL（元数据）+ MinIO（文件/产物）                            |
+| 构建 | Maven                                               |
+| Java | 21（虚拟线程 + GraalVM 友好）                               |
 
 ---
 

@@ -15,7 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 文档应用服务实现：编排上传流程（校验会话 → 落盘+sha256 → 查重 → 落库 → 解析 → 状态流转）。
@@ -68,21 +70,29 @@ public class DocumentAppServiceImpl implements DocumentAppService {
         DocumentEntity doc = new DocumentEntity();
         doc.setSessionId(sessionId);
         doc.setFilename(file.getOriginalFilename());
-        doc.setMimeType(file.getContentType());
+        doc.setMimeType(resolveMime(file));
         doc.setSize(file.getSize());
         doc.setSha256(stored.sha256());
         doc.setStoragePath(stored.relativePath());
         doc.setParseStatus(ParseStatus.PENDING);
         documentRepository.save(doc);
 
-        // 5. 解析（B 侧实现具体 parser；无 parser 时保持 PENDING，A 可独立验证）
+        // 5. 解析（按 MIME 路由到解析器；无解析器时保持 PENDING）
         int chunkCount = 0;
         if (parserRegistry.supports(doc.getMimeType())) {
             doc.setParseStatus(ParseStatus.PARSING);
             documentRepository.save(doc);
             try {
-                var chunks = parserRegistry.parse(storageService.resolve(doc.getStoragePath()), doc.getMimeType());
+                Path filePath = storageService.resolve(doc.getStoragePath());
+                var chunks = parserRegistry.parse(filePath, doc.getMimeType());
                 chunkCount = chunks.size();
+                doc.setChunkCount(chunkCount);
+                // 内容级元数据从文件内容抽取，覆盖"仅客户端 content-type"的基础元数据
+                var metadata = parserRegistry.extractMetadata(filePath, doc.getMimeType());
+                doc.setTitle(metadata.title());
+                doc.setAuthor(metadata.author());
+                doc.setPageCount(metadata.pageCount());
+                doc.setSheetCount(metadata.sheetCount());
                 doc.setParseStatus(ParseStatus.SUCCESS);
                 // TODO(B): VectorStoreService.add(chunks, doc.getId()) —— F3.2 索引接入点
             } catch (Exception e) {
@@ -112,6 +122,7 @@ public class DocumentAppServiceImpl implements DocumentAppService {
 
     /**
      * 实体 → 上传响应 DTO。chunkCount 仅在解析 SUCCESS 时有值，其余状态返回 0。
+     * 内容级元数据从实体读取（解析时回填，去重复用时也带出既有元数据）。
      */
     private UploadFileResp toResp(DocumentEntity doc, int chunkCount) {
         return new UploadFileResp(
@@ -120,8 +131,39 @@ public class DocumentAppServiceImpl implements DocumentAppService {
                 doc.getSize(),
                 doc.getMimeType(),
                 doc.getParseStatus().name(),
-                chunkCount
+                chunkCount,
+                doc.getTitle(),
+                doc.getAuthor(),
+                doc.getPageCount(),
+                doc.getSheetCount()
         );
+    }
+
+    /**
+     * 扩展名优先识别 MIME，客户端 content-type 兜底。
+     * 解决浏览器上传时 content-type 缺失或被误报为 application/octet-stream 的问题。
+     */
+    private String resolveMime(MultipartFile file) {
+        String filename = file.getOriginalFilename();
+        if (filename != null) {
+            int dot = filename.lastIndexOf('.');
+            if (dot >= 0) {
+                String ext = filename.substring(dot + 1).toLowerCase(Locale.ROOT);
+                String byExt = switch (ext) {
+                    case "pdf" -> "application/pdf";
+                    case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                    case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                    case "csv" -> "text/csv";
+                    case "txt" -> "text/plain";
+                    case "md", "markdown" -> "text/markdown";
+                    default -> null;
+                };
+                if (byExt != null) {
+                    return byExt;
+                }
+            }
+        }
+        return file.getContentType();
     }
 
     private DocumentSummary toSummary(DocumentEntity doc) {

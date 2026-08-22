@@ -14,4 +14,12 @@ public interface DocumentParser {
 
     /** 解析为若干文本块（chunk） */
     List<String> parse(Path file, String mimeType);
+
+    /**
+     * 从文件内容抽取内容级元数据（标题/作者/页数等）。默认返回空，
+     * 仅结构化格式（PDF/Office）的解析器覆盖此方法。
+     */
+    default DocumentMetadata extractMetadata(Path file, String mimeType) {
+        return DocumentMetadata.empty();
+    }
 }

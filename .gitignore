@@ -5,6 +5,10 @@ target/
 !.mvn/wrapper/maven-wrapper.jar
 *.war
 
+# ===== JVM 崩溃日志 =====
+hs_err_pid*
+replay_pid*
+
 # ===== IDE =====
 .idea/
 *.iml
@@ -33,3 +37,6 @@ Desktop.ini
 
 # ===== 其它 =====
 *.log
+
+# ===== 本地工具会话数据（ZCode 计划等，不入库） =====
+.zcode/

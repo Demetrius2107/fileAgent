@@ -1,6 +1,5 @@
 package com.demetrius.fileagent.session.domain;
 
-import com.demetrius.fileagent.model.enums.ActionType;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;

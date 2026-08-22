@@ -84,6 +84,13 @@
                 <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
                 <version>${springdoc.version}</version>
             </dependency>
+
+            <!-- 各接口模块用于 @Tag/@Operation 等 Swagger 注解的轻量依赖（不引入 springdoc 运行时） -->
+            <dependency>
+                <groupId>io.swagger.core.v3</groupId>
+                <artifactId>swagger-annotations-jakarta</artifactId>
+                <version>2.2.22</version>
+            </dependency>
         </dependencies>
     </dependencyManagement>
 

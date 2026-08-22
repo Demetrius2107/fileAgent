@@ -13,7 +13,14 @@ fileAgent/
 ├── docs/
 │   ├── PRD.md                     ✅ 需求文档
 │   ├── API.md                     ✅ 接口文档
-│   └── SKELETON.md                ✅ 本文件
+│   ├── SKELETON.md                ✅ 本文件
+│   ├── CODE-STYLE.md              ✅ 代码规范
+│   ├── COMMENT-STYLE.md           ✅ 注释规范
+│   ├── TESTING.md                 ✅ 测试规范
+│   └── GIT-WORKFLOW.md            ✅ Git 工作流
+├── AGENTS.md                      ✅ AI 代理协作规范
+├── CONTRIBUTING.md                ✅ 贡献指南
+└── README.md                      ✅ 项目入口
 └── src/main/java/com/demetrius/fileagent/
     ├── FileAgentApplication.java  ✅ 启动类
     ├── config/                    M2  配置类（AiConfig / WebConfig）

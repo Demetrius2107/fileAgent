@@ -99,9 +99,28 @@ Response `data`:
 
 ---
 
-## 3. 对话
+## 3. 知识库文件
 
-### 3.1 发送消息
+### 3.1 上传知识库文件（解析 → 分块 → 向量入库）
+`POST /api/rag-files/upload`
+
+- `multipart/form-data`，字段：`name`（知识库名称）、`tag`（知识标签）、`files`（文件列表，可多个）
+- 当前支持 TXT / Markdown；PDF/Office 随 M2 解析器扩展
+- 同步处理：解析 → 分块（`fileagent.chunk-size` / `chunk-overlap`）→ embedding → 写入向量库（`fileagent.vector-store-path`），并落库 `rag_file` 记录
+- chunk 元数据：`knowledge`=tag、`ragName`=name、`fileId`、`filename`、`chunkIndex`，供 chat 域按标签检索注入上下文
+
+Response `data`:
+```json
+{ "code": 0, "message": "ok", "data": true }
+```
+
+失败时返回 `code=400` + 失败原因（如 `暂不支持的文件格式: application/pdf`）；单文件失败时该文件在 `rag_file` 表中状态为 `FAILED`。
+
+---
+
+## 4. 对话
+
+### 4.1 发送消息
 `POST /api/sessions/{id}/chat`
 
 Request:
@@ -136,23 +155,23 @@ Response `data`:
 
 ---
 
-## 4. 产物管理
+## 5. 产物管理
 
-### 4.1 下载产物（M2）
+### 5.1 下载产物（M2）
 `GET /api/artifacts/{id}`（预留）
 
 ---
 
-## 5. 业务库连接器（M4 预留）
+## 6. 业务库连接器（M4 预留）
 
 - `POST /api/connectors`：配置外部业务数据库连接
 - `GET  /api/connectors`
 
 ---
 
-## 6. 系统
+## 7. 系统
 
-### 6.1 健康检查
+### 7.1 健康检查
 `GET /api/health`
 
 Response:
@@ -162,7 +181,7 @@ Response:
 
 ---
 
-## 7. 交互时序（M1 闭环）
+## 8. 交互时序（M1 闭环）
 
 ```
 前端                      后端

@@ -103,7 +103,7 @@ fileagent-starter → 全部业务域
 | common | spring-boot-starter-web |
 | api | common |
 | session | api + web + data-jpa + h2(runtime) |
-| document | api + web + data-jpa + spring-ai-openai + h2(runtime) |
+| document | api + web + data-jpa + spring-ai-openai + spring-ai-vector-store + h2(runtime) |
 | chat | api + web + spring-ai-openai |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
 | starter | 全部业务域 + h2(runtime) + springdoc |

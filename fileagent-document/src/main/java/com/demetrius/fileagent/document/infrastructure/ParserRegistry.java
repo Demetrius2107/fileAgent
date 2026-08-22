@@ -43,4 +43,15 @@ public class ParserRegistry {
                 .map(p -> p.parse(file, mimeType))
                 .orElseThrow(() -> new BizException("暂不支持该文件类型: " + mimeType));
     }
+
+    /**
+     * 抽取文件内容级元数据。无匹配解析器或解析器未覆盖时返回空元数据。
+     */
+    public DocumentMetadata extractMetadata(Path file, String mimeType) {
+        return parsers.stream()
+                .filter(p -> p.supports(mimeType))
+                .findFirst()
+                .map(p -> p.extractMetadata(file, mimeType))
+                .orElseGet(DocumentMetadata::empty);
+    }
 }

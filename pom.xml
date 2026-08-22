@@ -33,6 +33,8 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-ai.version>2.0.0</spring-ai.version>
         <springdoc.version>3.1.0</springdoc.version>
+        <pdfbox.version>2.0.32</pdfbox.version>
+        <poi.version>5.2.5</poi.version>
     </properties>
 
     <dependencyManagement>
@@ -90,6 +92,19 @@
                 <groupId>io.swagger.core.v3</groupId>
                 <artifactId>swagger-annotations-jakarta</artifactId>
                 <version>2.2.22</version>
+            </dependency>
+
+            <!-- 文档解析：PDFBox 抽取 PDF 文本层与文档信息（M1 提前引入） -->
+            <dependency>
+                <groupId>org.apache.pdfbox</groupId>
+                <artifactId>pdfbox</artifactId>
+                <version>${pdfbox.version}</version>
+            </dependency>
+            <!-- 文档解析：POI 解析 Office 格式（DOCX/XLSX，M1 提前引入） -->
+            <dependency>
+                <groupId>org.apache.poi</groupId>
+                <artifactId>poi-ooxml</artifactId>
+                <version>${poi.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

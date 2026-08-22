@@ -51,6 +51,7 @@ mvn spring-boot:run -pl fileagent-starter
 | `docs/M1-UPLOAD-SPLIT.md` | F1 上传模块两人分工方案 |
 | `AGENTS.md` | AI 编码代理协作规范（Cursor/Claude Code 等读取） |
 | `CONTRIBUTING.md` | 协作者贡献指南 |
+| `.agents/skills/add-code-comments/` | 注释技能（触发"加注释/补注释"自动按规范执行） |
 
 ## 里程碑（详见 PRD §7）
 

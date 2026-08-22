@@ -70,7 +70,8 @@ Response `data`:
 `POST /api/sessions/{id}/files`
 
 - `multipart/form-data`，字段名 `file`，支持多文件
-- 上传后**同步解析建索引**，M2 起改为异步 + 轮询状态
+- 上传后**同步解析并抽取内容级元数据**（标题/作者/页数/工作表数），M2 起改为异步 + 轮询状态
+- MIME 按扩展名优先识别、客户端 content-type 兜底；当前支持 PDF / DOCX / XLSX / CSV / TXT / MD
 
 Response `data`:
 ```json
@@ -80,9 +81,15 @@ Response `data`:
   "size": 20480,
   "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "parseStatus": "SUCCESS",
-  "chunkCount": 12
+  "chunkCount": 12,
+  "title": null,
+  "author": null,
+  "pageCount": null,
+  "sheetCount": 3
 }
 ```
+
+> 内容级元数据按格式可抽取的字段填充：PDF 取 `title`/`author`/`pageCount`；DOCX 取 `pageCount`（段落数近似）；XLSX 取 `sheetCount`；CSV/TXT/MD 无结构化元数据，对应字段为 null。
 
 ### 2.2 会话内文档列表
 `GET /api/sessions/{id}/documents`

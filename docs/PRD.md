@@ -182,6 +182,37 @@ business_db_connectors(id, name, type, jdbc_url, username, encrypted_pwd, query_
 
 ---
 
+## 6.5 架构（DDD 模块化单体）
+
+**形态**：模块化单体 —— 一个 Spring Boot 进程，多 Maven 模块，领域间用 **Port 端口 + 领域事件** 解耦。后续可按需拆独立进程。
+
+**模块划分**（依赖方向：`api→common`，`session/document/chat/action→api`，`starter→全部`）：
+
+| 模块 | 类型 | 职责 |
+|---|---|---|
+| `fileagent-common` | 支撑 | 统一响应 / 异常 / 通用工具 |
+| `fileagent-api` | 契约 | 跨域 DTO / 枚举 / Port / 领域事件 |
+| `fileagent-session` | 业务域 | 会话 / 消息 |
+| `fileagent-document` | 业务域 | 文档 / 解析 / 索引 |
+| `fileagent-chat` | 核心域 | 对话 / RAG / 推理编排 |
+| `fileagent-action` | 业务域 | 动作执行 / 产物 / 沙箱 |
+| `fileagent-starter` | 装配 | 唯一 Boot 入口，聚合各域 Bean |
+
+**域内四层**（`interfaces → application → domain ← infrastructure`）：
+
+| 层 | 职责 |
+|---|---|
+| interfaces | Controller / 出入参 DTO |
+| application | 用例编排 / 事务 / 跨域 port 调用 |
+| domain | 聚合根 / 值对象 / Repository 接口 / 领域服务 / 事件 |
+| infrastructure | JPA 实现 / 外部客户端 / 解析器 / 事件监听 |
+
+**跨域解耦通道**：
+- 同步取数 → `api/port` 接口（如 chat 调 `DocumentQueryPort.searchChunks`）
+- 异步通知 → `api/event` 事件（如 document 解析完发 `DocumentParsedEvent` → chat 订阅建索引）
+
+---
+
 ## 7. 里程碑
 
 ### M1 — 闭环骨架（最小可跑通）

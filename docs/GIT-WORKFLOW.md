@@ -40,13 +40,14 @@ git push -u origin feat/m1-chat
 <type>(<scope>): <subject>
 
 type:   feat | fix | docs | refactor | test | chore
-scope:  chat | document | parse | session | repo | pom | model | api | infra
+scope:  session | document | chat | action | api | common | starter | pom | docs | infra
 subject: 祈使句、中文、≤50 字
 ```
 
 示例：
 - `feat(parse): 支持 PDF 文本层抽取`
 - `fix(document): sha256 重复时复用解析结果`
+- `feat(chat): 实现 RAG 问答闭环`
 - `docs(api): 新增 chat 接口 SSE 示例`
 - `chore(pom): 升级 spring-ai 到 1.0.0-M3`
 

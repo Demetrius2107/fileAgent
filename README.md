@@ -3,6 +3,20 @@
 > 上传文件，融合**会话提示 + 历史上下文 + 文档内容**，自动分析、解析并执行用户操作。
 > 技术栈：Java 21 · Spring Boot 3.3 · Spring AI 1.0 · H2 · Maven
 
+## 架构
+
+**模块化单体（DDD）**：Maven 多模块聚合工程，一个 Spring Boot 进程，领域间用 Port 接口 + 领域事件解耦。
+
+```
+fileagent-common   通用支撑（统一响应/异常）
+fileagent-api      契约层（DTO / 枚举 / 端口 / 领域事件）
+fileagent-session  会话域        fileagent-document  文档域
+fileagent-chat     对话/推理域(核心) fileagent-action    动作执行域
+fileagent-starter  启动装配（唯一 Boot 入口）
+```
+
+每个业务域内部四层：`interfaces → application → domain ← infrastructure`。
+
 ## 快速开始
 
 ```bash
@@ -14,8 +28,8 @@ export AI_BASE_URL=https://api.openai.com
 export AI_CHAT_MODEL=gpt-4o-mini
 export AI_EMBEDDING_MODEL=text-embedding-3-small
 
-# 3. 启动
-mvn spring-boot:run
+# 3. 启动（在 fileagent-starter 模块）
+mvn spring-boot:run -pl fileagent-starter
 # Swagger UI: http://localhost:8080/swagger-ui.html
 ```
 

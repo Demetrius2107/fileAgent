@@ -15,26 +15,36 @@
 
 ## 2. 架构约束（写代码前必读）
 
-依赖方向：`controller → service → repo/parser → model`，禁止反向依赖。
+**模块化单体 + DDD**：Maven 聚合工程，模块间靠 `fileagent-api` 的 Port 接口与领域事件解耦。
 
-| 包 | 职责 | 硬性约束 |
+模块依赖方向：`api → common`；`session/document/chat/action → api`；`starter → 全部`。**各业务域互不直接依赖**。
+
+| 模块 | 职责 |
+|---|---|
+| `fileagent-common` | 统一响应/异常（`ApiResult` / `BizException` / `GlobalExceptionHandler`） |
+| `fileagent-api` | 跨域契约：`dto`(record) / `enums` / `event` / `port` |
+| `fileagent-session` | 会话域 |
+| `fileagent-document` | 文档域 |
+| `fileagent-chat` | 对话/推理域（核心域） |
+| `fileagent-action` | 动作执行域 |
+| `fileagent-starter` | 启动装配（唯一 Boot 入口） |
+
+每个业务域内部四层（依赖方向：`interfaces → application → domain ← infrastructure`）：
+
+| 层 | 职责 | 禁止 |
 |---|---|---|
-| `model/enums` | 枚举 | 只放值，不放逻辑 |
-| `model/entity` | JPA 实体 | Lombok `@Getter/@Setter`，无业务方法 |
-| `model/dto` | 出入参契约 | 一律 `record`，禁止 JPA 注解 |
-| `common/result` `common/exception` | 统一响应/异常 | `ApiResult<T>` + `BizException` |
-| `repo` | JPA Repository | 只声明查询接口 |
-| `parser` | 文档解析为 Chunk | 无状态，按 MIME 路由 |
-| `service` | 业务编排 | 核心逻辑所在 |
-| `controller` | HTTP 层 | 只做参数校验+调 service+包 ApiResult |
+| `interfaces` | Controller、出入参 DTO | 写业务 / 直接碰 repository |
+| `application` | 用例编排、事务、跨域 port 调用 | 写持久化 |
+| `domain` | 聚合根、值对象、Repository 接口、领域服务、领域事件 | 依赖 Spring / infrastructure |
+| `infrastructure` | JPA 实现、外部客户端、解析器、事件监听 | 被上层反向依赖 |
 
 **约定清单**：
-- DTO 用 `record`；实体用 Lombok。
+- `api/dto` 用 `record`；实体用 Lombok `@Getter/@Setter`。
 - 枚举持久化用 `@Enumerated(EnumType.STRING)`。
 - 长文本用 `@Lob + columnDefinition="CLOB"`。
 - 日志用 `@Slf4j`，禁 `System.out`。
 - 所有对外接口返回 `ApiResult<T>`；业务异常抛 `BizException`。
-- 对外绝不直接返回 `Entity`（会 NPE/循环引用），一律 DTO。
+- 对外绝不直接返回 `Entity`，一律 DTO；接口层包名是 `interfaces`（复数，`interface` 是关键字）。
 
 ## 3. 敏感信息（红线）
 
@@ -71,9 +81,9 @@
 
 | 里程碑 | 分工 |
 |---|---|
-| M1 闭环 | A: 上传→解析→索引；B: 检索→LLM→动作→落库 |
-| M2 多格式+多动作 | A: PDF/Office 解析；B: export/chart 执行器+SSE |
-| M3 Agent+沙箱 | A: ReAct 编排+工具注册；B: GraalVM 沙箱+外部 API |
-| M4 历史上下文 | A: 会话/历史文档检索；B: 业务库连接器 |
+| M1 闭环 | A：session/document 域（上传→解析→索引）；B：chat 域（检索→LLM→动作→落库） |
+| M2 多格式+多动作 | A：PDF/Office 解析器；B：export/chart 执行器+SSE |
+| M3 Agent+沙箱 | A：ReAct 编排+工具注册；B：GraalVM 沙箱+外部 API |
+| M4 历史上下文 | A：会话/历史文档检索；B：业务库连接器 |
 
 **代理不要擅自实现/改写对方负责的未完成模块**，除非用户明确要求。

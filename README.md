@@ -48,6 +48,7 @@ mvn spring-boot:run -pl fileagent-starter
 | `docs/TESTING.md` | 测试规范 |
 | `docs/SECURITY.md` | 安全与敏感信息规范 |
 | `docs/CICD.md` | CI/CD 流水线说明（GitHub Actions） |
+| `docs/M1-UPLOAD-SPLIT.md` | F1 上传模块两人分工方案 |
 | `AGENTS.md` | AI 编码代理协作规范（Cursor/Claude Code 等读取） |
 | `CONTRIBUTING.md` | 协作者贡献指南 |
 

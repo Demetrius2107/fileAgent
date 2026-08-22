@@ -103,7 +103,7 @@ fileagent-starter → 全部业务域
 | common | spring-boot-starter-web |
 | api | common |
 | session | api + web + data-jpa + h2(runtime) |
-| document | api + web + data-jpa + spring-ai-openai + spring-ai-vector-store + h2(runtime) |
+| document | api + web + data-jpa + spring-ai-openai + spring-ai-vector-store + pdfbox + poi-ooxml + h2(runtime) |
 | chat | api + web + spring-ai-openai |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
 | starter | 全部业务域 + h2(runtime) + springdoc |
@@ -111,12 +111,12 @@ fileagent-starter → 全部业务域
 ### 后续里程碑新增
 | 依赖 | 用途 | 里程碑 |
 |---|---|---|
-| `org.apache.pdfbox` | PDF 解析 | M2 |
-| `org.apache.poi` (poi-ooxml) | Word/Excel/PPT 解析 | M2 |
 | `org.apache.tika` | 统一解析兜底 | M2 |
 | `net.sourceforge.tess4j` | OCR | M2 |
 | `org.graalvm.polyglot` | 代码沙箱 | M3 |
 | `spring-ai-vector-store-*` | 生产向量库 | M4 |
+
+> pdfbox / poi-ooxml 在 M1 提前引入（F1.2 需支持 PDF/DOCX/XLSX/CSV），版本由 parent `pom.xml` 统一管理。
 
 ## 5. 配置说明（application.yml，位于 starter）
 

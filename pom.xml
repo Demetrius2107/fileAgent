@@ -33,7 +33,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-ai.version>2.0.0</spring-ai.version>
         <springdoc.version>3.1.0</springdoc.version>
-        <pdfbox.version>2.0.32</pdfbox.version>
+        <pdfbox.version>3.0.8</pdfbox.version>
         <poi.version>5.2.5</poi.version>
     </properties>
 

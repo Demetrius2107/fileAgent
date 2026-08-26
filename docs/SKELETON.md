@@ -27,28 +27,28 @@ fileAgent/
 │   └── common/{result,exception}      ApiResult / BizException / GlobalExceptionHandler
 │
 ├── fileagent-api/                 ✅ 契约层（跨域共享，只声明不实现）
-│   ├── api/dto/                       7 个 DTO（record）
+│   ├── api/dto/                       8 个 DTO（record，含 ChatStreamEvent / RagFileSummary）
 │   ├── api/enums/                     3 个枚举
 │   ├── api/event/                     DomainEvent / MessageCreatedEvent / DocumentParsedEvent
-│   └── api/port/                      SessionQueryPort / DocumentQueryPort / ChatExecutionPort
+│   └── api/port/                      SessionQueryPort / SessionMessagePort / DocumentQueryPort / KnowledgeSearchPort / ChatExecutionPort(流式)
 │
 ├── fileagent-session/             ✅ 会话域
-│   ├── interfaces/                   SessionController
-│   ├── application/                  SessionAppService（接口）
+│   ├── interfaces/                   SessionController（已实现）
+│   ├── application/                  SessionAppService（接口）+ SessionAppServiceImpl（已实现）
 │   ├── domain/                       SessionEntity / MessageEntity / SessionRepository
-│   └── infrastructure/               SessionJpaRepository / MessageJpaRepository / SessionQueryPortImpl
+│   └── infrastructure/               SessionJpaRepository / MessageJpaRepository / SessionRepositoryImpl / SessionQueryPortImpl / SessionMessagePortImpl
 │
 ├── fileagent-document/            ✅ 文档域
-│   ├── interfaces/                   FileController
-│   ├── application/                  DocumentAppService（接口）
-│   ├── domain/                       DocumentEntity / DocumentRepository
-│   └── infrastructure/               DocumentJpaRepository / DocumentQueryPortImpl / DocumentParser(契约)
+│   ├── interfaces/                   FileController / RagFileController（已实现）
+│   ├── application/                  DocumentAppService（接口）/ RagFileAppService + RagFileAppServiceImpl（已实现）
+│   ├── domain/                       DocumentEntity / DocumentRepository / RagFileEntity / RagFileRepository
+│   └── infrastructure/               DocumentJpaRepository / RagFileJpaRepository / RagFileRepositoryImpl / KnowledgeSearchPortImpl / 解析器（TXT/MD/PDF/Word/Excel/CSV）/ VectorStoreConfig
 │
-├── fileagent-chat/                ✅ 对话/推理域（核心域）
-│   ├── interfaces/                   ChatController
-│   ├── application/                  ChatAppService（接口，extends ChatExecutionPort）
+├── fileagent-chat/                ✅ 对话/推理域（核心域，M2 RAG 流式闭环已实现）
+│   ├── interfaces/                   ChatController（SSE 流式，已实现）
+│   ├── application/                  ChatAppService（接口，extends ChatExecutionPort）+ ChatAppServiceImpl（RAG 编排）+ RagPromptBuilder
 │   ├── domain/                       待建（Action / 意图模型）
-│   └── infrastructure/               DocumentParsedEventListener（索引订阅）
+│   └── infrastructure/               StreamingChatClient（模型流适配）/ DocumentParsedEventListener（索引订阅）
 │
 ├── fileagent-action/              ✅ 动作执行域
 │   ├── interfaces/                   待建（风险确认接口）
@@ -58,7 +58,8 @@ fileAgent/
 │
 └── fileagent-starter/             ✅ 启动装配（唯一 Boot 入口）
     ├── FileAgentApplication.java
-    └── resources/application.yml
+    ├── resources/application.yml
+    └── resources/static/             同源前端工作台（index.html / app.css / app.js）
 ```
 
 ---
@@ -73,7 +74,9 @@ fileagent-starter → 全部业务域
 
 **跨域解耦的两条通道**：
 1. **Port 端口**：跨域取数/触发走 `fileagent-api/port` 接口，由属主域 infrastructure 实现，消费方注入。
-   - 例：chat 域 RAG 检索 → `DocumentQueryPort.searchChunks(...)`
+   - 例：chat 域 RAG 检索 → `KnowledgeSearchPort.search(query)`（全局知识，document 域实现）
+   - 例：chat 域读历史/落消息 → `SessionQueryPort` / `SessionMessagePort`（session 域实现）
+   - 例：chat 域流式推理契约 → `ChatExecutionPort.chat(sessionId, prompt)` 返回 `Flux<ChatStreamEvent>`
 2. **领域事件**：跨域异步通知走 `fileagent-api/event`，发布方发事件，订阅方监听。
    - 例：document 域解析完发 `DocumentParsedEvent` → chat 域订阅更新索引
 
@@ -101,10 +104,10 @@ fileagent-starter → 全部业务域
 | 模块 | 依赖 |
 |---|---|
 | common | spring-boot-starter-web |
-| api | common |
+| api | common + reactor-core（Flux 契约） |
 | session | api + web + data-jpa + h2(runtime) |
 | document | api + web + data-jpa + spring-ai-openai + spring-ai-vector-store + pdfbox + poi-ooxml + h2(runtime) |
-| chat | api + web + spring-ai-openai |
+| chat | api + web + webflux（流式调用）+ spring-ai-openai + reactor-test(test) |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
 | starter | 全部业务域 + h2(runtime) + springdoc |
 
@@ -128,6 +131,8 @@ fileagent-starter → 全部业务域
 | `fileagent.storage-dir` | 上传文件目录 | ✅ 目录在 .gitignore |
 | `fileagent.vector-store-path` | 向量库 JSON 文件 | ✅ 目录在 .gitignore |
 | `fileagent.retrieval-top-k` | RAG 召回条数 | ✅ |
+| `fileagent.retrieval-similarity-threshold` | RAG 相似度阈值 | ✅ |
+| `fileagent.chat-history-limit` | 对话注入的历史条数（取最后 N 条） | ✅ |
 
 ## 6. 两人分工建议（按里程碑）
 

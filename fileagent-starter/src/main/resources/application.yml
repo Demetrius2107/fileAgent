@@ -41,6 +41,8 @@ fileagent:
   storage-dir: ./storage/files
   vector-store-path: ./storage/vectorstore.json
   retrieval-top-k: 5
+  retrieval-similarity-threshold: 0.7
+  chat-history-limit: 10
   chunk-size: 800
   chunk-overlap: 120
 

@@ -4,6 +4,15 @@
 (() => {
     const $ = (id) => document.getElementById(id);
 
+    /* SVG 图标常量 */
+    const SVG = {
+        userAvatar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+        botAvatar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>',
+        emptyChat: '<svg viewBox="0 0 80 80" fill="none" width="80" height="80"><rect x="10" y="16" width="60" height="40" rx="8" fill="#eef1fe" stroke="#4f6ef7" stroke-width="1.5"/><circle cx="28" cy="36" r="3" fill="#4f6ef7"/><circle cx="40" cy="36" r="3" fill="#4f6ef7"/><circle cx="52" cy="36" r="3" fill="#4f6ef7"/><path d="M24 56 L20 64 L32 56" fill="#eef1fe" stroke="#4f6ef7" stroke-width="1.5" stroke-linejoin="round"/></svg>',
+        fileDoc: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M10 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5z"/><path d="M10 1v4h4"/><line x1="6" y1="9" x2="10" y2="9"/><line x1="6" y1="12" x2="9" y2="12"/></svg>',
+        sourceIcon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M13 12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h4l4 4z"/><path d="M9 2v4h4"/></svg>',
+    };
+
     const sessionList = $('session-list');
     const newSessionButton = $('new-session-button');
     const chatTitle = $('chat-title');
@@ -49,13 +58,15 @@
 
     function el(tag, className, text) {
         const node = document.createElement(tag);
-        if (className) {
-            node.className = className;
-        }
-        if (text !== undefined) {
-            node.textContent = text;
-        }
+        if (className) { node.className = className; }
+        if (text !== undefined) { node.textContent = text; }
         return node;
+    }
+
+    function svgEl(svgString) {
+        const template = document.createElement('template');
+        template.innerHTML = svgString.trim();
+        return template.content.firstChild;
     }
 
     /* ---------- 会话 ---------- */
@@ -64,14 +75,12 @@
         const sessions = await api('/api/sessions');
         sessionList.replaceChildren();
         if (!sessions || sessions.length === 0) {
-            sessionList.appendChild(el('li', 'list-empty', '暂无会话，点击“新建会话”开始'));
+            sessionList.appendChild(el('li', 'list-empty', '暂无会话，点击"新建会话"开始'));
             return;
         }
         for (const session of sessions) {
             const item = el('li', null, session.title);
-            if (session.id === currentSessionId) {
-                item.classList.add('active');
-            }
+            if (session.id === currentSessionId) { item.classList.add('active'); }
             item.addEventListener('click', () => selectSession(session.id, session.title));
             sessionList.appendChild(item);
         }
@@ -88,9 +97,7 @@
     }
 
     async function selectSession(sessionId, title) {
-        if (streaming) {
-            abortController && abortController.abort();
-        }
+        if (streaming) { abortController && abortController.abort(); }
         currentSessionId = sessionId;
         chatTitle.textContent = title;
         sendButton.disabled = false;
@@ -102,7 +109,7 @@
         const messages = await api(`/api/sessions/${currentSessionId}/messages`);
         messageList.replaceChildren();
         if (!messages || messages.length === 0) {
-            messageList.appendChild(el('div', 'chat-hint', '上传知识文件后即可提问，回答将标明来源。'));
+            renderEmptyChat();
             return;
         }
         for (const message of messages) {
@@ -110,9 +117,24 @@
         }
     }
 
+    function renderEmptyChat() {
+        const hint = el('div', 'chat-hint');
+        const iconWrap = el('div', 'empty-icon');
+        iconWrap.appendChild(svgEl(SVG.emptyChat));
+        hint.appendChild(iconWrap);
+        hint.appendChild(el('div', 'empty-title', '开始对话'));
+        hint.appendChild(el('div', 'empty-desc', '上传知识文件后即可提问，回答将标明来源。'));
+        messageList.appendChild(hint);
+    }
+
     function appendMessage(role, content) {
         const wrap = el('div', `message ${role === 'USER' ? 'user' : 'assistant'}`);
-        wrap.appendChild(el('div', 'message-bubble', content));
+        const avatar = el('div', 'message-avatar');
+        avatar.innerHTML = role === 'USER' ? SVG.userAvatar : SVG.botAvatar;
+        wrap.appendChild(avatar);
+        const body = el('div', 'message-body');
+        body.appendChild(el('div', 'message-bubble', content));
+        wrap.appendChild(body);
         messageList.appendChild(wrap);
         messageList.scrollTop = messageList.scrollHeight;
         return wrap;
@@ -122,13 +144,9 @@
 
     chatForm.addEventListener('submit', (event) => {
         event.preventDefault();
-        if (streaming || !currentSessionId) {
-            return;
-        }
+        if (streaming || !currentSessionId) { return; }
         const prompt = promptInput.value.trim();
-        if (!prompt) {
-            return;
-        }
+        if (!prompt) { return; }
         sendMessage(prompt);
     });
 
@@ -137,9 +155,7 @@
         promptInput.style.height = `${Math.min(promptInput.scrollHeight, 120)}px`;
     });
 
-    stopButton.addEventListener('click', () => {
-        abortController && abortController.abort();
-    });
+    stopButton.addEventListener('click', () => { abortController && abortController.abort(); });
 
     async function sendMessage(prompt) {
         promptInput.value = '';
@@ -161,15 +177,16 @@
                 } else if (event.type === 'done') {
                     assistant.dataset.messageId = String(event.messageId);
                 } else if (event.type === 'error') {
-                    assistant.appendChild(el('div', 'message-error',
-                        `出错了：${event.message || event.code || '未知错误'}`));
+                    assistant.querySelector('.message-body')
+                        .appendChild(el('div', 'message-error', `出错了：${event.message || event.code || '未知错误'}`));
                 }
             });
         } catch (e) {
+            const body = assistant.querySelector('.message-body');
             if (e.name === 'AbortError') {
-                assistant.appendChild(el('div', 'message-error', '已停止生成。'));
+                body.appendChild(el('div', 'message-error', '已停止生成。'));
             } else {
-                assistant.appendChild(el('div', 'message-error', `出错了：${e.message}`));
+                body.appendChild(el('div', 'message-error', `出错了：${e.message}`));
             }
         } finally {
             setStreaming(false);
@@ -189,53 +206,38 @@
             let message = `HTTP ${response.status}`;
             try {
                 const body = await response.json();
-                if (body && body.message) {
-                    message = body.message;
-                }
+                if (body && body.message) { message = body.message; }
             } catch (e) { /* 非 JSON 错误体 */ }
             throw new Error(message);
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        // 跨 chunk 缓冲区：一次 read() 不一定恰好是一条事件
         let buffer = '';
         for (;;) {
             const { done, value } = await reader.read();
-            if (done) {
-                break;
-            }
+            if (done) { break; }
             buffer += decoder.decode(value, { stream: true });
             let separator;
             while ((separator = buffer.indexOf('\n\n')) >= 0) {
                 const block = buffer.slice(0, separator);
                 buffer = buffer.slice(separator + 2);
                 const parsed = parseSseBlock(block);
-                if (parsed) {
-                    onEvent(parsed);
-                }
+                if (parsed) { onEvent(parsed); }
             }
         }
-        // 冲刷残留缓冲
         const rest = parseSseBlock(buffer);
-        if (rest) {
-            onEvent(rest);
-        }
+        if (rest) { onEvent(rest); }
     }
 
     function parseSseBlock(block) {
         let eventName = null;
         let data = '';
         for (const line of block.split(/\r?\n/)) {
-            if (line.startsWith('event:')) {
-                eventName = line.slice(6).trim();
-            } else if (line.startsWith('data:')) {
-                data += line.slice(5).trim();
-            }
+            if (line.startsWith('event:')) { eventName = line.slice(6).trim(); }
+            else if (line.startsWith('data:')) { data += line.slice(5).trim(); }
         }
-        if (!data) {
-            return null;
-        }
+        if (!data) { return null; }
         try {
             const payload = JSON.parse(data);
             return payload && payload.type ? payload : { type: eventName, ...payload };
@@ -252,7 +254,10 @@
         } else {
             text = `来源：${files.join('、')}`;
         }
-        assistant.appendChild(el('div', 'message-sources', text));
+        const sources = el('div', 'message-sources');
+        sources.appendChild(svgEl(SVG.sourceIcon));
+        sources.appendChild(document.createTextNode(text));
+        assistant.querySelector('.message-body').appendChild(sources);
     }
 
     /* ---------- 知识库 ---------- */
@@ -261,14 +266,18 @@
         const files = await api('/api/rag-files');
         knowledgeList.replaceChildren();
         if (!files || files.length === 0) {
-            knowledgeList.appendChild(el('li', 'list-empty', '暂无知识文件，点击“上传”添加'));
+            knowledgeList.appendChild(el('li', 'list-empty', '暂无知识文件，点击"上传"添加'));
             return;
         }
         for (const file of files) {
             const item = el('li');
-            item.appendChild(el('div', 'knowledge-file-name', file.filename));
+            const nameEl = el('div', 'knowledge-file-name');
+            nameEl.appendChild(svgEl(SVG.fileDoc));
+            nameEl.appendChild(document.createTextNode(file.filename));
+            item.appendChild(nameEl);
             const meta = el('div', 'knowledge-file-meta');
-            meta.appendChild(el('span', null, `状态 ${file.status || '-'}`));
+            const statusSpan = el('span', file.status === 'READY' ? 'status-ready' : 'status-other', `状态 ${file.status || '-'}`);
+            meta.appendChild(statusSpan);
             meta.appendChild(el('span', null, `分块 ${file.chunkCount == null ? '-' : file.chunkCount}`));
             meta.appendChild(el('span', null, formatTime(file.createdAt)));
             item.appendChild(meta);
@@ -277,9 +286,7 @@
     }
 
     function formatTime(iso) {
-        if (!iso) {
-            return '-';
-        }
+        if (!iso) { return '-'; }
         return iso.replace('T', ' ').slice(0, 19);
     }
 
@@ -289,9 +296,7 @@
         uploadDialog.showModal();
     });
 
-    $('upload-cancel').addEventListener('click', () => {
-        uploadDialog.close();
-    });
+    $('upload-cancel').addEventListener('click', () => { uploadDialog.close(); });
 
     uploadForm.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -304,16 +309,13 @@
         const formData = new FormData();
         formData.append('name', name);
         formData.append('tag', tag);
-        for (const file of uploadFiles.files) {
-            formData.append('files', file);
-        }
+        for (const file of uploadFiles.files) { formData.append('files', file); }
         try {
             await api('/api/rag-files/upload', { method: 'POST', body: formData });
             uploadDialog.close();
             uploadForm.reset();
             await loadKnowledge();
         } catch (e) {
-            // 失败时保留用户已填内容和文件选择
             showUploadError(e.message);
         }
     });

@@ -23,10 +23,10 @@ fileagent-starter  启动装配（唯一 Boot 入口）
 
 ```bash
 # 1. 配置环境变量（必须，密钥绝不写入仓库）
-export AI_API_KEY='<由运行者提供>'
-export AI_BASE_URL='https://兼容服务地址'
-export AI_CHAT_MODEL='聊天模型名'
-export AI_EMBEDDING_MODEL='向量模型名'
+export FILEAGENT_AI_API_KEY='<由运行者提供>'
+export FILEAGENT_AI_BASE_URL='https://兼容服务地址'
+export FILEAGENT_AI_CHAT_MODEL='聊天模型名'
+export FILEAGENT_AI_EMBEDDING_MODEL='向量模型名'
 
 # 2. 启动（在仓库根目录）
 mvn -pl fileagent-starter -am spring-boot:run

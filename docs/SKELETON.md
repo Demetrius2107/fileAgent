@@ -125,8 +125,8 @@ fileagent-starter → 全部业务域
 
 | 键 | 说明 | 是否入库 |
 |---|---|---|
-| `spring.ai.openai.api-key` | `${AI_API_KEY}` 环境变量占位 | ❌ 严禁提交 |
-| `spring.ai.openai.base-url` | `${AI_BASE_URL}` | ❌ 按需 |
+| `spring.ai.openai.api-key` | `${FILEAGENT_AI_API_KEY}` 环境变量占位 | ❌ 严禁提交 |
+| `spring.ai.openai.base-url` | `${FILEAGENT_AI_BASE_URL}` | ❌ 按需 |
 | `spring.datasource.url` | H2 文件库 `./storage/db` | ✅ |
 | `fileagent.storage-dir` | 上传文件目录 | ✅ 目录在 .gitignore |
 | `fileagent.vector-store-path` | 向量库 JSON 文件 | ✅ 目录在 .gitignore |

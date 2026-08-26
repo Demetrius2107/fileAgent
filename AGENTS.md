@@ -49,7 +49,7 @@
 ## 3. 敏感信息（红线）
 
 - API Key / 密码 / Token **绝不**写入仓库文件。
-- `application.yml` 密钥用 `${AI_API_KEY}` 占位，真实值走环境变量。
+- `application.yml` 密钥用 `${FILEAGENT_AI_API_KEY}` 占位，真实值走环境变量。
 - `storage/`（上传文件、H2 库、向量库 JSON）已在 `.gitignore`，**禁止** `git add -f` 强加。
 - 新增密钥类配置 → 加 `.gitignore` 或环境变量占位。
 

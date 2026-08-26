@@ -8,15 +8,15 @@ spring:
   # Spring AI: OpenAI 兼容（通义/DeepSeek/OpenRouter 均可改 base-url）
   ai:
     openai:
-      api-key: ${AI_API_KEY:sk-placeholder}
-      base-url: ${AI_BASE_URL:https://api.openai.com}
+      api-key: ${FILEAGENT_AI_API_KEY:sk-placeholder}
+      base-url: ${FILEAGENT_AI_BASE_URL:https://api.openai.com}
       chat:
         options:
-          model: ${AI_CHAT_MODEL:gpt-4o-mini}
+          model: ${FILEAGENT_AI_CHAT_MODEL:gpt-4o-mini}
           temperature: 0.2
       embedding:
         options:
-          model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
+          model: ${FILEAGENT_AI_EMBEDDING_MODEL:text-embedding-3-small}
 
   # H2 文件数据库（元数据）
   datasource:
@@ -41,6 +41,8 @@ fileagent:
   storage-dir: ./storage/files
   vector-store-path: ./storage/vectorstore.json
   retrieval-top-k: 5
+  retrieval-similarity-threshold: 0.7
+  chat-history-limit: 10
   chunk-size: 800
   chunk-overlap: 120
 

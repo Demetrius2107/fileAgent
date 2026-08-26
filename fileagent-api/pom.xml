@@ -19,5 +19,10 @@
             <groupId>com.demetrius</groupId>
             <artifactId>fileagent-common</artifactId>
         </dependency>
+        <!-- Flux 契约（版本由 spring-boot-starter-parent 管理） -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
+        </dependency>
     </dependencies>
 </project>

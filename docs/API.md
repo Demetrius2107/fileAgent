@@ -1,8 +1,9 @@
 # 接口文档 (API.md)
 
-> 版本: v0.1 (M1 骨架)
+> 版本: v0.2 (M2 全局知识库 RAG + SSE 流式对话)
 > 基础路径: `http://localhost:8080`
 > 所有接口返回统一包装：`ApiResult<T>` `{ code, message, data }`，`code=0` 表示成功。
+> 例外：SSE 对话接口（§4.1）直接返回 `text/event-stream` 事件流。
 
 ---
 
@@ -41,6 +42,8 @@ Request:
 { "title": "Q3 销售分析" }
 ```
 
+- `title` 可省略或为空白，此时默认为「新会话」
+
 Response `data`:
 ```json
 { "id": 1, "title": "Q3 销售分析", "createdAt": "2026-08-22T13:30:00" }
@@ -49,16 +52,20 @@ Response `data`:
 ### 1.2 会话列表
 `GET /api/sessions`
 
+- 按更新时间倒序（最近活跃在前）
+
 Response `data`: `SessionDto[]`
 
-### 1.3 会话详情 / 消息历史
+### 1.3 会话消息历史
 `GET /api/sessions/{id}/messages`
+
+- 按创建时间正序；会话不存在返回 HTTP 404 + `code=404`
 
 Response `data`:
 ```json
 [
   { "id": 1, "role": "USER", "content": "帮我看下这个报表", "actionJson": null, "createdAt": "..." },
-  { "id": 2, "role": "ASSISTANT", "content": "已解析报表……", "actionJson": "{...}", "createdAt": "..." }
+  { "id": 2, "role": "ASSISTANT", "content": "已解析报表……", "actionJson": null, "createdAt": "..." }
 ]
 ```
 
@@ -112,53 +119,97 @@ Response `data`:
 `POST /api/rag-files/upload`
 
 - `multipart/form-data`，字段：`name`（知识库名称）、`tag`（知识标签）、`files`（文件列表，可多个）
-- 当前支持 TXT / Markdown；PDF/Office 随 M2 解析器扩展
-- 同步处理：解析 → 分块（`fileagent.chunk-size` / `chunk-overlap`）→ embedding → 写入向量库（`fileagent.vector-store-path`），并落库 `rag_file` 记录
-- chunk 元数据：`knowledge`=tag、`ragName`=name、`fileId`、`filename`、`chunkIndex`，供 chat 域按标签检索注入上下文
+- 支持格式及 MIME 映射（按扩展名固定识别，未知扩展名直接返回业务 400，不按纯文本解析）：
 
-Response `data`:
+| 扩展名 | MIME |
+|---|---|
+| `.txt` | `text/plain` |
+| `.md` / `.markdown` | `text/markdown` |
+| `.pdf` | `application/pdf` |
+| `.docx` | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` |
+| `.xlsx` | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
+| `.csv` | `text/csv` |
+
+- 同步处理：解析 → 分块（`fileagent.chunk-size` / `chunk-overlap`）→ embedding → 写入向量库（`fileagent.vector-store-path`），并落库 `rag_file` 记录
+- chunk 元数据：`knowledge`=tag、`ragName`=name、`fileId`、`filename`、`chunkIndex`；检索为全局范围，不按标签过滤
+
+Response:
 ```json
 { "code": 0, "message": "ok", "data": true }
 ```
 
-失败时返回 `code=400` + 失败原因（如 `暂不支持的文件格式: application/pdf`）；单文件失败时该文件在 `rag_file` 表中状态为 `FAILED`。
+失败时返回 `code=400` + 失败原因（如 `不支持的文件格式: virus.exe（当前支持 TXT/MD/PDF/DOCX/XLSX/CSV）`）；单文件失败时该文件在 `rag_file` 表中状态为 `FAILED`。
+
+### 3.2 知识文件列表
+`GET /api/rag-files`
+
+- 按创建时间倒序（最新上传在前）
+
+Response `data`: `RagFileSummary[]`
+```json
+[
+  {
+    "id": 1,
+    "ragName": "员工知识库",
+    "knowledgeTag": "制度",
+    "filename": "员工手册.pdf",
+    "status": "SUCCESS",
+    "chunkCount": 12,
+    "createdAt": "2026-08-26T09:00:00"
+  }
+]
+```
 
 ---
 
-## 4. 对话
+## 4. 对话（SSE 流式）
 
-### 4.1 发送消息
+### 4.1 流式问答
 `POST /api/sessions/{id}/chat`
+
+- 请求头 `Accept: text/event-stream`，响应 `Content-Type: text/event-stream`
+- 主流程：读取最近 `fileagent.chat-history-limit` 条历史 → 保存本次 USER → 全局知识检索 → 组装 Prompt（System 规则 + 历史 + 带来源标记的知识上下文）→ 模型流式调用 → 事件下发 → 完整 ASSISTANT 落库
+- 前置校验失败（`sessionId` 为空 / `prompt` 空白 / 会话不存在）在流建立前返回 HTTP 400/404 JSON；流建立后的错误以 `error` 事件传递，HTTP 仍为 200
 
 Request:
 ```json
-{ "prompt": "汇总各区域销售额并按季度对比" }
+{ "prompt": "年假如何申请？" }
 ```
 
-Response `data`:
-```json
-{
-  "messageId": 20,
-  "action": {
-    "action": "ANSWER",
-    "params": {
-      "answer": "| 区域 | Q1 | Q2 | ... |"
-    },
-    "reasoning": "根据上传的销售报表，按区域聚合了季度销售额",
-    "summary": "已按区域汇总季度销售额，见上方表格"
-  }
-}
+事件流共四种事件，事件名即 `type` 字段，`data` 为 `ChatStreamEvent` JSON：
+
+**`message`：模型增量正文（多条，未命中知识时首条为固定提示语）**
+```
+event:message
+data:{"type":"message","content":"根据《员工手册》，年假申请流程为……"}
+
+event:message
+data:{"type":"message","content":"更多正文增量……"}
 ```
 
-`action=ASK_USER` 示例：
-```json
-{
-  "action": "ASK_USER",
-  "params": { "question": "您希望按季度还是按年度对比？" }
-}
+**`sources`：回答来源（模型流结束后一条）**
+```
+event:sources
+data:{"type":"sources","answerSource":"KNOWLEDGE","files":["员工手册.pdf","制度.docx"]}
+```
+- `answerSource=KNOWLEDGE`：命中知识，`files` 为去重后的来源文件名（保持首次出现顺序）
+- `answerSource=MODEL_GENERAL`：未命中知识，`files` 为空数组
+
+**`done`：流结束（最后一条）**
+```
+event:done
+data:{"type":"done","messageId":20}
 ```
 
-> M2 起：本接口改为 `text/event-stream`（SSE 流式），且支持 `action=EXPORT_FILE` 等动作返回产物下载地址。
+**`error`：流式过程中的错误（HTTP 仍为 200）**
+```
+event:error
+data:{"type":"error","code":"MODEL_STREAM_FAILED","message":"模型调用失败，请稍后重试"}
+```
+- `code=KNOWLEDGE_SEARCH_FAILED`：知识检索失败
+- `code=MODEL_STREAM_FAILED`：模型调用失败或模型未返回任何内容
+
+> 未命中知识时，服务端提示语「未检索到相关知识库内容，以下回答来自模型通用知识。」会作为首条 `message` 事件下发，并计入最终落库的 ASSISTANT 正文。
 
 ---
 
@@ -188,17 +239,23 @@ Response:
 
 ---
 
-## 8. 交互时序（M1 闭环）
+## 8. 交互时序（M2 RAG 闭环）
 
 ```
 前端                      后端
   │ POST /api/sessions        │
   │─────────────────────────▶│ 创建会话
   │◀─────────────────────────│ SessionDto
-  │ POST /api/sessions/1/files
-  │─────────────────────────▶│ 存盘+解析+建索引
-  │◀─────────────────────────│ UploadFileResp
-  │ POST /api/sessions/1/chat
-  │─────────────────────────▶│ RAG检索 → LLM → ActionDto
-  │◀─────────────────────────│ ChatResp
+  │ POST /api/rag-files/upload
+  │─────────────────────────▶│ 解析+分块+向量化入库
+  │◀─────────────────────────│ data: true
+  │ GET  /api/rag-files       │
+  │─────────────────────────▶│ 知识文件列表
+  │◀─────────────────────────│ RagFileSummary[]
+  │ POST /api/sessions/1/chat (Accept: text/event-stream)
+  │─────────────────────────▶│ 历史读取→知识检索→Prompt→LLM 流式
+  │◀─────────────────────────│ event: message / sources / done
+  │ GET  /api/sessions/1/messages（刷新后恢复）
+  │─────────────────────────▶│ 消息历史
+  │◀─────────────────────────│ MessageDto[]
 ```

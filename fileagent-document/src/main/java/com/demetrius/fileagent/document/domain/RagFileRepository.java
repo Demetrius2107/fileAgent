@@ -14,4 +14,7 @@ public interface RagFileRepository {
     Optional<RagFileEntity> findById(Long id);
 
     List<RagFileEntity> findByKnowledgeTag(String knowledgeTag);
+
+    /** 全部知识文件，按创建时间倒序（最新上传在前） */
+    List<RagFileEntity> findAllOrderByCreatedAtDesc();
 }

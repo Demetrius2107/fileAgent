@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.document.application;
 
+import com.demetrius.fileagent.api.dto.RagFileSummary;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -17,4 +18,7 @@ public interface RagFileAppService {
      * @param files 待索引的文件列表
      */
     void storeRagFile(String name, String tag, List<MultipartFile> files);
+
+    /** 全部知识文件概要（按创建时间倒序） */
+    List<RagFileSummary> list();
 }

@@ -1,7 +1,7 @@
 # fileAgent — 文件驱动的智能 Agent
 
-> 上传文件，融合**会话提示 + 历史上下文 + 文档内容**，自动分析、解析并执行用户操作。
-> 技术栈：Java 21 · Spring Boot 3.3 · Spring AI 1.0 · H2 · Maven
+> 上传文件，融合**会话提示 + 历史上下文 + 全局知识库**，流式问答并标明回答来源。
+> 技术栈：Java 21 · Spring Boot 4.1 · Spring AI 2.0 · Reactor · H2 · Maven
 
 ## 架构
 
@@ -19,19 +19,22 @@ fileagent-starter  启动装配（唯一 Boot 入口）
 
 ## 快速开始
 
-```bash
-# 1. 需要 JDK 21（本项目不支持 Java 8）
-# 2. 配置环境变量（必须）
-export AI_API_KEY=你的OpenAI兼容Key
-# 可选
-export AI_BASE_URL=https://api.openai.com
-export AI_CHAT_MODEL=gpt-4o-mini
-export AI_EMBEDDING_MODEL=text-embedding-3-small
+要求：JDK 21 + Maven 3.9+。
 
-# 3. 启动（在 fileagent-starter 模块）
-mvn spring-boot:run -pl fileagent-starter
+```bash
+# 1. 配置环境变量（必须，密钥绝不写入仓库）
+export FILEAGENT_AI_API_KEY='<由运行者提供>'
+export FILEAGENT_AI_BASE_URL='https://兼容服务地址'
+export FILEAGENT_AI_CHAT_MODEL='聊天模型名'
+export FILEAGENT_AI_EMBEDDING_MODEL='向量模型名'
+
+# 2. 启动（在仓库根目录）
+mvn -pl fileagent-starter -am spring-boot:run
+# 工作台: http://localhost:8080/
 # Swagger UI: http://localhost:8080/swagger-ui.html
 ```
+
+打开 `http://localhost:8080/` 即可使用同源工作台：新建会话 → 右侧「知识库」上传 TXT/MD/PDF/DOCX/XLSX/CSV → 中间提问，回答流式输出并标明来源文件；刷新页面后会话与消息仍在（H2 + 向量库 JSON 落盘于 `storage/`）。
 
 > ⚠️ API Key **不要**写进 `application.yml`，只通过环境变量传入，`storage/` 目录已 gitignore。
 

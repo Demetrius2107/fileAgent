@@ -12,4 +12,7 @@ import java.util.List;
 public interface RagFileJpaRepository extends JpaRepository<RagFileEntity, Long> {
 
     List<RagFileEntity> findByKnowledgeTag(String knowledgeTag);
+
+    /** 全部知识文件，按创建时间倒序（最新上传在前） */
+    List<RagFileEntity> findAllByOrderByCreatedAtDesc();
 }

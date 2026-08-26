@@ -31,4 +31,9 @@ public class RagFileRepositoryImpl implements RagFileRepository {
     public List<RagFileEntity> findByKnowledgeTag(String knowledgeTag) {
         return jpaRepository.findByKnowledgeTag(knowledgeTag);
     }
+
+    @Override
+    public List<RagFileEntity> findAllOrderByCreatedAtDesc() {
+        return jpaRepository.findAllByOrderByCreatedAtDesc();
+    }
 }

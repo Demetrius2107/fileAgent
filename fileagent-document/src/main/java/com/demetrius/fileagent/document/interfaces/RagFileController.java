@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.document.interfaces;
 
+import com.demetrius.fileagent.api.dto.RagFileSummary;
 import com.demetrius.fileagent.common.result.ApiResult;
 import com.demetrius.fileagent.document.application.RagFileAppService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,5 +34,10 @@ public class RagFileController {
         log.info("上传知识库文件: name={}, tag={}, fileCount={}", name, tag, files == null ? 0 : files.size());
         ragFileAppService.storeRagFile(name, tag, files);
         return ApiResult.ok(true);
+    }
+
+    @GetMapping
+    public ApiResult<List<RagFileSummary>> listRagFiles() {
+        return ApiResult.ok(ragFileAppService.list());
     }
 }

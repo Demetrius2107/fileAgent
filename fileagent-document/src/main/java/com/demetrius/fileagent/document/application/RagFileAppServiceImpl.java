@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.document.application;
 
+import com.demetrius.fileagent.api.dto.RagFileSummary;
 import com.demetrius.fileagent.api.enums.ParseStatus;
 import com.demetrius.fileagent.common.exception.BizException;
 import com.demetrius.fileagent.document.domain.RagFileEntity;
@@ -56,6 +57,20 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             }
             storeOne(name, tag, file);
         }
+    }
+
+    @Override
+    public List<RagFileSummary> list() {
+        return ragFileRepository.findAllOrderByCreatedAtDesc().stream()
+                .map(entity -> new RagFileSummary(
+                        entity.getId(),
+                        entity.getRagName(),
+                        entity.getKnowledgeTag(),
+                        entity.getFilename(),
+                        entity.getStatus(),
+                        entity.getChunkCount(),
+                        entity.getCreatedAt().toString()))
+                .toList();
     }
 
     private void storeOne(String name, String tag, MultipartFile file) {
@@ -153,7 +168,12 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         return switch (extension) {
             case ".txt" -> "text/plain";
             case ".md", ".markdown" -> "text/markdown";
-            default -> StringUtils.hasText(file.getContentType()) ? file.getContentType() : "";
+            case ".pdf" -> "application/pdf";
+            case ".docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case ".xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case ".csv" -> "text/csv";
+            default -> throw new BizException(
+                    "不支持的文件格式: " + resolveFilename(file) + "（当前支持 TXT/MD/PDF/DOCX/XLSX/CSV）");
         };
     }
 

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件智能助手</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+    <button id="toggle-session-drawer" class="icon-button" aria-label="打开会话列表">☰</button>
+    <span class="app-name">文件智能助手</span>
+    <button id="toggle-knowledge-drawer" class="icon-button" aria-label="打开知识库">⌗</button>
+</header>
+
+<main class="workbench">
+    <aside id="session-panel" class="panel session-panel">
+        <div class="panel-header">
+            <h2>会话</h2>
+            <button id="new-session-button" type="button">新建会话</button>
+        </div>
+        <ul id="session-list" class="session-list" aria-label="会话列表"></ul>
+    </aside>
+
+    <section id="chat-panel" class="panel chat-panel">
+        <div class="chat-header">
+            <h2 id="chat-title">未选择会话</h2>
+        </div>
+        <div id="message-list" class="message-list" aria-label="消息列表"></div>
+        <form id="chat-form" class="chat-form">
+            <textarea id="prompt-input" rows="2" placeholder="输入问题，Ctrl/⌘ + Enter 发送" autocomplete="off"></textarea>
+            <div class="chat-actions">
+                <button id="send-button" type="submit" disabled>发送</button>
+                <button id="stop-button" type="button" hidden>停止</button>
+            </div>
+        </form>
+    </section>
+
+    <aside id="knowledge-panel" class="panel knowledge-panel">
+        <div class="panel-header">
+            <h2>知识库</h2>
+            <button id="upload-button" type="button">上传</button>
+        </div>
+        <ul id="knowledge-list" class="knowledge-list" aria-label="知识文件列表"></ul>
+    </aside>
+</main>
+
+<dialog id="upload-dialog" class="upload-dialog">
+    <form id="upload-form">
+        <h3>上传知识文件</h3>
+        <label>
+            知识库名称
+            <input id="upload-name" name="name" type="text" required placeholder="如：员工知识库">
+        </label>
+        <label>
+            知识标签
+            <input id="upload-tag" name="tag" type="text" required placeholder="如：制度">
+        </label>
+        <label>
+            文件（支持 TXT/MD/PDF/DOCX/XLSX/CSV，可多选）
+            <input id="upload-files" name="files" type="file" multiple required>
+        </label>
+        <p id="upload-error" class="upload-error" hidden></p>
+        <div class="dialog-actions">
+            <button type="button" id="upload-cancel" class="secondary">取消</button>
+            <button type="submit">上传</button>
+        </div>
+    </form>
+</dialog>
+
+<script src="/app.js"></script>
+</body>
+</html>

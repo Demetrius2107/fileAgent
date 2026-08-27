@@ -5,18 +5,28 @@ spring:
   application:
     name: file-agent
 
-  # Spring AI: OpenAI 兼容（通义/DeepSeek/OpenRouter 均可改 base-url）
+  # Spring AI: DeepSeek Chat + 通义百炼 OpenAI 兼容 Embedding
   ai:
-    openai:
-      api-key: ${FILEAGENT_AI_API_KEY:sk-placeholder}
-      base-url: ${FILEAGENT_AI_BASE_URL:https://api.openai.com}
+    model:
+      chat: deepseek
+      embedding: openai
+      audio:
+        speech: none
+        transcription: none
+      image: none
+      moderation: none
+    deepseek:
+      api-key: ${FILEAGENT_CHAT_API_KEY:sk-placeholder}
+      base-url: ${FILEAGENT_CHAT_BASE_URL:https://api.deepseek.com}
       chat:
-        options:
-          model: ${FILEAGENT_AI_CHAT_MODEL:gpt-4o-mini}
-          temperature: 0.2
+        model: ${FILEAGENT_CHAT_MODEL:deepseek-chat}
+        temperature: 0.2
+    openai:
       embedding:
-        options:
-          model: ${FILEAGENT_AI_EMBEDDING_MODEL:text-embedding-3-small}
+        api-key: ${FILEAGENT_EMBEDDING_API_KEY:sk-placeholder}
+        base-url: ${FILEAGENT_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+        model: ${FILEAGENT_EMBEDDING_MODEL:text-embedding-v4}
+        dimensions: ${FILEAGENT_EMBEDDING_DIMENSIONS:1024}
 
   # H2 文件数据库（元数据）
   datasource:

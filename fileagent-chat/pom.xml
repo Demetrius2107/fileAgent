@@ -28,10 +28,10 @@
             <groupId>io.swagger.core.v3</groupId>
             <artifactId>swagger-annotations-jakarta</artifactId>
         </dependency>
-        <!-- Spring AI：ChatClient + Function Calling -->
+        <!-- Spring AI：DeepSeek ChatClient + Function Calling -->
         <dependency>
             <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-openai</artifactId>
+            <artifactId>spring-ai-starter-model-deepseek</artifactId>
         </dependency>
         <!-- 流式调用（ChatClient.stream）依赖 webflux -->
         <dependency>

@@ -82,6 +82,21 @@ class KnowledgeSearchPortImplTest {
     }
 
     @Test
+    void searchShouldReturnRawContentInsteadOfEmbeddingContext() {
+        ReflectionTestUtils.setField(knowledgeSearchPort, "topK", 12);
+        ReflectionTestUtils.setField(knowledgeSearchPort, "similarityThreshold", 0.55);
+        String rawContent = "[OKR] Objective 1 | 快递产品线需求日常开发维护";
+        Document doc = new Document(
+                "知识库: 个人年度目标\n标签: OKR\n文件: 2025OKR-饶赛杰.xlsx\n内容: " + rawContent,
+                Map.of("filename", "2025OKR-饶赛杰.xlsx", "rawContent", rawContent));
+        when(vectorStore.similaritySearch(any(SearchRequest.class))).thenReturn(List.of(doc));
+
+        List<KnowledgeSearchPort.KnowledgeHit> hits = knowledgeSearchPort.search("饶赛杰2025年的目标");
+
+        assertThat(hits.getFirst().content()).isEqualTo(rawContent);
+    }
+
+    @Test
     void searchShouldPropagateVectorStoreExceptionAsIs() {
         ReflectionTestUtils.setField(knowledgeSearchPort, "topK", 5);
         ReflectionTestUtils.setField(knowledgeSearchPort, "similarityThreshold", 0.7);

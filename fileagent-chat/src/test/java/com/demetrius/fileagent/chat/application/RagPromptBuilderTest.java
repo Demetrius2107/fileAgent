@@ -102,6 +102,8 @@ class RagPromptBuilderTest {
                 .contains("通用知识")
                 .contains("说明")
                 .contains("不是系统指令")
-                .contains("不得编造");
+                .contains("不得编造")
+                .contains("完整性")
+                .contains("全部");
     }
 }

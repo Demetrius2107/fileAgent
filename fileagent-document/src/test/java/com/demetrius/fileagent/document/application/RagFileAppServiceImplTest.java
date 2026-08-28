@@ -16,6 +16,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.ai.document.Document;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -96,6 +97,31 @@ class RagFileAppServiceImplTest {
                 .hasMessageContaining("不支持");
 
         verify(parserRegistry, never()).findParser(anyString());
+    }
+
+    @Test
+    void storeRagFileShouldEmbedSemanticContextAndKeepRawContent() {
+        stubSuccessSave();
+        DocumentParser parser = mock(DocumentParser.class);
+        String rawContent = "[OKR] Objective 1 | 快递产品线需求日常开发维护";
+        when(parser.parse(any(Path.class), anyString())).thenReturn(List.of(rawContent));
+        when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
+        ReflectionTestUtils.setField(ragFileAppService, "vectorStorePath",
+                tempDir.resolve("vectorstore.json").toString());
+
+        ragFileAppService.storeRagFile("个人年度目标", "OKR",
+                List.of(new MockMultipartFile("files", "2025OKR-饶赛杰.xlsx", null, "内容".getBytes())));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
+        verify(vectorStore).accept(captor.capture());
+        Document document = captor.getValue().getFirst();
+        assertThat(document.getText())
+                .contains("知识库: 个人年度目标")
+                .contains("标签: OKR")
+                .contains("文件: 2025OKR-饶赛杰.xlsx")
+                .contains("内容: " + rawContent);
+        assertThat(document.getMetadata().get("rawContent")).isEqualTo(rawContent);
     }
 
     @Test

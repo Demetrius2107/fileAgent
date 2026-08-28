@@ -48,4 +48,22 @@ class StreamingChatClientTest {
         verify(chatClient).prompt(captor.capture());
         assertThat(captor.getValue()).isSameAs(prompt);
     }
+
+    @Test
+    void callShouldReturnCompleteContentFromChatClient() {
+        ChatClient.Builder builder = mock(ChatClient.Builder.class);
+        ChatClient chatClient = mock(ChatClient.class);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec responseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(builder.build()).thenReturn(chatClient);
+        when(chatClient.prompt(any(Prompt.class))).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(responseSpec);
+        when(responseSpec.content()).thenReturn("{\"needRetrieval\":true}");
+
+        StreamingChatClient streamingChatClient = new StreamingChatClient(builder);
+        Prompt prompt = new Prompt(List.of(new UserMessage("规划检索")));
+
+        assertThat(streamingChatClient.call(prompt)).isEqualTo("{\"needRetrieval\":true}");
+        verify(chatClient).prompt(prompt);
+    }
 }

@@ -25,6 +25,7 @@ import reactor.test.StepVerifier;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -64,6 +66,9 @@ class ChatAppServiceImplTest {
     private RagPromptBuilder ragPromptBuilder;
 
     @Mock
+    private RagRetrievalPlanner ragRetrievalPlanner;
+
+    @Mock
     private StreamingChatClient streamingChatClient;
 
     @InjectMocks
@@ -75,6 +80,11 @@ class ChatAppServiceImplTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(chatAppService, "chatHistoryLimit", 10);
+        lenient().when(ragRetrievalPlanner.plan(anyList(), anyString()))
+                .thenAnswer(invocation -> new RagRetrievalPlanner.RetrievalPlan(
+                        true, invocation.getArgument(1), "SINGLE"));
+        lenient().when(ragRetrievalPlanner.retryQuery(anyString(), any(), anyList()))
+                .thenReturn(Optional.empty());
     }
 
     @Test
@@ -145,6 +155,69 @@ class ChatAppServiceImplTest {
 
         verify(sessionMessagePort, times(1)).append(eq(1L), eq(MessageType.ASSISTANT),
                 eq(NO_KNOWLEDGE_NOTICE + "\n通用回答"));
+    }
+
+    @Test
+    void chatShouldRunOneTargetedRetryAndMergeHitsForIncompleteListQuestion() {
+        List<MessageDto> history = List.of(
+                new MessageDto(1L, 1L, MessageType.USER, "2025年饶赛杰的目标都有哪些", null, "2026-08-28T10:00"),
+                new MessageDto(2L, 1L, MessageType.ASSISTANT, "Objective 4", null, "2026-08-28T10:01"));
+        stubSessionBasics(1L, history);
+        when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), anyString())).thenReturn(100L);
+        when(sessionMessagePort.append(eq(1L), eq(MessageType.ASSISTANT), anyString())).thenReturn(101L);
+        RagRetrievalPlanner.RetrievalPlan plan = new RagRetrievalPlanner.RetrievalPlan(
+                true, "饶赛杰2025年的全部Objective", "LIST_ALL");
+        when(ragRetrievalPlanner.plan(history, "肯定有前三个啊")).thenReturn(plan);
+        List<KnowledgeSearchPort.KnowledgeHit> firstHits = List.of(
+                new KnowledgeSearchPort.KnowledgeHit("Objective 4", "2025OKR-饶赛杰.xlsx"));
+        List<KnowledgeSearchPort.KnowledgeHit> retryHits = List.of(
+                new KnowledgeSearchPort.KnowledgeHit("Objective 1", "2025OKR-饶赛杰.xlsx"),
+                new KnowledgeSearchPort.KnowledgeHit("Objective 2", "2025OKR-饶赛杰.xlsx"),
+                new KnowledgeSearchPort.KnowledgeHit("Objective 3", "2025OKR-饶赛杰.xlsx"),
+                new KnowledgeSearchPort.KnowledgeHit("Objective 4", "2025OKR-饶赛杰.xlsx"));
+        when(knowledgeSearchPort.search(plan.standaloneQuery())).thenReturn(firstHits);
+        when(ragRetrievalPlanner.retryQuery("肯定有前三个啊", plan, firstHits))
+                .thenReturn(Optional.of("饶赛杰2025年 Objective 1 Objective 2 Objective 3"));
+        when(knowledgeSearchPort.search("饶赛杰2025年 Objective 1 Objective 2 Objective 3"))
+                .thenReturn(retryHits);
+        Prompt modelPrompt = new Prompt(List.of(new UserMessage("组好的 Prompt")));
+        when(ragPromptBuilder.build(eq(history), anyList(), eq("肯定有前三个啊"))).thenReturn(modelPrompt);
+        when(streamingChatClient.stream(modelPrompt)).thenReturn(Flux.just("完整回答"));
+
+        StepVerifier.create(chatAppService.chat(1L, "肯定有前三个啊"))
+                .expectNext(ChatStreamEvent.message("完整回答"))
+                .expectNextMatches(event -> event.type().equals("sources")
+                        && event.files().equals(List.of("2025OKR-饶赛杰.xlsx")))
+                .expectNext(ChatStreamEvent.done(101L))
+                .verifyComplete();
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<KnowledgeSearchPort.KnowledgeHit>> hitsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(ragPromptBuilder).build(eq(history), hitsCaptor.capture(), eq("肯定有前三个啊"));
+        assertThat(hitsCaptor.getValue()).extracting(KnowledgeSearchPort.KnowledgeHit::content)
+                .containsExactly("Objective 4", "Objective 1", "Objective 2", "Objective 3");
+        verify(knowledgeSearchPort, times(2)).search(anyString());
+    }
+
+    @Test
+    void chatShouldSkipKnowledgeSearchForGeneralConversation() {
+        stubSessionBasics(1L, List.of());
+        when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), anyString())).thenReturn(100L);
+        when(sessionMessagePort.append(eq(1L), eq(MessageType.ASSISTANT), anyString())).thenReturn(101L);
+        when(ragRetrievalPlanner.plan(List.of(), "你好")).thenReturn(
+                new RagRetrievalPlanner.RetrievalPlan(false, "", "SINGLE"));
+        Prompt modelPrompt = new Prompt(List.of(new UserMessage("你好")));
+        when(ragPromptBuilder.build(List.of(), List.of(), "你好")).thenReturn(modelPrompt);
+        when(streamingChatClient.stream(modelPrompt)).thenReturn(Flux.just("你好"));
+
+        StepVerifier.create(chatAppService.chat(1L, "你好"))
+                .expectNext(ChatStreamEvent.message("你好"))
+                .expectNextMatches(event -> event.type().equals("sources")
+                        && event.answerSource().equals("MODEL_GENERAL"))
+                .expectNext(ChatStreamEvent.done(101L))
+                .verifyComplete();
+
+        verify(knowledgeSearchPort, never()).search(anyString());
     }
 
     @Test

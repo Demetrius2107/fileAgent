@@ -2,6 +2,8 @@ package com.demetrius.fileagent.document.infrastructure;
 
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
 import com.demetrius.fileagent.common.exception.BizException;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.document.Document;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.ai.vectorstore.SimpleVectorStore;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,14 +21,15 @@ import java.util.List;
  * @date 2026-08-26
  */
 @Component
+@Slf4j
 public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
 
     private final SimpleVectorStore vectorStore;
 
-    @Value("${fileagent.retrieval-top-k:5}")
+    @Value("${fileagent.retrieval-top-k:12}")
     private int topK;
 
-    @Value("${fileagent.retrieval-similarity-threshold:0.7}")
+    @Value("${fileagent.retrieval-similarity-threshold:0.55}")
     private double similarityThreshold;
 
     public KnowledgeSearchPortImpl(SimpleVectorStore vectorStore) {
@@ -43,9 +46,21 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
                 .topK(topK)
                 .similarityThreshold(similarityThreshold)
                 .build();
-        return vectorStore.similaritySearch(request).stream()
+        List<Document> documents = vectorStore.similaritySearch(request);
+        log.debug("知识检索完成: query={}, topK={}, threshold={}, hits={}",
+                query, topK, similarityThreshold, documents.size());
+        for (Document document : documents) {
+            log.debug("知识命中: query={}, score={}, file={}, chunkIndex={}",
+                    query,
+                    document.getScore(),
+                    document.getMetadata().get("filename"),
+                    document.getMetadata().get("chunkIndex"));
+        }
+        return documents.stream()
                 .map(document -> new KnowledgeHit(
-                        document.getText(),
+                        document.getMetadata().get("rawContent") == null
+                                ? document.getText()
+                                : String.valueOf(document.getMetadata().get("rawContent")),
                         document.getMetadata().get("filename") == null
                                 ? null
                                 : String.valueOf(document.getMetadata().get("filename"))))

@@ -125,10 +125,11 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         }
     }
 
-    /** chunk 文本 + 元数据 → Spring AI Document（content 保留原文，供检索注入上下文） */
+    /** chunk 文本 + 元数据 -> Spring AI Document */
     private List<Document> toDocuments(List<String> chunks, RagFileEntity entity) {
         List<Document> documents = new ArrayList<>(chunks.size());
         for (int i = 0; i < chunks.size(); i++) {
+            String rawContent = chunks.get(i);
             Map<String, Object> metadata = new HashMap<>();
             // 与参照实现保持一致：知识标签写入 knowledge 元数据
             metadata.put("knowledge", entity.getKnowledgeTag());
@@ -136,7 +137,12 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             metadata.put("fileId", entity.getId());
             metadata.put("filename", entity.getFilename());
             metadata.put("chunkIndex", i);
-            documents.add(new Document(chunks.get(i), metadata));
+            metadata.put("rawContent", rawContent);
+            String embeddingText = "知识库: " + entity.getRagName() + "\n"
+                    + "标签: " + entity.getKnowledgeTag() + "\n"
+                    + "文件: " + entity.getFilename() + "\n"
+                    + "内容: " + rawContent;
+            documents.add(new Document(embeddingText, metadata));
         }
         return documents;
     }

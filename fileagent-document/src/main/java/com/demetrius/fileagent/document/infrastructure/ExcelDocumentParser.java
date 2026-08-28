@@ -4,6 +4,7 @@ import com.demetrius.fileagent.common.exception.BizException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.FormulaEvaluator;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -40,10 +41,11 @@ public class ExcelDocumentParser implements DocumentParser {
         List<String> chunks = new ArrayList<>();
         try (InputStream in = Files.newInputStream(file);
              XSSFWorkbook workbook = new XSSFWorkbook(in)) {
+            FormulaEvaluator evaluator = workbook.getCreationHelper().createFormulaEvaluator();
             for (Sheet sheet : workbook) {
                 String sheetName = sheet.getSheetName();
                 for (Row row : sheet) {
-                    String line = serializeRow(sheetName, row);
+                    String line = serializeRow(sheetName, row, evaluator);
                     if (!line.isBlank()) {
                         chunks.add(line);
                     }
@@ -56,11 +58,11 @@ public class ExcelDocumentParser implements DocumentParser {
         }
     }
 
-    private String serializeRow(String sheetName, Row row) {
+    private String serializeRow(String sheetName, Row row, FormulaEvaluator evaluator) {
         StringBuilder sb = new StringBuilder();
         Iterator<Cell> cells = row.cellIterator();
         while (cells.hasNext()) {
-            String value = FORMATTER.formatCellValue(cells.next()).trim();
+            String value = FORMATTER.formatCellValue(cells.next(), evaluator).trim();
             if (!value.isEmpty()) {
                 sb.append(value).append(" | ");
             }

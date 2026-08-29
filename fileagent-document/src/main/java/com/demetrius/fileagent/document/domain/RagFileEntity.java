@@ -37,6 +37,14 @@ public class RagFileEntity {
     @Column(name = "file_size")
     private Long fileSize;
 
+    /** 内容指纹，用于同一文件去重/重新索引（本周只记录，去重逻辑下个迭代） */
+    @Column(name = "sha256")
+    private String sha256;
+
+    /** 本地存储相对路径（原件落盘，解析失败不丢文件） */
+    @Column(name = "storage_path")
+    private String storagePath;
+
     /** 切分出的 chunk 数量 */
     @Column(name = "chunk_count")
     private Integer chunkCount = 0;

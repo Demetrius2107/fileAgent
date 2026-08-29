@@ -7,6 +7,7 @@ import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import com.demetrius.fileagent.document.infrastructure.DocumentParser;
 import com.demetrius.fileagent.document.infrastructure.DocumentParserRegistry;
+import com.demetrius.fileagent.document.infrastructure.StorageService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -19,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.document.Document;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -53,6 +55,9 @@ class RagFileAppServiceImplTest {
     @Mock
     private org.springframework.ai.vectorstore.SimpleVectorStore vectorStore;
 
+    @Mock
+    private StorageService storageService;
+
     @InjectMocks
     private RagFileAppServiceImpl ragFileAppService;
 
@@ -71,6 +76,8 @@ class RagFileAppServiceImplTest {
     })
     void storeRagFileShouldRouteByExtensionToExactMime(String filename, String expectedMime) {
         stubSuccessSave();
+        stubStoredFile();
+        stubResolve();
         DocumentParser parser = mock(DocumentParser.class);
         when(parser.parse(any(Path.class), anyString())).thenReturn(List.of("知识片段"));
         when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
@@ -88,6 +95,7 @@ class RagFileAppServiceImplTest {
     @Test
     void storeRagFileShouldRejectUnknownExtensionWithBizError() {
         stubSuccessSave();
+        stubStoredFile();
         ReflectionTestUtils.setField(ragFileAppService, "vectorStorePath",
                 tempDir.resolve("vectorstore.json").toString());
 
@@ -102,6 +110,8 @@ class RagFileAppServiceImplTest {
     @Test
     void storeRagFileShouldEmbedSemanticContextAndKeepRawContent() {
         stubSuccessSave();
+        stubStoredFile();
+        stubResolve();
         DocumentParser parser = mock(DocumentParser.class);
         String rawContent = "[OKR] Objective 1 | 快递产品线需求日常开发维护";
         when(parser.parse(any(Path.class), anyString())).thenReturn(List.of(rawContent));
@@ -145,6 +155,54 @@ class RagFileAppServiceImplTest {
         assertThat(result.get(1).status()).isEqualTo(ParseStatus.PARSING);
     }
 
+    @Test
+    void storeRagFileShouldPersistOriginalFileWithSha256() {
+        stubSuccessSave();
+        stubStoredFile();
+        stubResolve();
+        DocumentParser parser = mock(DocumentParser.class);
+        when(parser.parse(any(Path.class), anyString())).thenReturn(List.of("知识片段"));
+        when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
+        ReflectionTestUtils.setField(ragFileAppService, "vectorStorePath",
+                tempDir.resolve("vectorstore.json").toString());
+
+        ragFileAppService.storeRagFile("员工知识库", "制度",
+                List.of(new MockMultipartFile("files", "manual.txt", null, "内容".getBytes())));
+
+        verify(storageService).store(any(MultipartFile.class));
+        ArgumentCaptor<RagFileEntity> captor = ArgumentCaptor.forClass(RagFileEntity.class);
+        verify(ragFileRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+        RagFileEntity saved = captor.getValue();
+        assertThat(saved.getStoragePath()).isEqualTo("2026/08/29/manual.txt");
+        assertThat(saved.getSha256()).isEqualTo("deadbeef");
+        assertThat(saved.getStatus()).isEqualTo(ParseStatus.SUCCESS);
+    }
+
+    @Test
+    void storeRagFileShouldKeepStoredFileWhenParseFails() {
+        stubSuccessSave();
+        stubStoredFile();
+        stubResolve();
+        DocumentParser parser = mock(DocumentParser.class);
+        when(parser.parse(any(Path.class), anyString())).thenThrow(new IllegalStateException("boom"));
+        when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
+        ReflectionTestUtils.setField(ragFileAppService, "vectorStorePath",
+                tempDir.resolve("vectorstore.json").toString());
+
+        assertThatThrownBy(() -> ragFileAppService.storeRagFile("员工知识库", "制度",
+                List.of(new MockMultipartFile("files", "manual.txt", null, "内容".getBytes()))))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("文件分块/向量化失败");
+
+        ArgumentCaptor<RagFileEntity> captor = ArgumentCaptor.forClass(RagFileEntity.class);
+        verify(ragFileRepository, org.mockito.Mockito.times(2)).save(captor.capture());
+        RagFileEntity saved = captor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(ParseStatus.FAILED);
+        // 文件本体已落盘：解析失败也保留 storagePath/sha256，供人工排查或重新索引
+        assertThat(saved.getStoragePath()).isEqualTo("2026/08/29/manual.txt");
+        assertThat(saved.getSha256()).isEqualTo("deadbeef");
+    }
+
     private void stubSuccessSave() {
         when(ragFileRepository.save(any(RagFileEntity.class)))
                 .thenAnswer(invocation -> {
@@ -154,6 +212,17 @@ class RagFileAppServiceImplTest {
                     }
                     return entity;
                 });
+    }
+
+    /** 落盘成功桩：固定返回相对路径 + sha256 指纹 */
+    private void stubStoredFile() {
+        when(storageService.store(any(MultipartFile.class)))
+                .thenReturn(new StorageService.StoredFile("2026/08/29/manual.txt", "deadbeef"));
+    }
+
+    /** 解析路径桩：resolve 返回临时目录内的路径 */
+    private void stubResolve() {
+        when(storageService.resolve(anyString())).thenReturn(tempDir.resolve("manual.txt"));
     }
 
     private RagFileEntity entity(Long id, String ragName, String tag, String filename,

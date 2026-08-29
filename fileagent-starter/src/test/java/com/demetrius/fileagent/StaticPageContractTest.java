@@ -23,7 +23,10 @@ class StaticPageContractTest {
             "chat-panel", "chat-title", "message-list", "chat-form", "prompt-input",
             "send-button", "stop-button",
             "knowledge-panel", "upload-button", "knowledge-list",
-            "upload-dialog", "upload-form", "upload-name", "upload-tag", "upload-files"
+            "upload-dialog", "upload-form", "upload-name", "upload-tag", "upload-files",
+            "toggle-model-settings", "model-settings-dialog", "model-settings-form",
+            "model-config-list", "provider-select", "base-url-input", "api-key-input",
+            "model-name-input", "model-config-error", "model-config-cancel", "model-config-save"
     );
 
     @Test

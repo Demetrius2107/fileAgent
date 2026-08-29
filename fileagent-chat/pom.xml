@@ -33,6 +33,17 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-deepseek</artifactId>
         </dependency>
+        <!-- Spring AI：OpenAI 兼容客户端（多 Provider 动态构建 OpenAiChatModel 用，
+             spring.ai.model.chat=deepseek 下其自动配置不生效，仅取类） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+        <!-- 模型 Provider 配置实体落库（JPA） -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
         <!-- 流式调用（ChatClient.stream）依赖 webflux -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

@@ -551,6 +551,110 @@ dialog.upload-dialog form {
     box-shadow: none;
 }
 
+/* ===== 模型设置弹窗 ===== */
+.upload-dialog input[type="password"],
+.upload-dialog select {
+    font: inherit;
+    padding: 8px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    transition: border-color var(--transition), box-shadow var(--transition);
+    background: var(--bg);
+}
+.upload-dialog input[type="password"]:focus,
+.upload-dialog select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(79,110,247,0.1);
+}
+
+.upload-error.ok {
+    color: var(--success);
+    background: var(--success-light);
+}
+
+.model-config-list {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 220px;
+    overflow-y: auto;
+}
+
+.model-config-item {
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    background: var(--sidebar-bg);
+}
+.model-config-item.active {
+    border-color: var(--accent);
+    background: var(--accent-light);
+}
+
+.model-config-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+.model-provider-tag {
+    background: var(--accent-light);
+    color: var(--accent);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 600;
+}
+.model-config-item.active .model-provider-tag { background: var(--panel-bg); }
+.model-config-name { flex: 1; }
+.model-config-head .badge-success { font-size: 11px; padding: 2px 8px; }
+
+.model-config-meta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    word-break: break-all;
+}
+
+.model-config-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    justify-content: flex-end;
+}
+.mini-button {
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color var(--transition), color var(--transition);
+}
+.mini-button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+.mini-button.danger:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+.mini-button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
 /* ===== 窄屏：侧栏抽屉化 ===== */
 @media (max-width: 900px) {
     .icon-button { display: inline-flex; }

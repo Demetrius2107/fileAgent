@@ -112,6 +112,8 @@ class RagFileAppServiceImplTest {
     @Test
     void storeRagFileShouldRollbackRecordWhenIndexingFails() {
         stubSuccessSave();
+        stubStoredFile();
+        stubResolve();
         DocumentParser parser = mock(DocumentParser.class);
         when(parser.parse(any(Path.class), anyString())).thenThrow(new RuntimeException("向量库故障"));
         when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
@@ -123,8 +125,9 @@ class RagFileAppServiceImplTest {
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("文件分块/向量化失败");
 
-        // 索引失败：删除本次上传的记录，列表只保留索引成功的文件
+        // 索引失败：删除本次上传的记录与已落盘原件，列表只保留索引成功的文件
         verify(ragFileRepository).delete(any(RagFileEntity.class));
+        verify(storageService).delete("2026/08/29/manual.txt");
     }
 
     @Test
@@ -196,31 +199,6 @@ class RagFileAppServiceImplTest {
         assertThat(saved.getStoragePath()).isEqualTo("2026/08/29/manual.txt");
         assertThat(saved.getSha256()).isEqualTo("deadbeef");
         assertThat(saved.getStatus()).isEqualTo(ParseStatus.SUCCESS);
-    }
-
-    @Test
-    void storeRagFileShouldKeepStoredFileWhenParseFails() {
-        stubSuccessSave();
-        stubStoredFile();
-        stubResolve();
-        DocumentParser parser = mock(DocumentParser.class);
-        when(parser.parse(any(Path.class), anyString())).thenThrow(new IllegalStateException("boom"));
-        when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
-        ReflectionTestUtils.setField(ragFileAppService, "vectorStorePath",
-                tempDir.resolve("vectorstore.json").toString());
-
-        assertThatThrownBy(() -> ragFileAppService.storeRagFile("员工知识库", "制度",
-                List.of(new MockMultipartFile("files", "manual.txt", null, "内容".getBytes()))))
-                .isInstanceOf(BizException.class)
-                .hasMessageContaining("文件分块/向量化失败");
-
-        ArgumentCaptor<RagFileEntity> captor = ArgumentCaptor.forClass(RagFileEntity.class);
-        verify(ragFileRepository, org.mockito.Mockito.times(2)).save(captor.capture());
-        RagFileEntity saved = captor.getValue();
-        assertThat(saved.getStatus()).isEqualTo(ParseStatus.FAILED);
-        // 文件本体已落盘：解析失败也保留 storagePath/sha256，供人工排查或重新索引
-        assertThat(saved.getStoragePath()).isEqualTo("2026/08/29/manual.txt");
-        assertThat(saved.getSha256()).isEqualTo("deadbeef");
     }
 
     private void stubSuccessSave() {

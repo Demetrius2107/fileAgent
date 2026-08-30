@@ -131,7 +131,7 @@ Response `data`:
 | `.csv` | `text/csv` |
 
 - 同步处理：原件落盘（`fileagent.storage-dir`，记录 `storage_path` + `sha256`）→ 解析 → 分块（`fileagent.chunk-size` / `chunk-overlap`）→ embedding → 写入向量库（`fileagent.vector-store-path`），并落库 `rag_file` 记录
-- 文件本体持久化：原件保存到 `storage/files/日期/文件名`，`rag_file` 表回填 `storage_path`/`sha256`；解析/向量化失败时原件保留、状态置 `FAILED`
+- 文件本体持久化：原件保存到 `storage/files/日期/文件名`，`rag_file` 表回填 `storage_path`/`sha256`；索引失败时整体回滚（删除记录与已落盘原件），列表只保留索引成功的文件
 - chunk 元数据：`knowledge`=tag、`ragName`=name、`fileId`、`filename`、`chunkIndex`；检索为全局范围，不按标签过滤
 
 Response:

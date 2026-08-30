@@ -85,7 +85,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         entity = ragFileRepository.save(entity);
 
         try {
-            // 原件先落盘再解析：解析/向量化失败也不丢文件本体，storagePath/sha256 供后续重新索引使用
+            // 原件先落盘再解析；索引失败时整体回滚（删记录 + 删原件），列表只保留索引成功的文件
             StorageService.StoredFile stored = storageService.store(file);
             entity.setStoragePath(stored.relativePath());
             entity.setSha256(stored.sha256());
@@ -157,13 +157,16 @@ public class RagFileAppServiceImpl implements RagFileAppService {
     }
 
     /**
-     * 索引失败回滚：删除本次上传的 rag_file 记录，列表只保留索引成功的文件。
-     * 删除失败时兜底标记 FAILED，避免记录悬在 PARSING。
+     * 索引失败回滚：删除本次上传的 rag_file 记录与已落盘的原件，列表只保留索引成功的文件。
+     * 回滚删除失败时兜底标记 FAILED，避免记录悬在 PARSING。
      */
     private void rollbackRecord(RagFileEntity entity, RuntimeException e) {
         try {
             ragFileRepository.delete(entity);
-            log.warn("知识库文件索引失败，已回滚记录: file={}, reason={}", entity.getFilename(), e.getMessage());
+            if (entity.getStoragePath() != null) {
+                storageService.delete(entity.getStoragePath());
+            }
+            log.warn("知识库文件索引失败，已回滚记录与原件: file={}, reason={}", entity.getFilename(), e.getMessage());
         } catch (Exception ex) {
             log.error("回滚失败记录时出错，降级标记 FAILED: {}", entity.getFilename(), ex);
             try {

@@ -17,4 +17,7 @@ public interface RagFileRepository {
 
     /** 全部知识文件，按创建时间倒序（最新上传在前） */
     List<RagFileEntity> findAllOrderByCreatedAtDesc();
+
+    /** 删除记录（索引失败回滚用） */
+    void delete(RagFileEntity ragFile);
 }

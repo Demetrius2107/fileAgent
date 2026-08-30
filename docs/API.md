@@ -138,7 +138,7 @@ Response:
 { "code": 0, "message": "ok", "data": true }
 ```
 
-失败时返回 `code=400` + 失败原因（如 `不支持的文件格式: virus.exe（当前支持 TXT/MD/PDF/DOCX/XLSX/CSV）`）；单文件失败时该文件在 `rag_file` 表中状态为 `FAILED`。
+失败时返回 `code=400` + 失败原因（如 `不支持的文件格式: virus.exe（当前支持 TXT/MD/PDF/DOCX/XLSX/CSV）`）；单文件索引失败时**回滚本次上传记录**（`rag_file` 中不留失败记录，列表只展示索引成功的文件），修正问题后重新上传即可。
 
 ### 3.2 知识文件列表
 `GET /api/rag-files`

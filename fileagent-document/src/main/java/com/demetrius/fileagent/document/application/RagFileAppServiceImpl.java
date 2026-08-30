@@ -111,12 +111,12 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             log.info("知识库文件索引完成: name={}, tag={}, file={}, chunks={}, storagePath={}",
                     name, tag, entity.getFilename(), documents.size(), stored.relativePath());
         } catch (BizException e) {
-            markFailed(entity, e);
+            rollbackRecord(entity, e);
             throw e;
         } catch (Exception e) {
             log.error("知识库文件索引失败: {}", entity.getFilename(), e);
             BizException biz = new BizException("文件分块/向量化失败: " + e.getMessage());
-            markFailed(entity, biz);
+            rollbackRecord(entity, biz);
             throw biz;
         }
     }
@@ -156,12 +156,22 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         }
     }
 
-    private void markFailed(RagFileEntity entity, RuntimeException e) {
+    /**
+     * 索引失败回滚：删除本次上传的 rag_file 记录，列表只保留索引成功的文件。
+     * 删除失败时兜底标记 FAILED，避免记录悬在 PARSING。
+     */
+    private void rollbackRecord(RagFileEntity entity, RuntimeException e) {
         try {
-            entity.setStatus(ParseStatus.FAILED);
-            ragFileRepository.save(entity);
+            ragFileRepository.delete(entity);
+            log.warn("知识库文件索引失败，已回滚记录: file={}, reason={}", entity.getFilename(), e.getMessage());
         } catch (Exception ex) {
-            log.warn("标记失败状态时出错: {}", entity.getFilename(), ex);
+            log.error("回滚失败记录时出错，降级标记 FAILED: {}", entity.getFilename(), ex);
+            try {
+                entity.setStatus(ParseStatus.FAILED);
+                ragFileRepository.save(entity);
+            } catch (Exception suppressed) {
+                log.warn("标记失败状态时出错: {}", entity.getFilename(), suppressed);
+            }
         }
     }
 

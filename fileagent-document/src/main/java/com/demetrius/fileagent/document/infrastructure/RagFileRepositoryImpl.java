@@ -36,4 +36,9 @@ public class RagFileRepositoryImpl implements RagFileRepository {
     public List<RagFileEntity> findAllOrderByCreatedAtDesc() {
         return jpaRepository.findAllByOrderByCreatedAtDesc();
     }
+
+    @Override
+    public void delete(RagFileEntity ragFile) {
+        jpaRepository.delete(ragFile);
+    }
 }

@@ -105,6 +105,26 @@ class RagFileAppServiceImplTest {
                 .hasMessageContaining("不支持");
 
         verify(parserRegistry, never()).findParser(anyString());
+        // 失败回滚：本次上传的记录不落库
+        verify(ragFileRepository).delete(any(RagFileEntity.class));
+    }
+
+    @Test
+    void storeRagFileShouldRollbackRecordWhenIndexingFails() {
+        stubSuccessSave();
+        DocumentParser parser = mock(DocumentParser.class);
+        when(parser.parse(any(Path.class), anyString())).thenThrow(new RuntimeException("向量库故障"));
+        when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
+        ReflectionTestUtils.setField(ragFileAppService, "vectorStorePath",
+                tempDir.resolve("vectorstore.json").toString());
+
+        assertThatThrownBy(() -> ragFileAppService.storeRagFile("员工知识库", "制度",
+                List.of(new MockMultipartFile("files", "manual.txt", null, "内容".getBytes()))))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("文件分块/向量化失败");
+
+        // 索引失败：删除本次上传的记录，列表只保留索引成功的文件
+        verify(ragFileRepository).delete(any(RagFileEntity.class));
     }
 
     @Test

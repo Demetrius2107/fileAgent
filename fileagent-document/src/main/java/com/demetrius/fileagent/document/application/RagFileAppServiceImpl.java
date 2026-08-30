@@ -7,6 +7,7 @@ import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import com.demetrius.fileagent.document.infrastructure.DocumentParser;
 import com.demetrius.fileagent.document.infrastructure.DocumentParserRegistry;
+import com.demetrius.fileagent.document.infrastructure.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.document.Document;
@@ -29,7 +30,7 @@ import java.util.Map;
  * 知识库文件应用服务实现。
  * <p>
  * 参照 {@code cn.bugstack.ai.domain.agent.service.rag.RagService#storeRagFile}：
- * 解析 → 分块 → 打知识标签元数据 → vectorStore.accept → 落库记录。
+ * 落盘原件 → 解析 → 分块 → 打知识标签元数据 → vectorStore.accept → 落库记录。
  */
 @Slf4j
 @Service
@@ -39,6 +40,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
     private final DocumentParserRegistry parserRegistry;
     private final RagFileRepository ragFileRepository;
     private final SimpleVectorStore vectorStore;
+    private final StorageService storageService;
 
     @Value("${fileagent.vector-store-path:./storage/vectorstore.json}")
     private String vectorStorePath;
@@ -82,17 +84,18 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         entity.setStatus(ParseStatus.PARSING);
         entity = ragFileRepository.save(entity);
 
-        Path tempFile = null;
         try {
-            tempFile = Files.createTempFile("fileagent-rag-", fileExtension(file));
-            file.transferTo(tempFile);
+            // 原件先落盘再解析：解析/向量化失败也不丢文件本体，storagePath/sha256 供后续重新索引使用
+            StorageService.StoredFile stored = storageService.store(file);
+            entity.setStoragePath(stored.relativePath());
+            entity.setSha256(stored.sha256());
 
             String mimeType = resolveMimeType(file);
             DocumentParser parser = parserRegistry.findParser(mimeType)
                     .orElseThrow(() -> new BizException("暂不支持的文件格式: " + mimeType + "（当前支持 TXT/MD，PDF/Office 随 M2 解析器扩展）"));
 
-            // 解析 + 分块
-            List<String> chunks = parser.parse(tempFile, mimeType);
+            // 解析 + 分块（读取已落盘的原件）
+            List<String> chunks = parser.parse(storageService.resolve(stored.relativePath()), mimeType);
             if (chunks.isEmpty()) {
                 throw new BizException("文件内容为空，未能切分出有效 chunk: " + entity.getFilename());
             }
@@ -105,7 +108,8 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             entity.setChunkCount(documents.size());
             entity.setStatus(ParseStatus.SUCCESS);
             ragFileRepository.save(entity);
-            log.info("知识库文件索引完成: name={}, tag={}, file={}, chunks={}", name, tag, entity.getFilename(), documents.size());
+            log.info("知识库文件索引完成: name={}, tag={}, file={}, chunks={}, storagePath={}",
+                    name, tag, entity.getFilename(), documents.size(), stored.relativePath());
         } catch (BizException e) {
             markFailed(entity, e);
             throw e;
@@ -114,14 +118,6 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             BizException biz = new BizException("文件分块/向量化失败: " + e.getMessage());
             markFailed(entity, biz);
             throw biz;
-        } finally {
-            if (tempFile != null) {
-                try {
-                    Files.deleteIfExists(tempFile);
-                } catch (IOException e) {
-                    log.warn("临时文件清理失败: {}", tempFile, e);
-                }
-            }
         }
     }
 

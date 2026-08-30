@@ -29,6 +29,15 @@
     const uploadTag = $('upload-tag');
     const uploadFiles = $('upload-files');
     const uploadError = $('upload-error');
+    const modelSettingsButton = $('toggle-model-settings');
+    const modelSettingsDialog = $('model-settings-dialog');
+    const modelSettingsForm = $('model-settings-form');
+    const modelConfigList = $('model-config-list');
+    const providerSelect = $('provider-select');
+    const baseUrlInput = $('base-url-input');
+    const apiKeyInput = $('api-key-input');
+    const modelNameInput = $('model-name-input');
+    const modelConfigError = $('model-config-error');
 
     let currentSessionId = null;
     let abortController = null;
@@ -324,6 +333,123 @@
         uploadError.textContent = message;
         uploadError.hidden = false;
     }
+
+    /* ---------- 模型设置 ---------- */
+
+    const PROVIDER_NAMES = {
+        DEEPSEEK: 'DeepSeek', ZHIPU: '智谱 GLM', DASHSCOPE: '通义 Qwen',
+        MOONSHOT: 'Kimi', OPENAI: 'OpenAI', CUSTOM: '自定义'
+    };
+
+    function showModelConfigHint(message, ok) {
+        modelConfigError.textContent = message;
+        modelConfigError.classList.toggle('ok', !!ok);
+        modelConfigError.hidden = false;
+    }
+
+    async function loadModelConfigs() {
+        const configs = await api('/api/model-providers');
+        modelConfigList.replaceChildren();
+        if (!configs || configs.length === 0) {
+            modelConfigList.appendChild(el('li', 'list-empty', '暂无模型配置，聊天将使用服务端默认模型（环境变量）'));
+            return;
+        }
+        for (const config of configs) {
+            modelConfigList.appendChild(renderModelConfigItem(config));
+        }
+    }
+
+    function renderModelConfigItem(config) {
+        const item = el('li', 'model-config-item' + (config.active ? ' active' : ''));
+        const head = el('div', 'model-config-head');
+        head.appendChild(el('span', 'model-provider-tag', PROVIDER_NAMES[config.provider] || config.provider));
+        head.appendChild(el('span', 'model-config-name', config.chatModel));
+        if (config.active) { head.appendChild(el('span', 'badge-success', '使用中')); }
+        item.appendChild(head);
+
+        const meta = el('div', 'model-config-meta');
+        meta.appendChild(el('span', null, `Key ${config.apiKeyMasked || '****'}`));
+        meta.appendChild(el('span', null, config.baseUrl));
+        item.appendChild(meta);
+
+        const actions = el('div', 'model-config-actions');
+        if (!config.active) {
+            const activateButton = el('button', 'mini-button', '启用');
+            activateButton.type = 'button';
+            activateButton.addEventListener('click', async () => {
+                try {
+                    await api(`/api/model-providers/${config.id}/activate`, { method: 'PUT' });
+                    await loadModelConfigs();
+                } catch (e) { showModelConfigHint(e.message, false); }
+            });
+            actions.appendChild(activateButton);
+        }
+        const testButton = el('button', 'mini-button', '测试');
+        testButton.type = 'button';
+        testButton.addEventListener('click', async () => {
+            testButton.disabled = true;
+            testButton.textContent = '测试中…';
+            try {
+                const result = await api(`/api/model-providers/${config.id}/test`, { method: 'POST' });
+                showModelConfigHint(result, true);
+            } catch (e) {
+                showModelConfigHint(e.message, false);
+            } finally {
+                testButton.disabled = false;
+                testButton.textContent = '测试';
+            }
+        });
+        actions.appendChild(testButton);
+        const deleteButton = el('button', 'mini-button danger', '删除');
+        deleteButton.type = 'button';
+        deleteButton.addEventListener('click', async () => {
+            if (!confirm(`删除 ${PROVIDER_NAMES[config.provider] || config.provider} 的 ${config.chatModel} 配置？`)) { return; }
+            try {
+                await api(`/api/model-providers/${config.id}`, { method: 'DELETE' });
+                await loadModelConfigs();
+            } catch (e) { showModelConfigHint(e.message, false); }
+        });
+        actions.appendChild(deleteButton);
+        item.appendChild(actions);
+        return item;
+    }
+
+    modelSettingsButton.addEventListener('click', () => {
+        modelConfigError.hidden = true;
+        modelSettingsDialog.showModal();
+        loadModelConfigs().catch((e) => showModelConfigHint(e.message, false));
+    });
+
+    $('model-config-cancel').addEventListener('click', () => { modelSettingsDialog.close(); });
+
+    modelSettingsForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const provider = providerSelect.value;
+        const apiKey = apiKeyInput.value;
+        const chatModel = modelNameInput.value.trim();
+        if (!provider || !apiKey || !chatModel) {
+            showModelConfigHint('请选择厂商并填写 API Key 和模型名', false);
+            return;
+        }
+        try {
+            const saved = await api('/api/model-providers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider,
+                    baseUrl: baseUrlInput.value.trim() || null,
+                    apiKey,
+                    chatModel,
+                    temperature: null
+                })
+            });
+            apiKeyInput.value = '';
+            await loadModelConfigs();
+            showModelConfigHint(saved.active ? `已保存并启用 ${PROVIDER_NAMES[provider]} / ${saved.chatModel}` : '配置已保存（未启用）', true);
+        } catch (e) {
+            showModelConfigHint(e.message, false);
+        }
+    });
 
     /* ---------- 侧栏抽屉（窄屏） ---------- */
 

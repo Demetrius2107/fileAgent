@@ -1,5 +1,7 @@
 package com.demetrius.fileagent.chat.infrastructure;
 
+import com.demetrius.fileagent.chat.domain.ModelConfigRepository;
+import com.demetrius.fileagent.common.security.AesGcmCipher;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
@@ -27,16 +29,8 @@ class StreamingChatClientTest {
 
     @Test
     void streamShouldReturnTokenFluxFromChatClient() {
-        ChatClient.Builder builder = mock(ChatClient.Builder.class);
-        ChatClient chatClient = mock(ChatClient.class);
-        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
-        ChatClient.StreamResponseSpec streamSpec = mock(ChatClient.StreamResponseSpec.class);
-        when(builder.build()).thenReturn(chatClient);
-        when(chatClient.prompt(any(Prompt.class))).thenReturn(requestSpec);
-        when(requestSpec.stream()).thenReturn(streamSpec);
-        when(streamSpec.content()).thenReturn(Flux.just("你", "好"));
-
-        StreamingChatClient streamingChatClient = new StreamingChatClient(builder);
+        ChatClient chatClient = mockDefaultClient();
+        StreamingChatClient streamingChatClient = newClient(chatClient);
         Prompt prompt = new Prompt(List.of(new UserMessage("你好")));
 
         StepVerifier.create(streamingChatClient.stream(prompt))
@@ -51,19 +45,34 @@ class StreamingChatClientTest {
 
     @Test
     void callShouldReturnCompleteContentFromChatClient() {
-        ChatClient.Builder builder = mock(ChatClient.Builder.class);
-        ChatClient chatClient = mock(ChatClient.class);
-        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
-        ChatClient.CallResponseSpec responseSpec = mock(ChatClient.CallResponseSpec.class);
-        when(builder.build()).thenReturn(chatClient);
-        when(chatClient.prompt(any(Prompt.class))).thenReturn(requestSpec);
-        when(requestSpec.call()).thenReturn(responseSpec);
-        when(responseSpec.content()).thenReturn("{\"needRetrieval\":true}");
-
-        StreamingChatClient streamingChatClient = new StreamingChatClient(builder);
+        ChatClient chatClient = mockDefaultClient();
+        StreamingChatClient streamingChatClient = newClient(chatClient);
         Prompt prompt = new Prompt(List.of(new UserMessage("规划检索")));
 
         assertThat(streamingChatClient.call(prompt)).isEqualTo("{\"needRetrieval\":true}");
         verify(chatClient).prompt(prompt);
+    }
+
+    /** 构造被测对象：mock 自动配置 Builder，并用 useDefault() 模拟"无 DB 配置回落默认"的初始化 */
+    private StreamingChatClient newClient(ChatClient chatClient) {
+        ChatClient.Builder builder = mock(ChatClient.Builder.class);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.StreamResponseSpec streamSpec = mock(ChatClient.StreamResponseSpec.class);
+        ChatClient.CallResponseSpec responseSpec = mock(ChatClient.CallResponseSpec.class);
+        when(builder.build()).thenReturn(chatClient);
+        when(chatClient.prompt(any(Prompt.class))).thenReturn(requestSpec);
+        when(requestSpec.stream()).thenReturn(streamSpec);
+        when(streamSpec.content()).thenReturn(Flux.just("你", "好"));
+        when(requestSpec.call()).thenReturn(responseSpec);
+        when(responseSpec.content()).thenReturn("{\"needRetrieval\":true}");
+
+        StreamingChatClient client = new StreamingChatClient(
+                builder, mock(ModelConfigRepository.class), mock(DynamicChatModelFactory.class), mock(AesGcmCipher.class));
+        client.useDefault();
+        return client;
+    }
+
+    private ChatClient mockDefaultClient() {
+        return mock(ChatClient.class);
     }
 }

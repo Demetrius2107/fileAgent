@@ -163,6 +163,67 @@ Response `data`: `RagFileSummary[]`
 
 ---
 
+## 3.5 模型 Provider 配置（前端模型设置）
+
+聊天模型的多套配置管理：新增/列表/启用（热切换，无需重启）/删除/连通性测试。所有厂商走 OpenAI 兼容协议。
+API Key 安全约定：提交明文 → AES-GCM 加密落 H2（主密钥在 `storage/secret.key`，不进仓库）；**接口只回掩码（`****尾4位`），明文永不出后端**。
+回落语义：无任何启用配置时，聊天模型回落到 application.yml + 环境变量配置的默认模型。
+
+### 3.5.1 配置列表
+`GET /api/model-providers`
+
+Response `data`: `ModelProviderSummary[]`
+```json
+[
+  {
+    "id": 1,
+    "provider": "ZHIPU",
+    "baseUrl": "https://open.bigmodel.cn/api/paas/v4",
+    "chatModel": "glm-4.6",
+    "temperature": null,
+    "active": true,
+    "apiKeyMasked": "****ab3f",
+    "createdAt": "2026-08-29T22:00:00"
+  }
+]
+```
+
+### 3.5.2 新增配置
+`POST /api/model-providers`
+
+```json
+{
+  "provider": "ZHIPU",
+  "baseUrl": null,
+  "apiKey": "sk-明文key",
+  "chatModel": "glm-4.6",
+  "temperature": null
+}
+```
+
+- `provider`：`DEEPSEEK` / `ZHIPU` / `DASHSCOPE` / `MOONSHOT` / `OPENAI` / `CUSTOM`
+- `baseUrl` 为空时用厂商默认端点（`CUSTOM` 必填）；`temperature` 为空时用 0.2
+- 库内无启用配置时，新配置自动启用
+
+Response `data`: `ModelProviderSummary`（同 3.5.1）
+
+### 3.5.3 启用配置（热切换）
+`PUT /api/model-providers/{id}/activate`
+
+原启用配置自动停用，聊天模型立即切换（不影响进行中的请求）。Response `data`: `true`
+
+### 3.5.4 连通性测试
+`POST /api/model-providers/{id}/test`
+
+用存储的 key 发起一次最小真实调用。成功 Response `data`: `"连通正常，耗时 1234ms，模型回复: 正常"`；失败返回 `code=400` + 原因（如 key 无效/网络不通）。
+
+### 3.5.5 删除配置
+`DELETE /api/model-providers/{id}`
+
+删除启用中的配置时，聊天模型自动回落默认（环境变量）。Response `data`: `true`
+
+---
+
 ## 4. 对话（SSE 流式）
 
 ### 4.1 流式问答

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.embedding.EmbeddingModel;
+import org.springframework.web.client.RestClient;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -47,7 +48,6 @@ class ElasticsearchKnowledgeIntegrationTest {
         properties.setIndexAlias("fileagent-knowledge-test");
         properties.setPhysicalIndex("fileagent-knowledge-test-v1");
         properties.setDimensions(2);
-        properties.setAdjacentWindow(0);
         properties.setFinalTopK(10);
         new ElasticsearchKnowledgeIndexInitializer(elasticsearchClient, properties).initialize();
     }
@@ -82,10 +82,11 @@ class ElasticsearchKnowledgeIntegrationTest {
 
         when(embeddingModel.embed("年度目标")).thenReturn(new float[]{1.0F, 0.0F});
         KnowledgeSearchPort searchPort = new KnowledgeSearchPortImpl(
-                elasticsearchClient, embeddingModel, properties, new RrfFusion());
+                elasticsearchClient, embeddingModel, properties, new RrfFusion(),
+                new DashScopeKnowledgeReranker(RestClient.builder(), new RerankerProperties()));
         List<KnowledgeSearchPort.KnowledgeHit> result = searchPort.search(
                 new KnowledgeSearchPort.SearchQuery(
-                        "年度目标", "LIST_ALL", null, null, 1L));
+                        "年度目标", null, null, 1L));
 
         assertThat(result).extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
                 .containsExactly("1:0", "1:1");
@@ -100,7 +101,7 @@ class ElasticsearchKnowledgeIntegrationTest {
 
         List<KnowledgeSearchPort.KnowledgeHit> overwritten = searchPort.search(
                 new KnowledgeSearchPort.SearchQuery(
-                        "年度目标", "LIST_ALL", null, null, 1L));
+                        "年度目标", null, null, 1L));
         assertThat(overwritten.getFirst().content()).contains("核心系统升级");
     }
 

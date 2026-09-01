@@ -16,6 +16,7 @@ import org.springframework.stereotype.Repository;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepository {
 
+    private static final String PARENT_CHUNK_TYPE = "PARENT";
+
     private final ElasticsearchClient elasticsearchClient;
     private final EmbeddingModel embeddingModel;
     private final ElasticsearchKnowledgeProperties properties;
@@ -39,13 +42,9 @@ public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepo
         if (chunks == null || chunks.isEmpty()) {
             return;
         }
-        List<float[]> embeddings = embeddingModel.embed(
-                chunks.stream().map(KnowledgeChunk::content).toList());
-        if (embeddings.size() != chunks.size()) {
-            throw new BizException("Embedding 返回数量与知识片段数量不一致");
-        }
-        for (int i = 0; i < embeddings.size(); i++) {
-            if (embeddings.get(i).length != properties.getDimensions()) {
+        List<float[]> embeddings = embedInBatches(chunks);
+        for (float[] embedding : embeddings) {
+            if (embedding != null && embedding.length != properties.getDimensions()) {
                 throw new BizException("Embedding 向量维度与 Elasticsearch 索引配置不一致");
             }
         }
@@ -60,6 +59,36 @@ public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepo
         } catch (IOException e) {
             throw new BizException("Elasticsearch 批量索引失败: " + e.getMessage());
         }
+    }
+
+    private List<float[]> embedInBatches(List<KnowledgeChunk> chunks) {
+        int batchSize = properties.getEmbeddingBatchSize();
+        if (batchSize <= 0) {
+            throw new BizException("Embedding 批量大小必须大于 0");
+        }
+        List<Integer> retrievableIndexes = new ArrayList<>();
+        for (int i = 0; i < chunks.size(); i++) {
+            if (!PARENT_CHUNK_TYPE.equals(chunks.get(i).metadata().get("chunkType"))) {
+                retrievableIndexes.add(i);
+            }
+        }
+
+        List<float[]> embeddings = new ArrayList<>(Collections.nCopies(chunks.size(), null));
+        for (int fromIndex = 0; fromIndex < retrievableIndexes.size(); fromIndex += batchSize) {
+            int toIndex = Math.min(fromIndex + batchSize, retrievableIndexes.size());
+            List<Integer> batchIndexes = retrievableIndexes.subList(fromIndex, toIndex);
+            List<String> contents = batchIndexes.stream()
+                    .map(index -> chunks.get(index).content())
+                    .toList();
+            List<float[]> batchEmbeddings = embeddingModel.embed(contents);
+            if (batchEmbeddings.size() != batchIndexes.size()) {
+                throw new BizException("Embedding 返回数量与知识片段数量不一致");
+            }
+            for (int i = 0; i < batchIndexes.size(); i++) {
+                embeddings.set(batchIndexes.get(i), batchEmbeddings.get(i));
+            }
+        }
+        return embeddings;
     }
 
     BulkRequest buildBulkRequest(List<KnowledgeChunk> chunks, List<float[]> embeddings) {
@@ -107,9 +136,13 @@ public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepo
         source.put("sourceType", value(chunk.metadata(), "sourceType"));
         source.put("sheetName", value(chunk.metadata(), "sheetName"));
         source.put("sectionId", value(chunk.metadata(), "sectionId"));
+        source.put("parentId", value(chunk.metadata(), "parentId"));
+        source.put("chunkType", value(chunk.metadata(), "chunkType"));
         source.put("rowIndex", integerValue(chunk.metadata(), "rowIndex"));
         source.put("metadata", chunk.metadata());
-        source.put("embedding", embedding);
+        if (embedding != null) {
+            source.put("embedding", embedding);
+        }
         return source;
     }
 

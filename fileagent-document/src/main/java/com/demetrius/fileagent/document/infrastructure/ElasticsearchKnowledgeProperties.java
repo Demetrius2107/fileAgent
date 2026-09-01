@@ -19,11 +19,10 @@ public class ElasticsearchKnowledgeProperties {
     private String indexAlias = "fileagent-knowledge";
     private String physicalIndex = "fileagent-knowledge-v1";
     private int dimensions = 1024;
+    private int embeddingBatchSize = 10;
     private int bm25TopK = 50;
     private int knnTopK = 50;
     private int knnCandidates = 100;
     private int rrfRankConstant = 60;
     private int finalTopK = 12;
-    private int adjacentWindow = 1;
-    private int maxExpandedChunks = 100;
 }

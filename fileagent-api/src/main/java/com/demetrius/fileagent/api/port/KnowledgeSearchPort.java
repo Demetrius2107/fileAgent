@@ -28,15 +28,10 @@ public interface KnowledgeSearchPort {
     }
 
     /** 通用检索条件。 */
-    record SearchQuery(String text, String answerMode,
-                       String ragName, String knowledgeTag, Long fileId) {
+    record SearchQuery(String text, String ragName, String knowledgeTag, Long fileId) {
 
-        public static SearchQuery single(String text) {
-            return new SearchQuery(text, "SINGLE", null, null, null);
-        }
-
-        public boolean listAll() {
-            return "LIST_ALL".equalsIgnoreCase(answerMode);
+        public static SearchQuery of(String text) {
+            return new SearchQuery(text, null, null, null);
         }
     }
 
@@ -48,6 +43,7 @@ public interface KnowledgeSearchPort {
             String filename,
             String sheetName,
             String sectionId,
+            String parentId,
             int chunkIndex,
             double score) {
     }

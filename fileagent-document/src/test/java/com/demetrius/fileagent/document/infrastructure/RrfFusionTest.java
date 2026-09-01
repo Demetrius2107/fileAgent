@@ -53,6 +53,6 @@ class RrfFusionTest {
     }
 
     private KnowledgeHit hit(String id) {
-        return new KnowledgeHit(id, 1L, id, "file.txt", null, "section", 0, 0);
+        return new KnowledgeHit(id, 1L, id, "file.txt", null, "section", null, 0, 0);
     }
 }

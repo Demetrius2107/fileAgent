@@ -59,7 +59,7 @@ class ChatAppServiceImplTest {
     @Mock
     private RagPromptBuilder ragPromptBuilder;
     @Mock
-    private RagRetrievalPlanner ragRetrievalPlanner;
+    private RagQueryRewriter ragQueryRewriter;
     @Mock
     private StreamingChatClient streamingChatClient;
 
@@ -72,9 +72,8 @@ class ChatAppServiceImplTest {
     @BeforeEach
     void setUp() {
         ReflectionTestUtils.setField(chatAppService, "chatHistoryLimit", 10);
-        lenient().when(ragRetrievalPlanner.plan(anyList(), anyString()))
-                .thenAnswer(invocation -> new RagRetrievalPlanner.RetrievalPlan(
-                        true, invocation.getArgument(1), "SINGLE"));
+        lenient().when(ragQueryRewriter.rewrite(anyList(), anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
     }
 
     @Test
@@ -92,7 +91,7 @@ class ChatAppServiceImplTest {
                 hit("1:0", "片段A", "a.pdf"),
                 hit("2:0", "片段B", "b.pdf"),
                 hit("1:1", "片段C", "a.pdf"));
-        when(knowledgeSearchPort.search(query("问题", "SINGLE"))).thenReturn(hits);
+        when(knowledgeSearchPort.search(query("问题"))).thenReturn(hits);
         Prompt prompt = new Prompt(List.of(new UserMessage("组好的 Prompt")));
         when(ragPromptBuilder.build(anyList(), eq(hits), eq("问题"))).thenReturn(prompt);
         when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("回答", "内容")
@@ -121,29 +120,31 @@ class ChatAppServiceImplTest {
     }
 
     @Test
-    void chatShouldUseGenericListAllSearchQuery() {
-        stubSessionBasics(1L, List.of());
+    void chatShouldUseRewrittenQueryForMultiTurnRetrieval() {
+        List<MessageDto> history = List.of(
+                new MessageDto(1L, 1L, MessageType.USER, "2025年研发部有哪些目标", null,
+                        "2026-08-28T10:00"));
+        stubSessionBasics(1L, history);
         when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), anyString())).thenReturn(100L);
         when(sessionMessagePort.append(eq(1L), eq(MessageType.ASSISTANT), anyString())).thenReturn(101L);
-        RagRetrievalPlanner.RetrievalPlan plan = new RagRetrievalPlanner.RetrievalPlan(
-                true, "2026年研发部的全部年度目标", "LIST_ALL");
-        when(ragRetrievalPlanner.plan(List.of(), "研发部有哪些年度目标")).thenReturn(plan);
+        when(ragQueryRewriter.rewrite(history, "那2026年呢"))
+                .thenReturn("2026年研发部有哪些目标");
         List<KnowledgeSearchPort.KnowledgeHit> hits = List.of(
                 hit("1:0", "目标一", "年度计划.xlsx"),
                 hit("1:1", "目标二", "年度计划.xlsx"));
-        when(knowledgeSearchPort.search(query(plan.standaloneQuery(), "LIST_ALL"))).thenReturn(hits);
+        when(knowledgeSearchPort.search(query("2026年研发部有哪些目标"))).thenReturn(hits);
         Prompt prompt = new Prompt(List.of(new UserMessage("组好的 Prompt")));
-        when(ragPromptBuilder.build(List.of(), hits, "研发部有哪些年度目标")).thenReturn(prompt);
+        when(ragPromptBuilder.build(history, hits, "那2026年呢")).thenReturn(prompt);
         when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("完整回答"));
 
-        StepVerifier.create(chatAppService.chat(1L, "研发部有哪些年度目标"))
+        StepVerifier.create(chatAppService.chat(1L, "那2026年呢"))
                 .expectNext(ChatStreamEvent.message("完整回答"))
                 .expectNextMatches(event -> event.type().equals("sources")
                         && event.files().equals(List.of("年度计划.xlsx")))
                 .expectNext(ChatStreamEvent.done(101L))
                 .verifyComplete();
 
-        verify(knowledgeSearchPort).search(query(plan.standaloneQuery(), "LIST_ALL"));
+        verify(knowledgeSearchPort).search(query("2026年研发部有哪些目标"));
     }
 
     @Test
@@ -151,7 +152,7 @@ class ChatAppServiceImplTest {
         stubSessionBasics(1L, List.of());
         when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), anyString())).thenReturn(100L);
         when(sessionMessagePort.append(eq(1L), eq(MessageType.ASSISTANT), anyString())).thenReturn(101L);
-        when(knowledgeSearchPort.search(query("制度问题", "SINGLE"))).thenReturn(List.of());
+        when(knowledgeSearchPort.search(query("制度问题"))).thenReturn(List.of());
         Prompt prompt = new Prompt(List.of(new UserMessage("组好的 Prompt")));
         when(ragPromptBuilder.build(anyList(), anyList(), eq("制度问题"))).thenReturn(prompt);
         when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("通用", "回答"));
@@ -170,31 +171,31 @@ class ChatAppServiceImplTest {
     }
 
     @Test
-    void chatShouldSkipKnowledgeSearchForGeneralConversation() {
+    void chatShouldRetrieveKnowledgeEvenForGeneralConversation() {
         stubSessionBasics(1L, List.of());
         when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), anyString())).thenReturn(100L);
         when(sessionMessagePort.append(eq(1L), eq(MessageType.ASSISTANT), anyString())).thenReturn(101L);
-        when(ragRetrievalPlanner.plan(List.of(), "你好")).thenReturn(
-                new RagRetrievalPlanner.RetrievalPlan(false, "", "SINGLE"));
+        when(knowledgeSearchPort.search(query("你好"))).thenReturn(List.of());
         Prompt prompt = new Prompt(List.of(new UserMessage("你好")));
         when(ragPromptBuilder.build(List.of(), List.of(), "你好")).thenReturn(prompt);
         when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("你好"));
 
         StepVerifier.create(chatAppService.chat(1L, "你好"))
+                .expectNext(ChatStreamEvent.message(NO_KNOWLEDGE_NOTICE))
                 .expectNext(ChatStreamEvent.message("你好"))
                 .expectNextMatches(event -> event.type().equals("sources")
                         && event.answerSource().equals("MODEL_GENERAL"))
                 .expectNext(ChatStreamEvent.done(101L))
                 .verifyComplete();
 
-        verify(knowledgeSearchPort, never()).search(any(KnowledgeSearchPort.SearchQuery.class));
+        verify(knowledgeSearchPort).search(query("你好"));
     }
 
     @Test
     void chatShouldEmitKnowledgeSearchFailedOnError() {
         stubSessionBasics(1L, List.of());
         when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), anyString())).thenReturn(100L);
-        when(knowledgeSearchPort.search(query("问题", "SINGLE")))
+        when(knowledgeSearchPort.search(query("问题")))
                 .thenThrow(new RuntimeException("检索故障"));
 
         StepVerifier.create(chatAppService.chat(1L, "问题"))
@@ -253,20 +254,20 @@ class ChatAppServiceImplTest {
     private void stubModelFailureScenario(Flux<String> modelStream) {
         stubSessionBasics(1L, List.of());
         when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), anyString())).thenReturn(100L);
-        when(knowledgeSearchPort.search(query("问题", "SINGLE")))
+        when(knowledgeSearchPort.search(query("问题")))
                 .thenReturn(List.of(hit("1:0", "片段A", "a.pdf")));
         Prompt prompt = new Prompt(List.of(new UserMessage("组好的 Prompt")));
         when(ragPromptBuilder.build(anyList(), anyList(), eq("问题"))).thenReturn(prompt);
         when(streamingChatClient.stream(prompt)).thenReturn(modelStream);
     }
 
-    private KnowledgeSearchPort.SearchQuery query(String text, String answerMode) {
-        return new KnowledgeSearchPort.SearchQuery(text, answerMode, null, null, null);
+    private KnowledgeSearchPort.SearchQuery query(String text) {
+        return new KnowledgeSearchPort.SearchQuery(text, null, null, null);
     }
 
     private KnowledgeSearchPort.KnowledgeHit hit(String id, String content, String filename) {
         return new KnowledgeSearchPort.KnowledgeHit(
-                id, 1L, content, filename, null, "section", 0, 1.0);
+                id, 1L, content, filename, null, "section", null, 0, 1.0);
     }
 
     private void stubSessionBasics(Long sessionId, List<MessageDto> history) {

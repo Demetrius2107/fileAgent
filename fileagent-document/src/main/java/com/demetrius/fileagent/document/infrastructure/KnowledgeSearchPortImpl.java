@@ -2,8 +2,6 @@ package com.demetrius.fileagent.document.infrastructure;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.KnnSearch;
-import co.elastic.clients.elasticsearch._types.SortOrder;
-import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
 import co.elastic.clients.elasticsearch._types.query_dsl.Query;
 import co.elastic.clients.elasticsearch.core.MgetRequest;
 import co.elastic.clients.elasticsearch.core.MgetResponse;
@@ -21,12 +19,10 @@ import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Elasticsearch BM25、KNN 与 RRF 混合知识检索实现。
@@ -45,10 +41,11 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
     private final EmbeddingModel embeddingModel;
     private final ElasticsearchKnowledgeProperties properties;
     private final RrfFusion rrfFusion;
+    private final DashScopeKnowledgeReranker knowledgeReranker;
 
     @Override
     public List<KnowledgeHit> search(String query) {
-        return search(SearchQuery.single(query));
+        return search(SearchQuery.of(query));
     }
 
     @Override
@@ -64,11 +61,9 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
             List<KnowledgeHit> knnHits = search(buildKnnRequest(query, toFloatList(queryEmbedding)));
             List<KnowledgeHit> fused = rrfFusion.fuse(
                     bm25Hits, knnHits, properties.getRrfRankConstant());
-
-            // TODO: 接入 Reranker，对混合召回结果进行语义重排
-            List<KnowledgeHit> result = query.listAll()
-                    ? expandListRegion(fused)
-                    : expandAdjacent(fused.stream().limit(properties.getFinalTopK()).toList());
+            List<KnowledgeHit> reranked = knowledgeReranker.rerank(query.text(), fused);
+            List<KnowledgeHit> result = expandParents(
+                    reranked.stream().limit(properties.getFinalTopK()).toList());
             logHits(query, bm25Hits.size(), knnHits.size(), result, startedAt);
             return result;
         } catch (IOException e) {
@@ -127,6 +122,7 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
 
     private List<Query> buildFilters(SearchQuery query) {
         List<Query> filters = new ArrayList<>();
+        filters.add(retrievableChunkFilter());
         addTermFilter(filters, "ragName.keyword", query.ragName());
         addTermFilter(filters, "knowledgeTag.keyword", query.knowledgeTag());
         if (query.fileId() != null) {
@@ -135,112 +131,54 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
         return List.copyOf(filters);
     }
 
+    private Query retrievableChunkFilter() {
+        Query child = Query.of(builder -> builder.term(term -> term
+                .field("chunkType").value("CHILD")));
+        Query missingType = Query.of(builder -> builder.bool(bool -> bool
+                .mustNot(Query.of(query -> query.exists(exists -> exists.field("chunkType"))))));
+        return Query.of(builder -> builder.bool(bool -> bool
+                .should(child)
+                .should(missingType)
+                .minimumShouldMatch("1")));
+    }
+
     private void addTermFilter(List<Query> filters, String field, String value) {
         if (StringUtils.hasText(value)) {
             filters.add(Query.of(builder -> builder.term(term -> term.field(field).value(value))));
         }
     }
 
-    private List<KnowledgeHit> expandListRegion(List<KnowledgeHit> fused) throws IOException {
-        KnowledgeHit anchor = fused.stream()
-                .filter(hit -> hit.fileId() != null && StringUtils.hasText(hit.sectionId()))
-                .findFirst()
-                .orElse(null);
-        if (anchor == null) {
-            return fused.stream().limit(properties.getFinalTopK()).toList();
-        }
-        Query regionQuery = Query.of(builder -> builder.bool(bool -> bool
-                .filter(termQuery("fileId", String.valueOf(anchor.fileId())))
-                .filter(termQuery("sectionId", anchor.sectionId()))));
-        SearchRequest request = new SearchRequest.Builder()
-                .index(properties.getIndexAlias())
-                .size(properties.getMaxExpandedChunks())
-                .source(source -> source.filter(filter -> filter.excludes("embedding")))
-                .query(regionQuery)
-                .sort(sort -> sort.field(field -> field.field("rowIndex").order(SortOrder.Asc)))
-                .sort(sort -> sort.field(field -> field.field("chunkIndex").order(SortOrder.Asc)))
-                .build();
-        @SuppressWarnings("unchecked")
-        SearchResponse<Map> response = elasticsearchClient.search(request, Map.class);
-        List<KnowledgeHit> region = mapHits(response).stream()
-                .map(hit -> withScore(hit, anchor.score()))
-                .toList();
-        if (response.hits().total() == null
-                || response.hits().total().value() <= region.size()) {
-            return region;
-        }
-        List<KnowledgeHit> truncated = new ArrayList<>(region);
-        truncated.add(new KnowledgeHit(
-                anchor.fileId() + ":truncated",
-                anchor.fileId(),
-                "【系统提示：该区域内容超过检索上下文上限，以下资料不是完整列表，请在回答中明确说明。】",
-                anchor.filename(),
-                anchor.sheetName(),
-                anchor.sectionId(),
-                Integer.MAX_VALUE,
-                anchor.score()));
-        return List.copyOf(truncated);
-    }
-
-    private List<KnowledgeHit> expandAdjacent(List<KnowledgeHit> anchors) throws IOException {
-        if (anchors.isEmpty() || properties.getAdjacentWindow() <= 0) {
-            return anchors;
-        }
-        LinkedHashSet<String> ids = new LinkedHashSet<>();
-        Map<String, Set<String>> acceptableSections = new LinkedHashMap<>();
-        Map<String, Double> anchorScores = new LinkedHashMap<>();
-        for (KnowledgeHit anchor : anchors) {
-            for (int offset = -properties.getAdjacentWindow();
-                 offset <= properties.getAdjacentWindow(); offset++) {
-                int chunkIndex = anchor.chunkIndex() + offset;
-                if (anchor.fileId() == null || chunkIndex < 0) {
-                    continue;
-                }
-                String id = anchor.fileId() + ":" + chunkIndex;
-                ids.add(id);
-                acceptableSections.computeIfAbsent(id, ignored -> new LinkedHashSet<>())
-                        .add(anchor.sectionId());
-                anchorScores.merge(id, anchor.score(), Math::max);
+    private List<KnowledgeHit> expandParents(List<KnowledgeHit> hits) throws IOException {
+        LinkedHashSet<String> parentIds = new LinkedHashSet<>();
+        for (KnowledgeHit hit : hits) {
+            if (StringUtils.hasText(hit.parentId())) {
+                parentIds.add(hit.parentId());
             }
         }
-        if (ids.isEmpty()) {
-            return anchors;
+        if (parentIds.isEmpty()) {
+            return hits;
         }
-
         MgetRequest request = new MgetRequest.Builder()
                 .index(properties.getIndexAlias())
-                .ids(List.copyOf(ids))
+                .ids(List.copyOf(parentIds))
                 .sourceExcludes("embedding")
                 .build();
         @SuppressWarnings("unchecked")
         MgetResponse<Map> response = elasticsearchClient.mget(request, Map.class);
-        Map<String, KnowledgeHit> fetched = new LinkedHashMap<>();
+        Map<String, KnowledgeHit> parents = new LinkedHashMap<>();
         for (MultiGetResponseItem<Map> item : response.docs()) {
-            if (!item.isResult() || !item.result().found() || item.result().source() == null) {
-                continue;
-            }
-            KnowledgeHit hit = toKnowledgeHit(item.result().id(), item.result().source(),
-                    anchorScores.getOrDefault(item.result().id(), 0.0));
-            Set<String> sections = acceptableSections.get(item.result().id());
-            if (sections != null && sections.contains(hit.sectionId())) {
-                fetched.put(hit.chunkId(), hit);
+            if (item.isResult() && item.result().found() && item.result().source() != null) {
+                parents.put(item.result().id(),
+                        toKnowledgeHit(item.result().id(), item.result().source(), 0.0));
             }
         }
-        for (KnowledgeHit anchor : anchors) {
-            fetched.putIfAbsent(anchor.chunkId(), anchor);
+        Map<String, KnowledgeHit> result = new LinkedHashMap<>();
+        for (KnowledgeHit hit : hits) {
+            KnowledgeHit parent = parents.get(hit.parentId());
+            KnowledgeHit context = parent == null ? hit : withScore(parent, hit.score());
+            result.putIfAbsent(context.chunkId(), context);
         }
-        return fetched.values().stream()
-                .sorted(Comparator.comparing(KnowledgeHit::filename,
-                                Comparator.nullsLast(String::compareTo))
-                        .thenComparing(KnowledgeHit::sectionId,
-                                Comparator.nullsLast(String::compareTo))
-                        .thenComparingInt(KnowledgeHit::chunkIndex))
-                .limit(properties.getMaxExpandedChunks())
-                .toList();
-    }
-
-    private Query termQuery(String field, String value) {
-        return Query.of(builder -> builder.term(term -> term.field(field).value(value)));
+        return result.values().stream().limit(properties.getFinalTopK()).toList();
     }
 
     private List<Float> toFloatList(float[] vector) {
@@ -264,7 +202,7 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
 
     private KnowledgeHit toKnowledgeHit(String id, Map<String, Object> source, double score) {
         if (source == null) {
-            return new KnowledgeHit(id, null, null, null, null, null, 0, score);
+            return new KnowledgeHit(id, null, null, null, null, null, null, 0, score);
         }
         return new KnowledgeHit(
                 stringValue(source, "chunkId", id),
@@ -273,13 +211,14 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
                 stringValue(source, "filename", null),
                 stringValue(source, "sheetName", null),
                 stringValue(source, "sectionId", null),
+                stringValue(source, "parentId", null),
                 intValue(source.get("chunkIndex")),
                 score);
     }
 
     private KnowledgeHit withScore(KnowledgeHit hit, double score) {
         return new KnowledgeHit(hit.chunkId(), hit.fileId(), hit.content(), hit.filename(),
-                hit.sheetName(), hit.sectionId(), hit.chunkIndex(), score);
+                hit.sheetName(), hit.sectionId(), hit.parentId(), hit.chunkIndex(), score);
     }
 
     private String stringValue(Map<String, Object> source, String key, String defaultValue) {
@@ -304,9 +243,9 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
     private void logHits(SearchQuery query, int bm25Count, int knnCount,
                          List<KnowledgeHit> hits, long startedAt) {
         long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000;
-        log.debug("知识混合检索完成: query={}, answerMode={}, ragName={}, knowledgeTag={}, fileId={}, "
+        log.debug("知识混合检索完成: query={}, ragName={}, knowledgeTag={}, fileId={}, "
                         + "bm25Hits={}, knnHits={}, finalHits={}, elapsedMs={}",
-                query.text(), query.answerMode(), query.ragName(), query.knowledgeTag(), query.fileId(),
+                query.text(), query.ragName(), query.knowledgeTag(), query.fileId(),
                 bm25Count, knnCount, hits.size(), elapsedMillis);
         for (KnowledgeHit hit : hits) {
             log.debug("知识命中: chunkId={}, score={}, file={}, section={}, chunkIndex={}",

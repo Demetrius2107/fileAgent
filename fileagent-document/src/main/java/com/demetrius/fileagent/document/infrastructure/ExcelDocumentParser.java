@@ -79,7 +79,8 @@ public class ExcelDocumentParser implements DocumentParser {
             String sectionId = "sheet-" + sheetIndex + "-section-" + sectionIndex;
             for (int rowOffset = headerDepth; rowOffset < region.rows().size(); rowOffset++) {
                 SheetRow row = region.rows().get(rowOffset);
-                String content = serializeDataRow(sheet.getSheetName(), headers, row.values());
+                String content = serializeDataRow(
+                        sheet.getSheetName(), headers, row.values(), row.horizontalMergeContinuations());
                 if (content.isBlank()) {
                     continue;
                 }
@@ -88,6 +89,7 @@ public class ExcelDocumentParser implements DocumentParser {
                 metadata.put("sheetName", sheet.getSheetName());
                 metadata.put("rowIndex", row.rowIndex() + 1);
                 metadata.put("sectionId", sectionId);
+                metadata.put("parentId", sectionId);
                 chunks.add(new ParsedChunk(content, metadata));
             }
         }
@@ -100,10 +102,15 @@ public class ExcelDocumentParser implements DocumentParser {
             Row row = sheet.getRow(rowIndex);
             int lastCell = lastCellIndex(sheet, rowIndex, row);
             List<String> values = new ArrayList<>(lastCell);
+            Set<Integer> horizontalMergeContinuations = new HashSet<>();
             for (int columnIndex = 0; columnIndex < lastCell; columnIndex++) {
                 values.add(readCellValue(sheet, rowIndex, columnIndex, evaluator));
+                if (isHorizontalMergeContinuation(sheet, rowIndex, columnIndex)) {
+                    horizontalMergeContinuations.add(columnIndex);
+                }
             }
-            rows.add(new SheetRow(rowIndex, trimTrailingBlanks(values)));
+            rows.add(new SheetRow(rowIndex, trimTrailingBlanks(values),
+                    Set.copyOf(horizontalMergeContinuations)));
         }
         return rows;
     }
@@ -135,6 +142,16 @@ public class ExcelDocumentParser implements DocumentParser {
             return firstCell == null ? "" : FORMATTER.formatCellValue(firstCell, evaluator).trim();
         }
         return "";
+    }
+
+    private boolean isHorizontalMergeContinuation(Sheet sheet, int rowIndex, int columnIndex) {
+        for (CellRangeAddress merged : sheet.getMergedRegions()) {
+            if (merged.isInRange(rowIndex, columnIndex)
+                    && columnIndex > merged.getFirstColumn()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<String> trimTrailingBlanks(List<String> values) {
@@ -231,9 +248,13 @@ public class ExcelDocumentParser implements DocumentParser {
         return List.copyOf(headers);
     }
 
-    private String serializeDataRow(String sheetName, List<String> headers, List<String> values) {
+    private String serializeDataRow(String sheetName, List<String> headers, List<String> values,
+                                    Set<Integer> horizontalMergeContinuations) {
         List<String> fields = new ArrayList<>();
         for (int columnIndex = 0; columnIndex < values.size(); columnIndex++) {
+            if (horizontalMergeContinuations.contains(columnIndex)) {
+                continue;
+            }
             String value = values.get(columnIndex);
             if (value.isBlank()) {
                 continue;
@@ -261,7 +282,8 @@ public class ExcelDocumentParser implements DocumentParser {
         }
     }
 
-    private record SheetRow(int rowIndex, List<String> values) {
+    private record SheetRow(int rowIndex, List<String> values,
+                            Set<Integer> horizontalMergeContinuations) {
 
         private boolean isEmpty() {
             return nonEmptyCount() == 0;

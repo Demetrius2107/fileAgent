@@ -20,8 +20,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 知识库文件应用服务实现。
@@ -56,15 +59,16 @@ public class RagFileAppServiceImpl implements RagFileAppService {
     @Override
     public List<RagFileSummary> list() {
         return ragFileRepository.findAllOrderByCreatedAtDesc().stream()
-                .map(entity -> new RagFileSummary(
-                        entity.getId(),
-                        entity.getRagName(),
-                        entity.getKnowledgeTag(),
-                        entity.getFilename(),
-                        entity.getStatus(),
-                        entity.getChunkCount(),
-                        entity.getCreatedAt().toString()))
-                .toList();
+            .filter(ragFileEntity -> ragFileEntity.getStatus() == ParseStatus.SUCCESS)
+            .map(entity -> new RagFileSummary(
+                entity.getId(),
+                entity.getRagName(),
+                entity.getKnowledgeTag(),
+                entity.getFilename(),
+                entity.getStatus(),
+                entity.getChunkCount(),
+                entity.getCreatedAt().toString()))
+            .toList();
     }
 
     private void storeOne(String name, String tag, MultipartFile file) {
@@ -93,7 +97,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             List<KnowledgeChunk> knowledgeChunks = toKnowledgeChunks(chunks, entity);
             knowledgeIndexRepository.saveAll(knowledgeChunks);
 
-            entity.setChunkCount(knowledgeChunks.size());
+            entity.setChunkCount(chunks.size());
             entity.setStatus(ParseStatus.SUCCESS);
             ragFileRepository.save(entity);
             log.info("知识库文件索引完成: name={}, tag={}, file={}, chunks={}",
@@ -120,9 +124,35 @@ public class RagFileAppServiceImpl implements RagFileAppService {
     }
 
     private List<KnowledgeChunk> toKnowledgeChunks(List<ParsedChunk> chunks, RagFileEntity entity) {
-        ArrayList<KnowledgeChunk> knowledgeChunks = new ArrayList<>(chunks.size());
+        Map<String, List<Integer>> parentGroups = new LinkedHashMap<>();
+        for (int i = 0; i < chunks.size(); i++) {
+            Object parentId = chunks.get(i).metadata().get("parentId");
+            if (parentId != null && StringUtils.hasText(String.valueOf(parentId))) {
+                parentGroups.computeIfAbsent(String.valueOf(parentId), ignored -> new ArrayList<>())
+                        .add(i);
+            }
+        }
+        Map<String, String> physicalParentIds = new LinkedHashMap<>();
+        int parentIndex = 0;
+        for (String logicalParentId : parentGroups.keySet()) {
+            physicalParentIds.put(logicalParentId, entity.getId() + ":parent:" + parentIndex++);
+        }
+
+        ArrayList<KnowledgeChunk> knowledgeChunks = new ArrayList<>(
+                chunks.size() + parentGroups.size());
         for (int i = 0; i < chunks.size(); i++) {
             ParsedChunk chunk = chunks.get(i);
+            Map<String, Object> metadata = new LinkedHashMap<>(chunk.metadata());
+            metadata.put("chunkType", "CHILD");
+            Object logicalParentId = metadata.get("parentId");
+            if (logicalParentId != null) {
+                String physicalParentId = physicalParentIds.get(String.valueOf(logicalParentId));
+                if (physicalParentId == null) {
+                    metadata.remove("parentId");
+                } else {
+                    metadata.put("parentId", physicalParentId);
+                }
+            }
             knowledgeChunks.add(new KnowledgeChunk(
                     entity.getId() + ":" + i,
                     entity.getId(),
@@ -131,7 +161,27 @@ public class RagFileAppServiceImpl implements RagFileAppService {
                     entity.getFilename(),
                     chunk.content(),
                     i,
-                    chunk.metadata()));
+                    metadata));
+        }
+        for (Map.Entry<String, List<Integer>> group : parentGroups.entrySet()) {
+            int firstChildIndex = group.getValue().getFirst();
+            ParsedChunk firstChild = chunks.get(firstChildIndex);
+            Map<String, Object> metadata = new LinkedHashMap<>(firstChild.metadata());
+            metadata.remove("parentId");
+            metadata.put("chunkType", "PARENT");
+            String parentContent = group.getValue().stream()
+                    .map(chunks::get)
+                    .map(ParsedChunk::content)
+                    .collect(Collectors.joining("\n"));
+            knowledgeChunks.add(new KnowledgeChunk(
+                    physicalParentIds.get(group.getKey()),
+                    entity.getId(),
+                    entity.getRagName(),
+                    entity.getKnowledgeTag(),
+                    entity.getFilename(),
+                    parentContent,
+                    firstChildIndex,
+                    metadata));
         }
         return List.copyOf(knowledgeChunks);
     }

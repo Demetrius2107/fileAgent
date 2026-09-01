@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -43,6 +44,9 @@ class KnowledgeSearchPortImplTest {
     @Mock
     private EmbeddingModel embeddingModel;
 
+    @Mock
+    private DashScopeKnowledgeReranker knowledgeReranker;
+
     private ElasticsearchKnowledgeProperties properties;
     private KnowledgeSearchPortImpl searchPort;
 
@@ -54,9 +58,10 @@ class KnowledgeSearchPortImplTest {
         properties.setKnnTopK(10);
         properties.setKnnCandidates(20);
         properties.setFinalTopK(2);
-        properties.setAdjacentWindow(0);
+        lenient().when(knowledgeReranker.rerank(any(String.class), any(List.class)))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         searchPort = new KnowledgeSearchPortImpl(
-                elasticsearchClient, embeddingModel, properties, new RrfFusion());
+                elasticsearchClient, embeddingModel, properties, new RrfFusion(), knowledgeReranker);
     }
 
     @Test
@@ -72,79 +77,69 @@ class KnowledgeSearchPortImplTest {
     @Test
     void bm25AndKnnShouldUseTheSamePlatformFilters() {
         KnowledgeSearchPort.SearchQuery query = new KnowledgeSearchPort.SearchQuery(
-                "年度目标", "SINGLE", "管理制度", "绩效", 7L);
+                "年度目标", "管理制度", "绩效", 7L);
 
         SearchRequest bm25 = searchPort.buildBm25Request(query);
         SearchRequest knn = searchPort.buildKnnRequest(query, List.of(0.1F, 0.2F));
 
         assertThat(bm25.toString())
                 .contains("content^3", "filename^2", "ragName.keyword", "管理制度",
-                        "knowledgeTag.keyword", "绩效", "fileId", "7");
+                        "knowledgeTag.keyword", "绩效", "fileId", "7", "chunkType");
         assertThat(knn.toString())
                 .contains("embedding", "ragName.keyword", "管理制度",
-                        "knowledgeTag.keyword", "绩效", "fileId", "7");
+                        "knowledgeTag.keyword", "绩效", "fileId", "7", "chunkType");
     }
 
     @Test
-    void searchShouldFuseTwoRoutesAndApplyFinalTopK() throws IOException {
+    void searchShouldApplyRerankerBeforeFinalTopK() throws IOException {
         when(embeddingModel.embed("查询")).thenReturn(new float[]{0.1F, 0.2F});
         when(elasticsearchClient.search(any(SearchRequest.class), eq(Map.class)))
                 .thenReturn(response(hit("A", 1.0), hit("B", 0.9)),
                         response(hit("B", 0.95), hit("C", 0.8)));
+        when(knowledgeReranker.rerank(eq("查询"), any(List.class)))
+                .thenAnswer(invocation -> {
+                    @SuppressWarnings("unchecked")
+                    List<KnowledgeSearchPort.KnowledgeHit> hits = invocation.getArgument(1);
+                    return List.of(hits.get(2), hits.get(1), hits.get(0));
+                });
 
         List<KnowledgeSearchPort.KnowledgeHit> result = searchPort.search("查询");
 
         assertThat(result).extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
-                .containsExactly("B", "A");
+                .containsExactly("C", "A");
         assertThat(result).allMatch(hit -> hit.score() > 0);
     }
 
     @Test
-    void listAllShouldExpandTheHighestRankedFileSectionInPositionOrder() throws IOException {
-        when(embeddingModel.embed("列出全部目标")).thenReturn(new float[]{0.1F, 0.2F});
-        Hit<Map> anchor = hit("7:2", 1.0);
-        Hit<Map> first = hit("7:0", 0.0);
-        Hit<Map> second = hit("7:1", 0.0);
+    void searchShouldReplaceChildHitWithItsExplicitParent() throws IOException {
+        properties.setFinalTopK(1);
+        when(embeddingModel.embed("目标")).thenReturn(new float[]{0.1F, 0.2F});
+        Hit<Map> child = childHit("7:2", "7:parent:0", 1.0);
         when(elasticsearchClient.search(any(SearchRequest.class), eq(Map.class)))
-                .thenReturn(response(anchor), response(anchor), response(first, second, anchor));
+                .thenReturn(response(child), response(child));
+        when(elasticsearchClient.mget(any(MgetRequest.class), eq(Map.class)))
+                .thenReturn(mgetResponse(parentHit("7:parent:0")));
 
-        List<KnowledgeSearchPort.KnowledgeHit> result = searchPort.search(
-                new KnowledgeSearchPort.SearchQuery(
-                        "列出全部目标", "LIST_ALL", null, null, null));
+        List<KnowledgeSearchPort.KnowledgeHit> result = searchPort.search("目标");
 
         assertThat(result).extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
-                .containsExactly("7:0", "7:1", "7:2");
+                .containsExactly("7:parent:0");
+        assertThat(result.getFirst().content()).isEqualTo("完整父块");
     }
 
     @Test
-    void listAllShouldMarkContextAsIncompleteWhenRegionExceedsLimit() throws IOException {
-        when(embeddingModel.embed("列出全部目标")).thenReturn(new float[]{0.1F, 0.2F});
+    void searchShouldNotExpandASectionWithoutExplicitParentId() throws IOException {
+        properties.setFinalTopK(1);
+        when(embeddingModel.embed("查询")).thenReturn(new float[]{0.1F, 0.2F});
         Hit<Map> anchor = hit("7:0", 1.0);
         when(elasticsearchClient.search(any(SearchRequest.class), eq(Map.class)))
-                .thenReturn(response(anchor), response(anchor), response(3, anchor));
-
-        List<KnowledgeSearchPort.KnowledgeHit> result = searchPort.search(
-                new KnowledgeSearchPort.SearchQuery(
-                        "列出全部目标", "LIST_ALL", null, null, null));
-
-        assertThat(result.getLast().content()).contains("不是完整列表");
-    }
-
-    @Test
-    void singleSearchShouldExpandAdjacentChunksWithinTheSameSection() throws IOException {
-        properties.setFinalTopK(1);
-        properties.setAdjacentWindow(1);
-        when(embeddingModel.embed("查询")).thenReturn(new float[]{0.1F, 0.2F});
-        Hit<Map> anchor = hit("7:1", 1.0);
-        when(elasticsearchClient.search(any(SearchRequest.class), eq(Map.class)))
                 .thenReturn(response(anchor), response(anchor));
-        when(elasticsearchClient.mget(any(MgetRequest.class), eq(Map.class)))
-                .thenReturn(mgetResponse("7:0", "7:1", "7:2"));
 
         List<KnowledgeSearchPort.KnowledgeHit> result = searchPort.search("查询");
 
         assertThat(result).extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
-                .containsExactly("7:0", "7:1", "7:2");
+                .containsExactly("7:0");
+        verify(elasticsearchClient, never()).mget(any(MgetRequest.class), eq(Map.class));
     }
 
     @Test
@@ -172,15 +167,37 @@ class KnowledgeSearchPortImplTest {
                         .hits(List.of(hits))));
     }
 
-    private MgetResponse<Map> mgetResponse(String... ids) {
-        List<MultiGetResponseItem<Map>> items = java.util.Arrays.stream(ids)
-                .map(id -> MultiGetResponseItem.<Map>of(item -> item.result(result -> result
+    @SafeVarargs
+    private MgetResponse<Map> mgetResponse(Hit<Map>... hits) {
+        List<MultiGetResponseItem<Map>> items = java.util.Arrays.stream(hits)
+                .map(hit -> MultiGetResponseItem.<Map>of(item -> item.result(result -> result
                         .index(properties.getIndexAlias())
-                        .id(id)
+                        .id(hit.id())
                         .found(true)
-                        .source(hit(id, 0).source()))))
+                        .source(hit.source()))))
                 .toList();
         return MgetResponse.of(response -> response.docs(items));
+    }
+
+    private Hit<Map> childHit(String id, String parentId, double score) {
+        Map<String, Object> source = new java.util.LinkedHashMap<>(hit(id, score).source());
+        source.put("parentId", parentId);
+        return Hit.of(hit -> hit.index(properties.getIndexAlias()).id(id).score(score).source(source));
+    }
+
+    private Hit<Map> parentHit(String id) {
+        return Hit.of(hit -> hit
+                .index(properties.getIndexAlias())
+                .id(id)
+                .score(0.0)
+                .source(Map.of(
+                        "chunkId", id,
+                        "fileId", "7",
+                        "content", "完整父块",
+                        "filename", "年度目标.xlsx",
+                        "sheetName", "目标",
+                        "sectionId", "sheet-0-section-0",
+                        "chunkIndex", 0)));
     }
 
     private Hit<Map> hit(String id, double score) {

@@ -28,6 +28,7 @@ public class ElasticsearchKnowledgeIndexInitializer {
                     .existsAlias(request -> request.name(properties.getIndexAlias()))
                     .value();
             if (aliasExists) {
+                ensureParentChildMapping(properties.getIndexAlias());
                 return;
             }
             boolean physicalIndexExists = elasticsearchClient.indices()
@@ -38,6 +39,7 @@ public class ElasticsearchKnowledgeIndexInitializer {
                         .index(properties.getPhysicalIndex())
                         .name(properties.getIndexAlias())
                         .isWriteIndex(true));
+                ensureParentChildMapping(properties.getIndexAlias());
                 log.info("Elasticsearch 知识索引别名已修复: index={}, alias={}",
                         properties.getPhysicalIndex(), properties.getIndexAlias());
                 return;
@@ -62,6 +64,8 @@ public class ElasticsearchKnowledgeIndexInitializer {
                                     .analyzer("cjk")
                                     .fields("keyword", keyword -> keyword.keyword(value -> value))))
                             .properties("sectionId", field -> field.keyword(keyword -> keyword))
+                            .properties("parentId", field -> field.keyword(keyword -> keyword))
+                            .properties("chunkType", field -> field.keyword(keyword -> keyword))
                             .properties("rowIndex", field -> field.integer(integer -> integer))
                             .properties("chunkIndex", field -> field.integer(integer -> integer))
                             .properties("content", field -> field.text(text -> text.analyzer("cjk")))
@@ -75,5 +79,12 @@ public class ElasticsearchKnowledgeIndexInitializer {
         } catch (Exception e) {
             throw new IllegalStateException("Elasticsearch 知识索引初始化失败", e);
         }
+    }
+
+    private void ensureParentChildMapping(String index) throws Exception {
+        elasticsearchClient.indices().putMapping(request -> request
+                .index(index)
+                .properties("parentId", field -> field.keyword(keyword -> keyword))
+                .properties("chunkType", field -> field.keyword(keyword -> keyword)));
     }
 }

@@ -127,6 +127,39 @@ class RagFileAppServiceImplTest {
     }
 
     @Test
+    void storeRagFileShouldCreateOneParentChunkForExplicitChildGroup() {
+        stubSuccessSave();
+        DocumentParser parser = mock(DocumentParser.class);
+        ParsedChunk first = new ParsedChunk("目标一", Map.of(
+                "sourceType", "xlsx", "sheetName", "OKR", "rowIndex", 2,
+                "sectionId", "sheet-0-section-0", "parentId", "sheet-0-section-0"));
+        ParsedChunk second = new ParsedChunk("目标二", Map.of(
+                "sourceType", "xlsx", "sheetName", "OKR", "rowIndex", 3,
+                "sectionId", "sheet-0-section-0", "parentId", "sheet-0-section-0"));
+        when(parser.parseChunks(any(Path.class), anyString())).thenReturn(List.of(first, second));
+        when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
+
+        ragFileAppService.storeRagFile("年度计划", "目标",
+                List.of(new MockMultipartFile("files", "2026.xlsx", null, "内容".getBytes())));
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<KnowledgeChunk>> captor = ArgumentCaptor.forClass(List.class);
+        verify(knowledgeIndexRepository).saveAll(captor.capture());
+        List<KnowledgeChunk> indexed = captor.getValue();
+        assertThat(indexed).hasSize(3);
+        assertThat(indexed.get(0).metadata())
+                .containsEntry("chunkType", "CHILD")
+                .containsEntry("parentId", "100:parent:0");
+        assertThat(indexed.get(1).metadata())
+                .containsEntry("parentId", "100:parent:0");
+        assertThat(indexed.get(2).chunkId()).isEqualTo("100:parent:0");
+        assertThat(indexed.get(2).content()).isEqualTo("目标一\n目标二");
+        assertThat(indexed.get(2).metadata())
+                .containsEntry("chunkType", "PARENT")
+                .doesNotContainKey("parentId");
+    }
+
+    @Test
     void storeRagFileShouldCleanupIndexAndMarkFailedWhenIndexingFails() {
         stubSuccessSave();
         DocumentParser parser = mock(DocumentParser.class);
@@ -148,7 +181,7 @@ class RagFileAppServiceImplTest {
     }
 
     @Test
-    void listShouldMapEntitiesToSummariesInRepositoryOrder() {
+    void listShouldOnlyMapSuccessfulEntitiesToSummaries() {
         RagFileEntity first = entity(1L, "员工知识库", "制度", "手册.pdf",
                 ParseStatus.SUCCESS, 12, LocalDateTime.of(2026, 8, 26, 9, 0));
         RagFileEntity second = entity(2L, "项目知识库", "方案", "计划.docx",
@@ -157,7 +190,7 @@ class RagFileAppServiceImplTest {
 
         List<RagFileSummary> result = ragFileAppService.list();
 
-        assertThat(result).hasSize(2);
+        assertThat(result).hasSize(1);
         assertThat(result.get(0).id()).isEqualTo(1L);
         assertThat(result.get(0).ragName()).isEqualTo("员工知识库");
         assertThat(result.get(0).knowledgeTag()).isEqualTo("制度");
@@ -165,7 +198,6 @@ class RagFileAppServiceImplTest {
         assertThat(result.get(0).status()).isEqualTo(ParseStatus.SUCCESS);
         assertThat(result.get(0).chunkCount()).isEqualTo(12);
         assertThat(result.get(0).createdAt()).isEqualTo("2026-08-26T09:00");
-        assertThat(result.get(1).status()).isEqualTo(ParseStatus.PARSING);
     }
 
     private void stubSuccessSave() {

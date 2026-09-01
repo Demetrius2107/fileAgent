@@ -111,6 +111,6 @@ class RagPromptBuilderTest {
             String content, String filename, String sheetName, int chunkIndex) {
         return new KnowledgeSearchPort.KnowledgeHit(
                 "1:" + chunkIndex, 1L, content, filename,
-                sheetName, "section", chunkIndex, 1.0);
+                sheetName, "section", null, chunkIndex, 1.0);
     }
 }

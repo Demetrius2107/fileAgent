@@ -63,7 +63,8 @@ class ExcelDocumentParserTest {
                 .containsEntry("sourceType", "xlsx")
                 .containsEntry("sheetName", "项目")
                 .containsEntry("rowIndex", 2)
-                .containsEntry("sectionId", "sheet-0-section-0");
+                .containsEntry("sectionId", "sheet-0-section-0")
+                .containsEntry("parentId", "sheet-0-section-0");
     }
 
     @Test
@@ -105,6 +106,23 @@ class ExcelDocumentParserTest {
         assertThat(chunks).extracting(ParsedChunk::content).containsExactly(
                 "[人员] 员工信息 / 姓名: 张三 | 员工信息 / 部门: 研发 | 工作信息 / 目标: 完成升级");
         assertThat(chunks.getFirst().metadata()).containsEntry("rowIndex", 3);
+    }
+
+    @Test
+    void parseChunksShouldNotRepeatHorizontallyMergedDataCells() throws Exception {
+        Path file = tempDir.resolve("合并数据.xlsx");
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            var sheet = workbook.createSheet("评价");
+            addRow(sheet, 0, "标题", "说明", "备注");
+            addRow(sheet, 1, "结果导向", "", "");
+            sheet.addMergedRegion(new CellRangeAddress(1, 1, 0, 2));
+            write(workbook, file);
+        }
+
+        List<ParsedChunk> chunks = new ExcelDocumentParser().parseChunks(file, MIME_XLSX);
+
+        assertThat(chunks).extracting(ParsedChunk::content)
+                .containsExactly("[评价] 标题: 结果导向");
     }
 
     @Test

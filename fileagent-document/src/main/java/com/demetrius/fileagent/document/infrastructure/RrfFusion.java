@@ -34,7 +34,8 @@ public class RrfFusion {
             KnowledgeHit hit = entry.getValue();
             fused.add(new KnowledgeHit(
                     hit.chunkId(), hit.fileId(), hit.content(), hit.filename(),
-                    hit.sheetName(), hit.sectionId(), hit.chunkIndex(), scores.get(entry.getKey())));
+                    hit.sheetName(), hit.sectionId(), hit.parentId(), hit.chunkIndex(),
+                    scores.get(entry.getKey())));
         }
         fused.sort(Comparator.comparingDouble(KnowledgeHit::score).reversed()
                 .thenComparing(KnowledgeHit::chunkId));

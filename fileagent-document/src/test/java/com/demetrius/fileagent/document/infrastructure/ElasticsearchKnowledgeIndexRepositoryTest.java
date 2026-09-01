@@ -18,12 +18,15 @@ import org.springframework.ai.embedding.EmbeddingModel;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -79,6 +82,68 @@ class ElasticsearchKnowledgeIndexRepositoryTest {
                 .containsEntry("sheetName", "目标")
                 .containsEntry("sectionId", "sheet-0-section-0");
         assertThat((float[]) source.get("embedding")).containsExactly(0.1F, 0.2F);
+    }
+
+    @Test
+    void saveAllShouldRespectEmbeddingProviderBatchLimit() throws IOException {
+        List<KnowledgeChunk> chunks = IntStream.range(0, 45)
+                .mapToObj(this::chunk)
+                .toList();
+        when(embeddingModel.embed(anyList())).thenAnswer(invocation -> {
+            List<String> contents = invocation.getArgument(0);
+            return contents.stream()
+                    .map(content -> new float[]{0.1F, 0.2F})
+                    .toList();
+        });
+        BulkResponse response = mock(BulkResponse.class);
+        when(response.errors()).thenReturn(false);
+        when(elasticsearchClient.bulk(any(BulkRequest.class))).thenReturn(response);
+        repository.saveAll(chunks);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<String>> batches = ArgumentCaptor.forClass(List.class);
+        verify(embeddingModel, times(5)).embed(batches.capture());
+        assertThat(batches.getAllValues()).extracting(List::size)
+                .containsExactly(10, 10, 10, 10, 5);
+
+        ArgumentCaptor<BulkRequest> bulkRequest = ArgumentCaptor.forClass(BulkRequest.class);
+        verify(elasticsearchClient).bulk(bulkRequest.capture());
+        assertThat(bulkRequest.getValue().operations()).hasSize(45);
+    }
+
+    @Test
+    void saveAllShouldNotEmbedParentChunks() throws IOException {
+        KnowledgeChunk child = chunk(0);
+        KnowledgeChunk parent = new KnowledgeChunk(
+                "7:parent:0",
+                7L,
+                "年度计划",
+                "绩效",
+                "目标.xlsx",
+                "父块正文",
+                2,
+                Map.of(
+                        "sourceType", "xlsx",
+                        "sheetName", "目标",
+                        "sectionId", "sheet-0-section-0",
+                        "chunkType", "PARENT"));
+        when(embeddingModel.embed(List.of("正文0")))
+                .thenReturn(List.of(new float[]{0.1F, 0.2F}));
+        BulkResponse response = mock(BulkResponse.class);
+        when(response.errors()).thenReturn(false);
+        when(elasticsearchClient.bulk(any(BulkRequest.class))).thenReturn(response);
+
+        repository.saveAll(List.of(child, parent));
+
+        verify(embeddingModel).embed(List.of("正文0"));
+        ArgumentCaptor<BulkRequest> captor = ArgumentCaptor.forClass(BulkRequest.class);
+        verify(elasticsearchClient).bulk(captor.capture());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> parentSource = (Map<String, Object>) captor.getValue()
+                .operations().get(1).index().document();
+        assertThat(parentSource)
+                .containsEntry("chunkType", "PARENT")
+                .doesNotContainKey("embedding");
     }
 
     @Test

@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * RAG 流式聊天编排：检索规划 -> 混合检索 -> Prompt 组装 -> 模型回答 -> 落库。
+ * RAG 流式聊天编排：多轮问题改写 -> 混合检索 -> Prompt 组装 -> 模型回答 -> 落库。
  *
  * @author raosaijie
  * @since 0.1.0
@@ -40,7 +40,7 @@ public class ChatAppServiceImpl implements ChatAppService {
     private final SessionQueryPort sessionQueryPort;
     private final SessionMessagePort sessionMessagePort;
     private final KnowledgeSearchPort knowledgeSearchPort;
-    private final RagRetrievalPlanner ragRetrievalPlanner;
+    private final RagQueryRewriter ragQueryRewriter;
     private final RagPromptBuilder ragPromptBuilder;
     private final StreamingChatClient streamingChatClient;
 
@@ -66,16 +66,16 @@ public class ChatAppServiceImpl implements ChatAppService {
         List<MessageDto> history = tail(sessionQueryPort.listMessages(sessionId), chatHistoryLimit);
         sessionMessagePort.append(sessionId, MessageType.USER, prompt);
 
-        RagRetrievalPlanner.RetrievalPlan retrievalPlan = ragRetrievalPlanner.plan(history, prompt);
+        String retrievalQuery = ragQueryRewriter.rewrite(history, prompt);
         List<KnowledgeSearchPort.KnowledgeHit> hits;
         try {
-            hits = retrieveKnowledge(retrievalPlan);
+            hits = knowledgeSearchPort.search(KnowledgeSearchPort.SearchQuery.of(retrievalQuery));
         } catch (Exception e) {
             log.warn("知识检索失败: sessionId={}", sessionId, e);
             return Flux.just(ChatStreamEvent.error(CODE_KNOWLEDGE_SEARCH_FAILED, "知识检索失败，请稍后重试"));
         }
         boolean knowledgeMiss = hits.isEmpty();
-        boolean showKnowledgeMissNotice = retrievalPlan.needRetrieval() && knowledgeMiss;
+        boolean showKnowledgeMissNotice = knowledgeMiss;
 
         Prompt modelPrompt = ragPromptBuilder.build(history, hits, prompt);
         StringBuilder answer = new StringBuilder();
@@ -111,15 +111,6 @@ public class ChatAppServiceImpl implements ChatAppService {
                     log.warn("模型流式调用失败: sessionId={}", sessionId, e);
                     return Flux.just(ChatStreamEvent.error(CODE_MODEL_STREAM_FAILED, "模型调用失败，请稍后重试"));
                 });
-    }
-
-    private List<KnowledgeSearchPort.KnowledgeHit> retrieveKnowledge(
-            RagRetrievalPlanner.RetrievalPlan plan) {
-        if (!plan.needRetrieval()) {
-            return List.of();
-        }
-        return knowledgeSearchPort.search(new KnowledgeSearchPort.SearchQuery(
-                plan.standaloneQuery(), plan.answerMode(), null, null, null));
     }
 
     private List<MessageDto> tail(List<MessageDto> messages, int limit) {

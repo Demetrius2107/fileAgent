@@ -10,7 +10,6 @@ import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import com.demetrius.fileagent.document.infrastructure.DocumentParser;
 import com.demetrius.fileagent.document.infrastructure.DocumentParserRegistry;
-import com.demetrius.fileagent.document.infrastructure.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,11 +38,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
 
     private final DocumentParserRegistry parserRegistry;
     private final RagFileRepository ragFileRepository;
-    private final SimpleVectorStore vectorStore;
-    private final StorageService storageService;
 
-    @Value("${fileagent.vector-store-path:./storage/vectorstore.json}")
-    private String vectorStorePath;
     private final KnowledgeIndexRepository knowledgeIndexRepository;
 
     @Override

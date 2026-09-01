@@ -125,12 +125,16 @@
             <input id="base-url-input" name="baseUrl" type="text" placeholder="https://...">
         </label>
         <label>
-            API Key（AES 加密存储，保存后不再回显明文）
+            API Key（AES 加密存储，保存后不再回显明文；编辑时留空表示保留原 Key）
             <input id="api-key-input" name="apiKey" type="password" required placeholder="sk-...">
         </label>
         <label>
             模型名
             <input id="model-name-input" name="chatModel" type="text" required placeholder="如 deepseek-chat / glm-4.6 / qwen-max">
+        </label>
+        <label>
+            采样温度（可选，留空用默认 0.2）
+            <input id="temperature-input" name="temperature" type="number" step="0.1" min="0" max="2" placeholder="0.2">
         </label>
         <p id="model-config-error" class="upload-error" hidden></p>
         <div class="dialog-actions">

@@ -93,6 +93,24 @@ public class StorageService {
         return abs;
     }
 
+    /**
+     * 删除已落盘的原件（索引失败回滚用）。文件不存在时静默忽略。
+     *
+     * @param relativePath 存储时返回的相对路径
+     * @throws BizException 路径越界（非法相对路径）时
+     */
+    public void delete(String relativePath) {
+        Path target = storageRoot.resolve(relativePath).normalize();
+        if (!target.startsWith(storageRoot)) {
+            throw new BizException("非法存储路径: " + relativePath);
+        }
+        try {
+            Files.deleteIfExists(target);
+        } catch (IOException e) {
+            log.warn("删除已存储文件失败: {}", target, e);
+        }
+    }
+
     /** 仅取文件名部分，丢弃任何路径前缀，防穿越。空名用时间戳兜底。 */
     private String sanitize(String original) {
         if (original == null || original.isBlank()) {

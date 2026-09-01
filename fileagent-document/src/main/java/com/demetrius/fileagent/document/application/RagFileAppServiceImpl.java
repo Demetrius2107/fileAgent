@@ -3,15 +3,15 @@ package com.demetrius.fileagent.document.application;
 import com.demetrius.fileagent.api.dto.RagFileSummary;
 import com.demetrius.fileagent.api.enums.ParseStatus;
 import com.demetrius.fileagent.common.exception.BizException;
+import com.demetrius.fileagent.document.domain.KnowledgeChunk;
+import com.demetrius.fileagent.document.domain.KnowledgeIndexRepository;
+import com.demetrius.fileagent.document.domain.ParsedChunk;
 import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import com.demetrius.fileagent.document.infrastructure.DocumentParser;
 import com.demetrius.fileagent.document.infrastructure.DocumentParserRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.document.Document;
-import org.springframework.ai.vectorstore.SimpleVectorStore;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -20,16 +20,16 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 知识库文件应用服务实现。
  * <p>
- * 参照 {@code cn.bugstack.ai.domain.agent.service.rag.RagService#storeRagFile}：
- * 解析 → 分块 → 打知识标签元数据 → vectorStore.accept → 落库记录。
+ * 负责文件解析、通用分块与知识索引写入。
  */
 @Slf4j
 @Service
@@ -38,10 +38,8 @@ public class RagFileAppServiceImpl implements RagFileAppService {
 
     private final DocumentParserRegistry parserRegistry;
     private final RagFileRepository ragFileRepository;
-    private final SimpleVectorStore vectorStore;
 
-    @Value("${fileagent.vector-store-path:./storage/vectorstore.json}")
-    private String vectorStorePath;
+    private final KnowledgeIndexRepository knowledgeIndexRepository;
 
     @Override
     public void storeRagFile(String name, String tag, List<MultipartFile> files) {
@@ -62,15 +60,16 @@ public class RagFileAppServiceImpl implements RagFileAppService {
     @Override
     public List<RagFileSummary> list() {
         return ragFileRepository.findAllOrderByCreatedAtDesc().stream()
-                .map(entity -> new RagFileSummary(
-                        entity.getId(),
-                        entity.getRagName(),
-                        entity.getKnowledgeTag(),
-                        entity.getFilename(),
-                        entity.getStatus(),
-                        entity.getChunkCount(),
-                        entity.getCreatedAt().toString()))
-                .toList();
+            .filter(ragFileEntity -> ragFileEntity.getStatus() == ParseStatus.SUCCESS)
+            .map(entity -> new RagFileSummary(
+                entity.getId(),
+                entity.getRagName(),
+                entity.getKnowledgeTag(),
+                entity.getFilename(),
+                entity.getStatus(),
+                entity.getChunkCount(),
+                entity.getCreatedAt().toString()))
+            .toList();
     }
 
     private void storeOne(String name, String tag, MultipartFile file) {
@@ -91,28 +90,28 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             DocumentParser parser = parserRegistry.findParser(mimeType)
                     .orElseThrow(() -> new BizException("暂不支持的文件格式: " + mimeType + "（当前支持 TXT/MD，PDF/Office 随 M2 解析器扩展）"));
 
-            // 解析 + 分块
-            List<String> chunks = parser.parse(tempFile, mimeType);
+            List<ParsedChunk> chunks = parser.parseChunks(tempFile, mimeType);
             if (chunks.isEmpty()) {
                 throw new BizException("文件内容为空，未能切分出有效 chunk: " + entity.getFilename());
             }
 
-            // 打知识标签等元数据后写入向量库
-            List<Document> documents = toDocuments(chunks, entity);
-            vectorStore.accept(documents);
-            persistVectorStore();
+            List<KnowledgeChunk> knowledgeChunks = toKnowledgeChunks(chunks, entity);
+            knowledgeIndexRepository.saveAll(knowledgeChunks);
 
-            entity.setChunkCount(documents.size());
+            entity.setChunkCount(chunks.size());
             entity.setStatus(ParseStatus.SUCCESS);
             ragFileRepository.save(entity);
-            log.info("知识库文件索引完成: name={}, tag={}, file={}, chunks={}", name, tag, entity.getFilename(), documents.size());
+            log.info("知识库文件索引完成: name={}, tag={}, file={}, chunks={}",
+                    name, tag, entity.getFilename(), knowledgeChunks.size());
         } catch (BizException e) {
-            rollbackRecord(entity, e);
+            cleanupIndex(entity.getId());
+            markFailed(entity, e);
             throw e;
         } catch (Exception e) {
             log.error("知识库文件索引失败: {}", entity.getFilename(), e);
-            BizException biz = new BizException("文件分块/向量化失败: " + e.getMessage());
-            rollbackRecord(entity, biz);
+            cleanupIndex(entity.getId());
+            BizException biz = new BizException("文件分块/索引失败: " + e.getMessage());
+            markFailed(entity, biz);
             throw biz;
         } finally {
             if (tempFile != null) {
@@ -125,57 +124,83 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         }
     }
 
-    /** chunk 文本 + 元数据 -> Spring AI Document */
-    private List<Document> toDocuments(List<String> chunks, RagFileEntity entity) {
-        List<Document> documents = new ArrayList<>(chunks.size());
+    private List<KnowledgeChunk> toKnowledgeChunks(List<ParsedChunk> chunks, RagFileEntity entity) {
+        Map<String, List<Integer>> parentGroups = new LinkedHashMap<>();
         for (int i = 0; i < chunks.size(); i++) {
-            String rawContent = chunks.get(i);
-            Map<String, Object> metadata = new HashMap<>();
-            // 与参照实现保持一致：知识标签写入 knowledge 元数据
-            metadata.put("knowledge", entity.getKnowledgeTag());
-            metadata.put("ragName", entity.getRagName());
-            metadata.put("fileId", entity.getId());
-            metadata.put("filename", entity.getFilename());
-            metadata.put("chunkIndex", i);
-            metadata.put("rawContent", rawContent);
-            String embeddingText = "知识库: " + entity.getRagName() + "\n"
-                    + "标签: " + entity.getKnowledgeTag() + "\n"
-                    + "文件: " + entity.getFilename() + "\n"
-                    + "内容: " + rawContent;
-            documents.add(new Document(embeddingText, metadata));
-        }
-        return documents;
-    }
-
-    private void persistVectorStore() {
-        try {
-            Path path = Path.of(vectorStorePath);
-            if (path.getParent() != null) {
-                Files.createDirectories(path.toAbsolutePath().getParent());
+            Object parentId = chunks.get(i).metadata().get("parentId");
+            if (parentId != null && StringUtils.hasText(String.valueOf(parentId))) {
+                parentGroups.computeIfAbsent(String.valueOf(parentId), ignored -> new ArrayList<>())
+                        .add(i);
             }
-            vectorStore.save(path.toFile());
-        } catch (IOException e) {
-            log.error("向量库落盘失败: {}", vectorStorePath, e);
-            throw new BizException("向量库落盘失败: " + e.getMessage());
+        }
+        Map<String, String> physicalParentIds = new LinkedHashMap<>();
+        int parentIndex = 0;
+        for (String logicalParentId : parentGroups.keySet()) {
+            physicalParentIds.put(logicalParentId, entity.getId() + ":parent:" + parentIndex++);
+        }
+
+        ArrayList<KnowledgeChunk> knowledgeChunks = new ArrayList<>(
+                chunks.size() + parentGroups.size());
+        for (int i = 0; i < chunks.size(); i++) {
+            ParsedChunk chunk = chunks.get(i);
+            Map<String, Object> metadata = new LinkedHashMap<>(chunk.metadata());
+            metadata.put("chunkType", "CHILD");
+            Object logicalParentId = metadata.get("parentId");
+            if (logicalParentId != null) {
+                String physicalParentId = physicalParentIds.get(String.valueOf(logicalParentId));
+                if (physicalParentId == null) {
+                    metadata.remove("parentId");
+                } else {
+                    metadata.put("parentId", physicalParentId);
+                }
+            }
+            knowledgeChunks.add(new KnowledgeChunk(
+                    entity.getId() + ":" + i,
+                    entity.getId(),
+                    entity.getRagName(),
+                    entity.getKnowledgeTag(),
+                    entity.getFilename(),
+                    chunk.content(),
+                    i,
+                    metadata));
+        }
+        for (Map.Entry<String, List<Integer>> group : parentGroups.entrySet()) {
+            int firstChildIndex = group.getValue().getFirst();
+            ParsedChunk firstChild = chunks.get(firstChildIndex);
+            Map<String, Object> metadata = new LinkedHashMap<>(firstChild.metadata());
+            metadata.remove("parentId");
+            metadata.put("chunkType", "PARENT");
+            String parentContent = group.getValue().stream()
+                    .map(chunks::get)
+                    .map(ParsedChunk::content)
+                    .collect(Collectors.joining("\n"));
+            knowledgeChunks.add(new KnowledgeChunk(
+                    physicalParentIds.get(group.getKey()),
+                    entity.getId(),
+                    entity.getRagName(),
+                    entity.getKnowledgeTag(),
+                    entity.getFilename(),
+                    parentContent,
+                    firstChildIndex,
+                    metadata));
+        }
+        return List.copyOf(knowledgeChunks);
+    }
+
+    private void cleanupIndex(Long fileId) {
+        try {
+            knowledgeIndexRepository.deleteByFileId(fileId);
+        } catch (Exception e) {
+            log.warn("清理失败知识索引时出错: fileId={}", fileId, e);
         }
     }
 
-    /**
-     * 索引失败回滚：删除本次上传的 rag_file 记录，列表只保留索引成功的文件。
-     * 删除失败时兜底标记 FAILED，避免记录悬在 PARSING。
-     */
-    private void rollbackRecord(RagFileEntity entity, RuntimeException e) {
+    private void markFailed(RagFileEntity entity, RuntimeException e) {
         try {
-            ragFileRepository.delete(entity);
-            log.warn("知识库文件索引失败，已回滚记录: file={}, reason={}", entity.getFilename(), e.getMessage());
+            entity.setStatus(ParseStatus.FAILED);
+            ragFileRepository.save(entity);
         } catch (Exception ex) {
-            log.error("回滚失败记录时出错，降级标记 FAILED: {}", entity.getFilename(), ex);
-            try {
-                entity.setStatus(ParseStatus.FAILED);
-                ragFileRepository.save(entity);
-            } catch (Exception suppressed) {
-                log.warn("标记失败状态时出错: {}", entity.getFilename(), suppressed);
-            }
+            log.warn("标记失败状态时出错: {}", entity.getFilename(), ex);
         }
     }
 

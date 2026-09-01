@@ -130,7 +130,8 @@ Response `data`:
 | `.xlsx` | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
 | `.csv` | `text/csv` |
 
-- 同步处理：解析 → 分块（`fileagent.chunk-size` / `chunk-overlap`）→ embedding → 写入向量库（`fileagent.vector-store-path`），并落库 `rag_file` 记录
+- 同步处理：原件落盘（`fileagent.storage-dir`，记录 `storage_path` + `sha256`）→ 解析 → 分块（`fileagent.chunk-size` / `chunk-overlap`）→ embedding → 写入向量库（`fileagent.vector-store-path`），并落库 `rag_file` 记录
+- 文件本体持久化：原件保存到 `storage/files/日期/文件名`，`rag_file` 表回填 `storage_path`/`sha256`；索引失败时整体回滚（删除记录与已落盘原件），列表只保留索引成功的文件
 - chunk 元数据：`knowledge`=tag、`ragName`=name、`fileId`、`filename`、`chunkIndex`；检索为全局范围，不按标签过滤
 
 Response:
@@ -164,7 +165,7 @@ Response `data`: `RagFileSummary[]`
 
 ## 3.5 模型 Provider 配置（前端模型设置）
 
-聊天模型的多套配置管理：新增/列表/启用（热切换，无需重启）/删除/连通性测试。所有厂商走 OpenAI 兼容协议。
+聊天模型的多套配置管理：新增/列表/编辑/启用（热切换，无需重启）/删除/连通性测试。所有厂商走 OpenAI 兼容协议。
 API Key 安全约定：提交明文 → AES-GCM 加密落 H2（主密钥在 `storage/secret.key`，不进仓库）；**接口只回掩码（`****尾4位`），明文永不出后端**。
 回落语义：无任何启用配置时，聊天模型回落到 application.yml + 环境变量配置的默认模型。
 
@@ -206,17 +207,27 @@ Response `data`: `ModelProviderSummary[]`
 
 Response `data`: `ModelProviderSummary`（同 3.5.1）
 
-### 3.5.3 启用配置（热切换）
+### 3.5.3 编辑配置
+`PUT /api/model-providers/{id}`
+
+请求体同 3.5.2，差异：
+- `apiKey` **留空（null/空串）表示保留原 key**；填写则重新加密覆盖
+- `baseUrl` 为空时改用所选厂商默认端点（`CUSTOM` 必填）
+- 编辑启用中的配置会热切换聊天模型（实例缓存先失效再重建）
+
+Response `data`: `ModelProviderSummary`（同 3.5.1）
+
+### 3.5.4 启用配置（热切换）
 `PUT /api/model-providers/{id}/activate`
 
 原启用配置自动停用，聊天模型立即切换（不影响进行中的请求）。Response `data`: `true`
 
-### 3.5.4 连通性测试
+### 3.5.5 连通性测试
 `POST /api/model-providers/{id}/test`
 
 用存储的 key 发起一次最小真实调用。成功 Response `data`: `"连通正常，耗时 1234ms，模型回复: 正常"`；失败返回 `code=400` + 原因（如 key 无效/网络不通）。
 
-### 3.5.5 删除配置
+### 3.5.6 删除配置
 `DELETE /api/model-providers/{id}`
 
 删除启用中的配置时，聊天模型自动回落默认（环境变量）。Response `data`: `true`

@@ -1,5 +1,7 @@
 package com.demetrius.fileagent.document.infrastructure;
 
+import com.demetrius.fileagent.document.domain.ParsedChunk;
+
 import java.nio.file.Path;
 import java.util.List;
 
@@ -14,6 +16,13 @@ public interface DocumentParser {
 
     /** 解析为若干文本块（chunk） */
     List<String> parse(Path file, String mimeType);
+
+    /** 解析为带结构化元数据的知识块，普通解析器默认只提供正文。 */
+    default List<ParsedChunk> parseChunks(Path file, String mimeType) {
+        return parse(file, mimeType).stream()
+                .map(ParsedChunk::text)
+                .toList();
+    }
 
     /**
      * 从文件内容抽取内容级元数据（标题/作者/页数等）。默认返回空，

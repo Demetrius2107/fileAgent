@@ -41,8 +41,8 @@ fileAgent/
 ├── fileagent-document/            ✅ 文档域
 │   ├── interfaces/                   FileController / RagFileController（已实现）
 │   ├── application/                  DocumentAppService（接口）/ RagFileAppService + RagFileAppServiceImpl（已实现）
-│   ├── domain/                       DocumentEntity / DocumentRepository / RagFileEntity / RagFileRepository
-│   └── infrastructure/               DocumentJpaRepository / RagFileJpaRepository / RagFileRepositoryImpl / KnowledgeSearchPortImpl / 解析器（TXT/MD/PDF/Word/Excel/CSV）/ VectorStoreConfig
+│   ├── domain/                       DocumentEntity / RagFileEntity / KnowledgeChunk / KnowledgeIndexRepository
+│   └── infrastructure/               JPA 实现 / Elasticsearch 索引与混合检索 / 解析器（TXT/MD/PDF/Word/Excel/CSV）
 │
 ├── fileagent-chat/                ✅ 对话/推理域（核心域，M2 RAG 流式闭环已实现）
 │   ├── interfaces/                   ChatController（SSE 流式，已实现）
@@ -108,6 +108,8 @@ fileagent-starter → 全部业务域
 | session | api + web + data-jpa + h2(runtime) |
 | document | api + web + data-jpa + spring-ai-openai + spring-ai-vector-store + pdfbox + poi-ooxml + h2(runtime) |
 | chat | api + web + webflux（流式调用）+ spring-ai-openai + spring-ai-starter-model-deepseek + spring-ai-starter-model-openai（多 Provider 动态构建）+ data-jpa（模型配置实体）+ reactor-test(test) |
+| document | api + web + data-jpa + spring-ai-openai + Elasticsearch Java Client + pdfbox + poi-ooxml + h2(runtime) |
+| chat | api + web + webflux（流式调用）+ spring-ai-openai + reactor-test(test) |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
 | starter | 全部业务域 + h2(runtime) + springdoc |
 
@@ -117,7 +119,7 @@ fileagent-starter → 全部业务域
 | `org.apache.tika` | 统一解析兜底 | M2 |
 | `net.sourceforge.tess4j` | OCR | M2 |
 | `org.graalvm.polyglot` | 代码沙箱 | M3 |
-| `spring-ai-vector-store-*` | 生产向量库 | M4 |
+| `testcontainers-elasticsearch` | Elasticsearch 集成测试 | M2 |
 
 > pdfbox / poi-ooxml 在 M1 提前引入（F1.2 需支持 PDF/DOCX/XLSX/CSV），版本由 parent `pom.xml` 统一管理。
 
@@ -129,9 +131,8 @@ fileagent-starter → 全部业务域
 | `spring.ai.openai.base-url` | `${FILEAGENT_AI_BASE_URL}` | ❌ 按需 |
 | `spring.datasource.url` | H2 文件库 `./storage/db` | ✅ |
 | `fileagent.storage-dir` | 上传文件目录 | ✅ 目录在 .gitignore |
-| `fileagent.vector-store-path` | 向量库 JSON 文件 | ✅ 目录在 .gitignore |
-| `fileagent.retrieval-top-k` | RAG 召回条数 | ✅ |
-| `fileagent.retrieval-similarity-threshold` | RAG 相似度阈值 | ✅ |
+| `spring.elasticsearch.*` | Elasticsearch 地址与凭证（环境变量注入） | ❌ 凭证严禁提交 |
+| `fileagent.elasticsearch.*` | 索引别名、BM25/KNN/RRF 与结果数量 | ✅ |
 | `fileagent.chat-history-limit` | 对话注入的历史条数（取最后 N 条） | ✅ |
 
 ## 6. 两人分工建议（按里程碑）

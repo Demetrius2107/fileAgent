@@ -45,6 +45,12 @@ spring:
     multipart:
       max-file-size: 50MB
       max-request-size: 100MB
+  elasticsearch:
+    uris: ${FILEAGENT_ELASTICSEARCH_URIS:http://localhost:9200}
+    username: ${FILEAGENT_ELASTICSEARCH_USERNAME:}
+    password: ${FILEAGENT_ELASTICSEARCH_PASSWORD:}
+    connection-timeout: 5s
+    socket-timeout: 30s
 
 # 业务配置
 fileagent:
@@ -56,6 +62,23 @@ fileagent:
   chat-history-limit: 10
   chunk-size: 800
   chunk-overlap: 120
+  elasticsearch:
+    index-alias: ${FILEAGENT_ELASTICSEARCH_INDEX_ALIAS:fileagent-knowledge}
+    physical-index: ${FILEAGENT_ELASTICSEARCH_PHYSICAL_INDEX:fileagent-knowledge-v1}
+    dimensions: ${FILEAGENT_EMBEDDING_DIMENSIONS:1024}
+    embedding-batch-size: ${FILEAGENT_EMBEDDING_BATCH_SIZE:10}
+    bm25-top-k: 50
+    knn-top-k: 50
+    knn-candidates: 100
+    rrf-rank-constant: 60
+    final-top-k: 12
+  reranker:
+    enabled: ${FILEAGENT_RERANKER_ENABLED:false}
+    base-url: ${FILEAGENT_RERANKER_BASE_URL:}
+    api-key: ${FILEAGENT_RERANKER_API_KEY:${FILEAGENT_EMBEDDING_API_KEY:}}
+    model: ${FILEAGENT_RERANKER_MODEL:qwen3-rerank}
+    candidate-top-k: 50
+    top-n: 12
 
 # Swagger
 springdoc:

@@ -20,7 +20,31 @@ public interface KnowledgeSearchPort {
      */
     List<KnowledgeHit> search(String query);
 
-    /** 知识命中（不暴露向量库 Document 结构） */
-    record KnowledgeHit(String content, String filename) {
+    /**
+     * 按文本与结构化条件检索知识片段。默认实现兼容仅支持语义检索的适配器。
+     */
+    default List<KnowledgeHit> search(SearchQuery query) {
+        return search(query.text());
+    }
+
+    /** 通用检索条件。 */
+    record SearchQuery(String text, String ragName, String knowledgeTag, Long fileId) {
+
+        public static SearchQuery of(String text) {
+            return new SearchQuery(text, null, null, null);
+        }
+    }
+
+    /** 知识命中，不暴露 Elasticsearch SDK 类型。 */
+    record KnowledgeHit(
+            String chunkId,
+            Long fileId,
+            String content,
+            String filename,
+            String sheetName,
+            String sectionId,
+            String parentId,
+            int chunkIndex,
+            double score) {
     }
 }

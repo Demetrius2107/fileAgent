@@ -141,6 +141,52 @@ class ModelConfigAppServiceImplTest {
                 .hasMessageContaining("连接失败");
     }
 
+    @Test
+    void updateShouldReEncryptNewKeyAndHotRefreshActiveConfig() {
+        ModelConfigEntity active = entity(1L, true);
+        when(modelConfigRepository.findById(1L)).thenReturn(Optional.of(active));
+        when(aesGcmCipher.encrypt("sk-new")).thenReturn("cipher-new");
+        when(modelConfigRepository.save(any(ModelConfigEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(aesGcmCipher.decrypt("cipher-new")).thenReturn("sk-new");
+        ChatModel model = mock(ChatModel.class);
+        when(chatModelFactory.create(active, "sk-new")).thenReturn(model);
+
+        modelConfigAppService.update(1L,
+                new SaveModelProviderReq(ModelProvider.ZHIPU, null, "sk-new", "glm-4.6", 0.7));
+
+        // 新 key 加密覆盖，厂商默认端点回填，实例缓存先失效再热切换
+        assertThat(active.getApiKeyCipher()).isEqualTo("cipher-new");
+        assertThat(active.getBaseUrl()).isEqualTo(ModelProvider.ZHIPU.getDefaultBaseUrl());
+        assertThat(active.getChatModel()).isEqualTo("glm-4.6");
+        assertThat(active.getTemperature()).isEqualTo(0.7);
+        verify(chatModelFactory).evict(1L);
+        verify(streamingChatClient).refresh(model);
+    }
+
+    @Test
+    void updateWithBlankKeyShouldKeepCipherAndRefreshInactiveConfig() {
+        ModelConfigEntity inactive = entity(2L, false);
+        when(modelConfigRepository.findById(2L)).thenReturn(Optional.of(inactive));
+        when(modelConfigRepository.save(any(ModelConfigEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        modelConfigAppService.update(2L,
+                new SaveModelProviderReq(ModelProvider.DEEPSEEK, null, " ", "deepseek-chat", null));
+
+        // key 留空 = 保留原密文；非启用配置不触发热切换
+        assertThat(inactive.getApiKeyCipher()).isEqualTo("cipher-2");
+        verify(chatModelFactory).evict(2L);
+        verify(streamingChatClient, never()).refresh(any());
+    }
+
+    @Test
+    void updateShouldRejectBlankChatModel() {
+        assertThatThrownBy(() -> modelConfigAppService.update(1L,
+                new SaveModelProviderReq(ModelProvider.DEEPSEEK, null, "sk-x", " ", null)))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("模型名");
+        verify(modelConfigRepository, never()).save(any());
+    }
+
     private ModelConfigEntity entity(Long id, boolean active) {
         ModelConfigEntity entity = new ModelConfigEntity();
         entity.setId(id);

@@ -34,6 +34,11 @@ public class ModelConfigController {
         return ApiResult.ok(modelConfigAppService.save(req));
     }
 
+    @PutMapping("/{id}")
+    public ApiResult<ModelProviderSummary> update(@PathVariable Long id, @RequestBody SaveModelProviderReq req) {
+        return ApiResult.ok(modelConfigAppService.update(id, req));
+    }
+
     @PutMapping("/{id}/activate")
     public ApiResult<Boolean> activate(@PathVariable Long id) {
         modelConfigAppService.activate(id);

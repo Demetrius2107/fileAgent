@@ -75,6 +75,44 @@ public class ModelConfigAppServiceImpl implements ModelConfigAppService {
 
     @Override
     @Transactional
+    public ModelProviderSummary update(Long id, SaveModelProviderReq req) {
+        if (req.provider() == null) {
+            throw new BizException("请选择模型厂商");
+        }
+        if (!StringUtils.hasText(req.chatModel())) {
+            throw new BizException("模型名不能为空");
+        }
+        String baseUrl = StringUtils.hasText(req.baseUrl())
+                ? req.baseUrl()
+                : req.provider().getDefaultBaseUrl();
+        if (!StringUtils.hasText(baseUrl)) {
+            throw new BizException("自定义 Provider 必须填写 base-url");
+        }
+        ModelConfigEntity entity = modelConfigRepository.findById(id)
+                .orElseThrow(() -> new BizException(404, "模型配置不存在: " + id));
+        entity.setProvider(req.provider());
+        entity.setBaseUrl(baseUrl);
+        entity.setChatModel(req.chatModel());
+        entity.setTemperature(req.temperature());
+        // key 留空表示保留原密文；填写则重新加密覆盖
+        boolean keyUpdated = StringUtils.hasText(req.apiKey());
+        if (keyUpdated) {
+            entity.setApiKeyCipher(aesGcmCipher.encrypt(req.apiKey()));
+        }
+        ModelConfigEntity saved = modelConfigRepository.save(entity);
+        // 实例按配置 id 缓存，字段或 key 变更后必须先失效再重建
+        chatModelFactory.evict(id);
+        if (saved.isActive()) {
+            String plain = aesGcmCipher.decrypt(saved.getApiKeyCipher());
+            streamingChatClient.refresh(chatModelFactory.create(saved, plain));
+        }
+        log.info("编辑模型配置: id={}, provider={}, model={}, keyUpdated={}, active={}",
+                id, saved.getProvider(), saved.getChatModel(), keyUpdated, saved.isActive());
+        return toSummary(saved);
+    }
+
+    @Override
+    @Transactional
     public void activate(Long id) {
         ModelConfigEntity target = modelConfigRepository.findById(id)
                 .orElseThrow(() -> new BizException(404, "模型配置不存在: " + id));

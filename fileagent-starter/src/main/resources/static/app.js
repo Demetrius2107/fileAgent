@@ -37,11 +37,15 @@
     const baseUrlInput = $('base-url-input');
     const apiKeyInput = $('api-key-input');
     const modelNameInput = $('model-name-input');
+    const temperatureInput = $('temperature-input');
     const modelConfigError = $('model-config-error');
+    const modelConfigSaveButton = $('model-config-save');
 
     let currentSessionId = null;
     let abortController = null;
     let streaming = false;
+    /* 当前正在编辑的模型配置 id；null 表示表单处于"新建"模式 */
+    let editingConfigId = null;
 
     /* ---------- 通用 ---------- */
 
@@ -384,6 +388,10 @@
             });
             actions.appendChild(activateButton);
         }
+        const editButton = el('button', 'mini-button', '编辑');
+        editButton.type = 'button';
+        editButton.addEventListener('click', () => { startEdit(config); });
+        actions.appendChild(editButton);
         const testButton = el('button', 'mini-button', '测试');
         testButton.type = 'button';
         testButton.addEventListener('click', async () => {
@@ -422,30 +430,82 @@
 
     $('model-config-cancel').addEventListener('click', () => { modelSettingsDialog.close(); });
 
+    /* Esc 关闭对话框时同样退出编辑态，避免残留状态污染下次新建 */
+    modelSettingsDialog.addEventListener('close', resetEditMode);
+
+    function startEdit(config) {
+        editingConfigId = config.id;
+        providerSelect.value = config.provider;
+        baseUrlInput.value = config.baseUrl || '';
+        apiKeyInput.value = '';
+        apiKeyInput.required = false;
+        apiKeyInput.placeholder = '留空表示保留原 Key';
+        modelNameInput.value = config.chatModel || '';
+        temperatureInput.value = config.temperature == null ? '' : config.temperature;
+        modelConfigSaveButton.textContent = '更新配置';
+        showModelConfigHint(`正在编辑 ${PROVIDER_NAMES[config.provider] || config.provider} / ${config.chatModel}，修改后点击"更新配置"`, true);
+    }
+
+    function resetEditMode() {
+        editingConfigId = null;
+        apiKeyInput.required = true;
+        apiKeyInput.placeholder = 'sk-...';
+        modelConfigSaveButton.textContent = '保存配置';
+    }
+
+    function parseTemperature() {
+        const raw = temperatureInput.value.trim();
+        if (!raw) { return null; }
+        const value = Number(raw);
+        return Number.isFinite(value) ? value : null;
+    }
+
     modelSettingsForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         const provider = providerSelect.value;
         const apiKey = apiKeyInput.value;
         const chatModel = modelNameInput.value.trim();
-        if (!provider || !apiKey || !chatModel) {
-            showModelConfigHint('请选择厂商并填写 API Key 和模型名', false);
+        if (!provider || !chatModel) {
+            showModelConfigHint('请选择厂商并填写模型名', false);
             return;
         }
+        if (!editingConfigId && !apiKey) {
+            showModelConfigHint('请填写 API Key', false);
+            return;
+        }
+        const wasEdit = !!editingConfigId;
+        const payload = {
+            provider,
+            baseUrl: baseUrlInput.value.trim() || null,
+            apiKey: apiKey || null,
+            chatModel,
+            temperature: parseTemperature()
+        };
         try {
-            const saved = await api('/api/model-providers', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    provider,
-                    baseUrl: baseUrlInput.value.trim() || null,
-                    apiKey,
-                    chatModel,
-                    temperature: null
-                })
-            });
-            apiKeyInput.value = '';
+            let saved;
+            if (wasEdit) {
+                saved = await api(`/api/model-providers/${editingConfigId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } else {
+                saved = await api('/api/model-providers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }
+            modelSettingsForm.reset();
+            resetEditMode();
             await loadModelConfigs();
-            showModelConfigHint(saved.active ? `已保存并启用 ${PROVIDER_NAMES[provider]} / ${saved.chatModel}` : '配置已保存（未启用）', true);
+            if (!wasEdit && saved.active) {
+                showModelConfigHint(`已保存并启用 ${PROVIDER_NAMES[provider]} / ${saved.chatModel}`, true);
+            } else if (!wasEdit) {
+                showModelConfigHint('配置已保存（未启用）', true);
+            } else {
+                showModelConfigHint(`配置已更新：${PROVIDER_NAMES[saved.provider] || saved.provider} / ${saved.chatModel}${saved.active ? '（已热切换生效）' : ''}`, true);
+            }
         } catch (e) {
             showModelConfigHint(e.message, false);
         }

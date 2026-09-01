@@ -17,6 +17,12 @@ public interface ModelConfigAppService {
     /** 新增配置（key 加密入库；库内无启用配置时本套自动启用） */
     ModelProviderSummary save(SaveModelProviderReq req);
 
+    /**
+     * 编辑已有配置（厂商/base-url/模型名/温度；key 留空表示保留原 key）。
+     * 编辑启用中的配置会热切换聊天模型。
+     */
+    ModelProviderSummary update(Long id, SaveModelProviderReq req);
+
     /** 启用指定配置并热切换聊天模型（原启用配置自动置为停用） */
     void activate(Long id);
 

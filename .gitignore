@@ -29,6 +29,8 @@ logs/
 .env
 *.local.yml
 application-local.yml
+# 本地私有覆盖配置（真实 API Key 只放这里，绝不进仓库）
+config/
 
 # ===== OS =====
 Thumbs.db

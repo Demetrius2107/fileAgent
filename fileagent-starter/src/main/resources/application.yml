@@ -55,6 +55,10 @@ spring:
 # 业务配置
 fileagent:
   storage-dir: ./storage/files
+  vector-store-path: ./storage/vectorstore.json
+  secret-key-path: ./storage/secret.key
+  retrieval-top-k: 12
+  retrieval-similarity-threshold: 0.55
   chat-history-limit: 10
   chunk-size: 800
   chunk-overlap: 120

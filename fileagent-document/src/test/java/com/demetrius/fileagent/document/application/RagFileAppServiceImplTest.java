@@ -3,43 +3,44 @@ package com.demetrius.fileagent.document.application;
 import com.demetrius.fileagent.api.dto.RagFileSummary;
 import com.demetrius.fileagent.api.enums.ParseStatus;
 import com.demetrius.fileagent.common.exception.BizException;
+import com.demetrius.fileagent.document.domain.KnowledgeChunk;
+import com.demetrius.fileagent.document.domain.KnowledgeIndexRepository;
+import com.demetrius.fileagent.document.domain.ParsedChunk;
 import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import com.demetrius.fileagent.document.infrastructure.DocumentParser;
 import com.demetrius.fileagent.document.infrastructure.DocumentParserRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.document.Document;
 import org.springframework.mock.web.MockMultipartFile;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link RagFileAppServiceImpl} 用例测试：MIME 路由、未知格式拒绝与列表映射。
+ * {@link RagFileAppServiceImpl} 用例测试。
  *
  * @author raosaijie
- * @since 0.1.0
- * @date 2026-08-26
  */
 @ExtendWith(MockitoExtension.class)
 class RagFileAppServiceImplTest {
@@ -51,13 +52,10 @@ class RagFileAppServiceImplTest {
     private RagFileRepository ragFileRepository;
 
     @Mock
-    private org.springframework.ai.vectorstore.SimpleVectorStore vectorStore;
+    private KnowledgeIndexRepository knowledgeIndexRepository;
 
     @InjectMocks
     private RagFileAppServiceImpl ragFileAppService;
-
-    @TempDir
-    Path tempDir;
 
     @ParameterizedTest
     @CsvSource({
@@ -72,10 +70,9 @@ class RagFileAppServiceImplTest {
     void storeRagFileShouldRouteByExtensionToExactMime(String filename, String expectedMime) {
         stubSuccessSave();
         DocumentParser parser = mock(DocumentParser.class);
-        when(parser.parse(any(Path.class), anyString())).thenReturn(List.of("知识片段"));
+        when(parser.parseChunks(any(Path.class), anyString()))
+                .thenReturn(List.of(ParsedChunk.text("知识片段")));
         when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
-        ReflectionTestUtils.setField(ragFileAppService, "vectorStorePath",
-                tempDir.resolve("vectorstore.json").toString());
 
         ragFileAppService.storeRagFile("员工知识库", "制度",
                 List.of(new MockMultipartFile("files", filename, null, "内容".getBytes())));
@@ -88,8 +85,6 @@ class RagFileAppServiceImplTest {
     @Test
     void storeRagFileShouldRejectUnknownExtensionWithBizError() {
         stubSuccessSave();
-        ReflectionTestUtils.setField(ragFileAppService, "vectorStorePath",
-                tempDir.resolve("vectorstore.json").toString());
 
         assertThatThrownBy(() -> ragFileAppService.storeRagFile("员工知识库", "制度",
                 List.of(new MockMultipartFile("files", "virus.exe", null, "内容".getBytes()))))
@@ -97,31 +92,59 @@ class RagFileAppServiceImplTest {
                 .hasMessageContaining("不支持");
 
         verify(parserRegistry, never()).findParser(anyString());
+        verify(knowledgeIndexRepository).deleteByFileId(100L);
     }
 
     @Test
-    void storeRagFileShouldEmbedSemanticContextAndKeepRawContent() {
+    void storeRagFileShouldWriteDeterministicChunksAndKeepGenericMetadata() {
         stubSuccessSave();
         DocumentParser parser = mock(DocumentParser.class);
-        String rawContent = "[OKR] Objective 1 | 快递产品线需求日常开发维护";
-        when(parser.parse(any(Path.class), anyString())).thenReturn(List.of(rawContent));
+        ParsedChunk chunk = new ParsedChunk(
+                "[目标表] 姓名: 张三 | 目标: 完成系统升级 | 权重: 40%",
+                Map.of("sourceType", "xlsx", "sheetName", "目标表",
+                        "rowIndex", 2, "sectionId", "sheet-0-section-0"));
+        when(parser.parseChunks(any(Path.class), anyString())).thenReturn(List.of(chunk));
         when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
-        ReflectionTestUtils.setField(ragFileAppService, "vectorStorePath",
-                tempDir.resolve("vectorstore.json").toString());
 
-        ragFileAppService.storeRagFile("个人年度目标", "OKR",
-                List.of(new MockMultipartFile("files", "2025OKR-饶赛杰.xlsx", null, "内容".getBytes())));
+        ragFileAppService.storeRagFile("年度计划", "目标",
+                List.of(new MockMultipartFile("files", "2026-张三.xlsx", null, "内容".getBytes())));
 
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<Document>> captor = ArgumentCaptor.forClass(List.class);
-        verify(vectorStore).accept(captor.capture());
-        Document document = captor.getValue().getFirst();
-        assertThat(document.getText())
-                .contains("知识库: 个人年度目标")
-                .contains("标签: OKR")
-                .contains("文件: 2025OKR-饶赛杰.xlsx")
-                .contains("内容: " + rawContent);
-        assertThat(document.getMetadata().get("rawContent")).isEqualTo(rawContent);
+        ArgumentCaptor<List<KnowledgeChunk>> captor = ArgumentCaptor.forClass(List.class);
+        verify(knowledgeIndexRepository).saveAll(captor.capture());
+        KnowledgeChunk indexed = captor.getValue().getFirst();
+        assertThat(indexed.chunkId()).isEqualTo("100:0");
+        assertThat(indexed.fileId()).isEqualTo(100L);
+        assertThat(indexed.ragName()).isEqualTo("年度计划");
+        assertThat(indexed.knowledgeTag()).isEqualTo("目标");
+        assertThat(indexed.filename()).isEqualTo("2026-张三.xlsx");
+        assertThat(indexed.metadata())
+                .containsEntry("sourceType", "xlsx")
+                .containsEntry("sheetName", "目标表")
+                .containsEntry("rowIndex", 2)
+                .containsEntry("sectionId", "sheet-0-section-0")
+                .doesNotContainKeys("person", "year", "contentType");
+    }
+
+    @Test
+    void storeRagFileShouldCleanupIndexAndMarkFailedWhenIndexingFails() {
+        stubSuccessSave();
+        DocumentParser parser = mock(DocumentParser.class);
+        when(parser.parseChunks(any(Path.class), anyString()))
+                .thenReturn(List.of(ParsedChunk.text("知识片段")));
+        when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
+        doThrow(new IllegalStateException("ES unavailable"))
+                .when(knowledgeIndexRepository).saveAll(any());
+
+        assertThatThrownBy(() -> ragFileAppService.storeRagFile("员工知识库", "制度",
+                List.of(new MockMultipartFile("files", "manual.txt", null, "内容".getBytes()))))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("文件分块/索引失败");
+
+        verify(knowledgeIndexRepository).deleteByFileId(100L);
+        ArgumentCaptor<RagFileEntity> captor = ArgumentCaptor.forClass(RagFileEntity.class);
+        verify(ragFileRepository, atLeast(2)).save(captor.capture());
+        assertThat(captor.getAllValues().getLast().getStatus()).isEqualTo(ParseStatus.FAILED);
     }
 
     @Test

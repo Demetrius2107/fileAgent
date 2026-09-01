@@ -32,7 +32,7 @@ class RagPromptBuilderTest {
                 new MessageDto(2L, 1L, MessageType.ASSISTANT, "之前的回答", null, "2026-08-26T10:01")
         );
         List<KnowledgeSearchPort.KnowledgeHit> hits = List.of(
-                new KnowledgeSearchPort.KnowledgeHit("知识片段正文", "员工手册.pdf"));
+                hit("知识片段正文", "员工手册.pdf", "制度", 3));
 
         Prompt prompt = ragPromptBuilder.build(history, hits, "年假如何申请？");
 
@@ -49,19 +49,19 @@ class RagPromptBuilderTest {
     @Test
     void buildShouldEmbedKnowledgeWithContextMarkers() {
         List<KnowledgeSearchPort.KnowledgeHit> hits = List.of(
-                new KnowledgeSearchPort.KnowledgeHit("知识片段正文", "员工手册.pdf"));
+                hit("知识片段正文", "员工手册.pdf", "制度", 3));
 
         Prompt prompt = ragPromptBuilder.build(List.of(), hits, "年假如何申请？");
 
         String userContent = prompt.getInstructions().get(1).getText();
         assertThat(userContent)
                 .contains("参考资料：")
-                .contains("[来源: 员工手册.pdf]")
+                .contains("[来源: 员工手册.pdf；Sheet: 制度；片段: 3]")
                 .contains("知识片段正文")
                 .contains("用户问题：")
                 .contains("年假如何申请？");
         int referenceIndex = userContent.indexOf("参考资料：");
-        int sourceIndex = userContent.indexOf("[来源: 员工手册.pdf]");
+        int sourceIndex = userContent.indexOf("[来源: 员工手册.pdf");
         int questionIndex = userContent.indexOf("用户问题：");
         assertThat(referenceIndex).isZero();
         assertThat(sourceIndex).isGreaterThan(referenceIndex);
@@ -71,16 +71,16 @@ class RagPromptBuilderTest {
     @Test
     void buildShouldIncludeEveryHitWithItsOwnSourceMarker() {
         List<KnowledgeSearchPort.KnowledgeHit> hits = List.of(
-                new KnowledgeSearchPort.KnowledgeHit("片段一", "手册.pdf"),
-                new KnowledgeSearchPort.KnowledgeHit("片段二", "制度.docx"));
+                hit("片段一", "手册.pdf", null, 0),
+                hit("片段二", "制度.docx", null, 1));
 
         Prompt prompt = ragPromptBuilder.build(List.of(), hits, "问题");
 
         String userContent = prompt.getInstructions().get(1).getText();
         assertThat(userContent)
-                .contains("[来源: 手册.pdf]")
+                .contains("[来源: 手册.pdf；片段: 0]")
                 .contains("片段一")
-                .contains("[来源: 制度.docx]")
+                .contains("[来源: 制度.docx；片段: 1]")
                 .contains("片段二");
     }
 
@@ -105,5 +105,12 @@ class RagPromptBuilderTest {
                 .contains("不得编造")
                 .contains("完整性")
                 .contains("全部");
+    }
+
+    private KnowledgeSearchPort.KnowledgeHit hit(
+            String content, String filename, String sheetName, int chunkIndex) {
+        return new KnowledgeSearchPort.KnowledgeHit(
+                "1:" + chunkIndex, 1L, content, filename,
+                sheetName, "section", chunkIndex, 1.0);
     }
 }

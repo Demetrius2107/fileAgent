@@ -15,14 +15,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Agentic RAG 流式聊天编排：检索规划 -> 最多两轮检索 -> Prompt 组装 -> 模型回答 -> 落库。
+ * RAG 流式聊天编排：检索规划 -> 混合检索 -> Prompt 组装 -> 模型回答 -> 落库。
  *
  * @author raosaijie
  * @since 0.1.0
@@ -71,7 +69,7 @@ public class ChatAppServiceImpl implements ChatAppService {
         RagRetrievalPlanner.RetrievalPlan retrievalPlan = ragRetrievalPlanner.plan(history, prompt);
         List<KnowledgeSearchPort.KnowledgeHit> hits;
         try {
-            hits = retrieveKnowledge(prompt, retrievalPlan);
+            hits = retrieveKnowledge(retrievalPlan);
         } catch (Exception e) {
             log.warn("知识检索失败: sessionId={}", sessionId, e);
             return Flux.just(ChatStreamEvent.error(CODE_KNOWLEDGE_SEARCH_FAILED, "知识检索失败，请稍后重试"));
@@ -116,32 +114,12 @@ public class ChatAppServiceImpl implements ChatAppService {
     }
 
     private List<KnowledgeSearchPort.KnowledgeHit> retrieveKnowledge(
-            String question, RagRetrievalPlanner.RetrievalPlan plan) {
+            RagRetrievalPlanner.RetrievalPlan plan) {
         if (!plan.needRetrieval()) {
             return List.of();
         }
-        List<KnowledgeSearchPort.KnowledgeHit> firstHits = knowledgeSearchPort.search(plan.standaloneQuery());
-        return ragRetrievalPlanner.retryQuery(question, plan, firstHits)
-                .map(retryQuery -> mergeRetryHits(firstHits, retryQuery))
-                .orElse(firstHits);
-    }
-
-    private List<KnowledgeSearchPort.KnowledgeHit> mergeRetryHits(
-            List<KnowledgeSearchPort.KnowledgeHit> firstHits, String retryQuery) {
-        try {
-            List<KnowledgeSearchPort.KnowledgeHit> retryHits = knowledgeSearchPort.search(retryQuery);
-            Map<String, KnowledgeSearchPort.KnowledgeHit> uniqueHits = new LinkedHashMap<>();
-            for (KnowledgeSearchPort.KnowledgeHit hit : firstHits) {
-                uniqueHits.put(hit.filename() + "\n" + hit.content(), hit);
-            }
-            for (KnowledgeSearchPort.KnowledgeHit hit : retryHits) {
-                uniqueHits.putIfAbsent(hit.filename() + "\n" + hit.content(), hit);
-            }
-            return List.copyOf(uniqueHits.values());
-        } catch (Exception e) {
-            log.warn("补检索失败，继续使用首轮结果: retryQuery={}", retryQuery, e);
-            return firstHits;
-        }
+        return knowledgeSearchPort.search(new KnowledgeSearchPort.SearchQuery(
+                plan.standaloneQuery(), plan.answerMode(), null, null, null));
     }
 
     private List<MessageDto> tail(List<MessageDto> messages, int limit) {

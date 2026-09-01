@@ -59,7 +59,11 @@ public class RagPromptBuilder {
         }
         StringBuilder content = new StringBuilder("参考资料：\n");
         for (KnowledgeSearchPort.KnowledgeHit hit : hits) {
-            content.append("[来源: ").append(hit.filename()).append("]\n")
+            content.append("[来源: ").append(hit.filename());
+            if (hit.sheetName() != null) {
+                content.append("；Sheet: ").append(hit.sheetName());
+            }
+            content.append("；片段: ").append(hit.chunkIndex()).append("]\n")
                     .append(hit.content()).append("\n\n");
         }
         content.append("用户问题：\n").append(question);

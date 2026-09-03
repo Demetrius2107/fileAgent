@@ -24,7 +24,7 @@
 **文件：**
 - 修改：`fileagent-document/src/test/java/com/demetrius/fileagent/document/infrastructure/DashScopeKnowledgeRerankerTest.java`
 
-- [ ] **步骤 1：添加低分过滤测试**
+- [x] **步骤 1：添加低分过滤测试**
 
 新增测试，模拟 reranker 返回 `0.92`、`0.20`、`0.19`，并验证默认阈值 `0.20` 保留前两条：
 
@@ -51,7 +51,7 @@ void rerankShouldFilterScoresBelowMinimumAndKeepBoundary() {
 }
 ```
 
-- [ ] **步骤 2：添加全部低于阈值时返回空列表的测试**
+- [x] **步骤 2：添加全部低于阈值时返回空列表的测试**
 
 模拟有效响应只包含 `0.19`，验证结果为空而不是错误降级回原候选：
 
@@ -59,7 +59,7 @@ void rerankShouldFilterScoresBelowMinimumAndKeepBoundary() {
 assertThat(reranker.rerank("无答案问题", List.of(hit("A")))).isEmpty();
 ```
 
-- [ ] **步骤 3：运行测试并确认先失败**
+- [x] **步骤 3：运行测试并确认先失败**
 
 运行：
 
@@ -82,7 +82,7 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
 - 修改：`fileagent-document/src/main/java/com/demetrius/fileagent/document/infrastructure/DashScopeKnowledgeReranker.java`
 - 测试：`fileagent-document/src/test/java/com/demetrius/fileagent/document/infrastructure/DashScopeKnowledgeRerankerTest.java`
 
-- [ ] **步骤 1：增加最低相关性配置**
+- [x] **步骤 1：增加最低相关性配置**
 
 在 `RerankerProperties` 中加入：
 
@@ -90,7 +90,7 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
 private double minRelevanceScore = 0.2;
 ```
 
-- [ ] **步骤 2：只过滤成功映射的 reranker 结果**
+- [x] **步骤 2：只过滤成功映射的 reranker 结果**
 
 在调用前校验阈值范围，调用成功后统计有效返回项。有效项低于阈值时不加入结果；只在一个有效结果都无法映射时降级原候选：
 
@@ -122,17 +122,17 @@ for (int rank = 0; rank < response.results().size(); rank++) {
 return validResultCount == 0 ? candidates : List.copyOf(reranked);
 ```
 
-- [ ] **步骤 3：增加调用摘要和耗时日志**
+- [x] **步骤 3：增加调用摘要和耗时日志**
 
-使用 `System.nanoTime()` 记录耗时。DEBUG 日志包含 query、候选数、提交数、`topN`、阈值、返回数、保留数、过滤数和耗时，不记录正文或认证信息。
+使用 Spring `StopWatch` 记录耗时。DEBUG 日志包含 query、候选数、提交数、`topN`、阈值、返回数、保留数、过滤数和耗时，不记录正文或认证信息。
 
-- [ ] **步骤 4：运行 reranker 测试确认通过**
+- [x] **步骤 4：运行 reranker 测试确认通过**
 
 运行任务 1 的 Maven 命令。
 
 预期：`DashScopeKnowledgeRerankerTest` 全部通过。
 
-- [ ] **步骤 5：提交相关性过滤**
+- [x] **步骤 5：提交相关性过滤**
 
 ```bash
 git add \
@@ -150,7 +150,7 @@ git commit -m "fix(rag): 过滤 reranker 低相关性结果"
 - 修改：`docs/API.md`
 - 测试：`fileagent-chat/src/test/java/com/demetrius/fileagent/chat/application/RagQueryRewriterTest.java`
 
-- [ ] **步骤 1：记录问题改写决策和耗时**
+- [x] **步骤 1：记录问题改写决策和耗时**
 
 保持第二轮起每次调用模型的逻辑不变，仅增加日志：
 
@@ -159,12 +159,13 @@ if (!hasPreviousUserMessage(history)) {
     log.debug("多轮问题改写跳过: reason=no_previous_user_message, question={}", question);
     return question;
 }
-long startedAt = System.nanoTime();
+StopWatch stopWatch = new StopWatch();
+stopWatch.start();
 ```
 
 成功与失败日志增加 `elapsedMs`，继续保留失败时返回原问题的行为。
 
-- [ ] **步骤 2：更新应用配置**
+- [x] **步骤 2：更新应用配置**
 
 在 `fileagent.reranker` 下增加：
 
@@ -174,11 +175,11 @@ min-relevance-score: ${FILEAGENT_RERANKER_MIN_RELEVANCE_SCORE:0.2}
 
 删除没有 Java 绑定和实际效果的顶层 `retrieval-similarity-threshold: 0.55`，避免误认为它控制当前 ES 检索。
 
-- [ ] **步骤 3：更新 API 文档**
+- [x] **步骤 3：更新 API 文档**
 
 将聊天主流程写明为：历史问题改写 -> 混合召回 -> reranker -> 最低分过滤 -> 父块展开 -> Prompt。说明 `sources.files` 来自过滤后的命中，reranker 关闭或降级时不应用该阈值。
 
-- [ ] **步骤 4：运行 chat 与 document 相关测试**
+- [x] **步骤 4：运行 chat 与 document 相关测试**
 
 运行：
 
@@ -194,7 +195,7 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
 
 预期：指定测试全部通过，问题改写调用条件没有变化。
 
-- [ ] **步骤 5：提交日志和文档**
+- [x] **步骤 5：提交日志和文档**
 
 ```bash
 git add \
@@ -209,7 +210,7 @@ git commit -m "chore(rag): 补充检索链路诊断信息"
 **文件：**
 - 检查：本计划涉及的全部文件
 
-- [ ] **步骤 1：检查差异和敏感信息**
+- [x] **步骤 1：检查差异和敏感信息**
 
 ```bash
 git diff master...HEAD --check
@@ -220,7 +221,7 @@ git diff master...HEAD -- \
 
 确认没有 API Key、片段正文日志、上传去重代码或定时扫描任务。
 
-- [ ] **步骤 2：运行全量测试**
+- [x] **步骤 2：运行全量测试**
 
 ```bash
 JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
@@ -237,11 +238,11 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
 **文件：**
 - 不修改仓库文件
 
-- [ ] **步骤 1：删除前再次确认范围**
+- [x] **步骤 1：删除前再次确认范围**
 
 分别查询 `fileId=15` 和 `fileId=18` 的 ES 数量，并确认 H2 中只有 `fileId=18` 的有效记录。
 
-- [ ] **步骤 2：精准删除 `fileId=15`**
+- [x] **步骤 2：精准删除 `fileId=15`**
 
 ```http
 POST fileagent-knowledge/_delete_by_query?refresh=true&conflicts=proceed
@@ -254,6 +255,6 @@ POST fileagent-knowledge/_delete_by_query?refresh=true&conflicts=proceed
 }
 ```
 
-- [ ] **步骤 3：验证清理结果**
+- [x] **步骤 3：验证清理结果**
 
 使用 `_count` 确认 `fileId=15` 为 `0`，并确认 `fileId=18` 仍为 `1`。不增加定时任务，不扫描全部 H2 或 ES 数据。

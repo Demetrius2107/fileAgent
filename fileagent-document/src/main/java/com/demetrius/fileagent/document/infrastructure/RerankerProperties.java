@@ -22,4 +22,5 @@ public class RerankerProperties {
     private String model = "qwen3-rerank";
     private int candidateTopK = 50;
     private int topN = 12;
+    private double minRelevanceScore = 0.2;
 }

@@ -69,6 +69,52 @@ class DashScopeKnowledgeRerankerTest {
         assertThat(reranker.rerank("年度目标", candidates)).isSameAs(candidates);
     }
 
+    @Test
+    void rerankShouldFilterScoresBelowMinimumAndKeepBoundary() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        RerankerProperties properties = properties(true);
+        DashScopeKnowledgeReranker reranker = new DashScopeKnowledgeReranker(builder, properties);
+        server.expect(once(), requestTo(properties.getBaseUrl()))
+                .andRespond(withSuccess("""
+                        {
+                          "results":[
+                            {"index":0,"relevance_score":0.92},
+                            {"index":1,"relevance_score":0.20},
+                            {"index":2,"relevance_score":0.19}
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        List<KnowledgeHit> result = reranker.rerank(
+                "年度目标", List.of(hit("A"), hit("B"), hit("C")));
+
+        assertThat(result).extracting(KnowledgeHit::chunkId).containsExactly("A", "B");
+        assertThat(result).extracting(KnowledgeHit::score).containsExactly(0.92, 0.20);
+        server.verify();
+    }
+
+    @Test
+    void rerankShouldReturnEmptyWhenAllScoresAreBelowMinimum() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        RerankerProperties properties = properties(true);
+        DashScopeKnowledgeReranker reranker = new DashScopeKnowledgeReranker(builder, properties);
+        server.expect(once(), requestTo(properties.getBaseUrl()))
+                .andRespond(withSuccess("""
+                        {
+                          "results":[
+                            {"index":0,"relevance_score":0.19}
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        List<KnowledgeHit> result = reranker.rerank("无答案问题", List.of(hit("A")));
+
+        assertThat(result).isEmpty();
+        server.verify();
+    }
+
     private RerankerProperties properties(boolean enabled) {
         RerankerProperties properties = new RerankerProperties();
         properties.setEnabled(enabled);

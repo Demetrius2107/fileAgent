@@ -12,6 +12,7 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StopWatch;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -31,21 +32,29 @@ public class RagQueryRewriter {
 
     public String rewrite(List<MessageDto> history, String question) {
         if (!hasPreviousUserMessage(history)) {
+            log.debug("多轮问题改写跳过: reason=no_previous_user_message, question={}", question);
             return question;
         }
-        BeanOutputConverter<RewriteResult> converter = new BeanOutputConverter<>(RewriteResult.class);
+        StopWatch stopWatch = new StopWatch();
+        stopWatch.start();
         try {
+            BeanOutputConverter<RewriteResult> converter = new BeanOutputConverter<>(RewriteResult.class);
             String response = chatClient.call(buildPrompt(history, question, converter.getFormat()));
             RewriteResult result = converter.convert(response);
             if (result == null || !StringUtils.hasText(result.standaloneQuery())) {
                 throw new IllegalStateException("问题改写结果为空");
             }
             String rewritten = result.standaloneQuery().trim();
-            log.debug("多轮问题改写: question={}, standaloneQuery={}", question, rewritten);
+            stopWatch.stop();
+            log.debug("多轮问题改写完成: question={}, standaloneQuery={}, elapsedMs={}",
+                    question, rewritten, stopWatch.getTotalTimeMillis());
             return rewritten;
         } catch (Exception e) {
-            log.warn("多轮问题改写失败，使用原问题检索: question={}, reason={}",
-                    question, e.getMessage());
+            if (stopWatch.isRunning()) {
+                stopWatch.stop();
+            }
+            log.warn("多轮问题改写失败，使用原问题检索: question={}, elapsedMs={}, reason={}",
+                    question, stopWatch.getTotalTimeMillis(), e.getMessage());
             return question;
         }
     }

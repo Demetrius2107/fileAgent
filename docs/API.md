@@ -240,7 +240,8 @@ Response `data`: `ModelProviderSummary`（同 3.5.1）
 `POST /api/sessions/{id}/chat`
 
 - 请求头 `Accept: text/event-stream`，响应 `Content-Type: text/event-stream`
-- 主流程：读取最近 `fileagent.chat-history-limit` 条历史 → 保存本次 USER → 全局知识检索 → 组装 Prompt（System 规则 + 历史 + 带来源标记的知识上下文）→ 模型流式调用 → 事件下发 → 完整 ASSISTANT 落库
+- 主流程：读取最近 `fileagent.chat-history-limit` 条历史 → 保存本次 USER → 第二轮起调用模型改写独立检索问题 → BM25/KNN 混合召回 → RRF 融合 → 可选 reranker → 最低相关性过滤 → 父块展开 → 组装 Prompt（System 规则 + 历史 + 带来源标记的知识上下文）→ 模型流式调用 → 事件下发 → 完整 ASSISTANT 落库
+- `fileagent.reranker.min-relevance-score` 默认 `0.2`，仅在 reranker 成功返回时过滤低分片段；reranker 关闭或降级为 RRF 时不应用该阈值
 - 前置校验失败（`sessionId` 为空 / `prompt` 空白 / 会话不存在）在流建立前返回 HTTP 400/404 JSON；流建立后的错误以 `error` 事件传递，HTTP 仍为 200
 
 Request:
@@ -264,7 +265,7 @@ data:{"type":"message","content":"更多正文增量……"}
 event:sources
 data:{"type":"sources","answerSource":"KNOWLEDGE","files":["员工手册.pdf","制度.docx"]}
 ```
-- `answerSource=KNOWLEDGE`：命中知识，`files` 为去重后的来源文件名（保持首次出现顺序）
+- `answerSource=KNOWLEDGE`：命中知识，`files` 为通过 reranker 最低分过滤后的来源文件名，去重并保持首次出现顺序
 - `answerSource=MODEL_GENERAL`：未命中知识，`files` 为空数组
 
 **`done`：流结束（最后一条）**

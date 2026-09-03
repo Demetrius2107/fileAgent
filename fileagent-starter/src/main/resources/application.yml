@@ -58,7 +58,6 @@ fileagent:
   vector-store-path: ./storage/vectorstore.json
   secret-key-path: ./storage/secret.key
   retrieval-top-k: 12
-  retrieval-similarity-threshold: 0.55
   chat-history-limit: 10
   chunk-size: 800
   chunk-overlap: 120
@@ -79,6 +78,7 @@ fileagent:
     model: ${FILEAGENT_RERANKER_MODEL:qwen3-rerank}
     candidate-top-k: 50
     top-n: 12
+    min-relevance-score: ${FILEAGENT_RERANKER_MIN_RELEVANCE_SCORE:0.2}
 
 # Swagger
 springdoc:

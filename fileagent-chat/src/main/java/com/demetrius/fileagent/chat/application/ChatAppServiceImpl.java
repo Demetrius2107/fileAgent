@@ -75,15 +75,14 @@ public class ChatAppServiceImpl implements ChatAppService {
             return Flux.just(ChatStreamEvent.error(CODE_KNOWLEDGE_SEARCH_FAILED, "知识检索失败，请稍后重试"));
         }
         boolean knowledgeMiss = hits.isEmpty();
-        boolean showKnowledgeMissNotice = knowledgeMiss;
 
-        Prompt modelPrompt = ragPromptBuilder.build(history, hits, prompt);
+      Prompt modelPrompt = ragPromptBuilder.build(history, hits, prompt);
         StringBuilder answer = new StringBuilder();
 
         Flux<ChatStreamEvent> messageEvents = streamingChatClient.stream(modelPrompt)
                 .doOnNext(answer::append)
                 .map(ChatStreamEvent::message);
-        if (showKnowledgeMissNotice) {
+        if (knowledgeMiss) {
             messageEvents = Flux.concat(
                     Flux.just(ChatStreamEvent.message(NO_KNOWLEDGE_NOTICE)),
                     messageEvents);
@@ -94,7 +93,7 @@ public class ChatAppServiceImpl implements ChatAppService {
                 .switchIfEmpty(Flux.error(new IllegalStateException("模型未返回任何内容")))
                 // 模型完整结束后才保存 ASSISTANT 并收尾；取消/异常不会进入该分支
                 .concatWith(Flux.defer(() -> {
-                    String fullAnswer = showKnowledgeMissNotice
+                    String fullAnswer = knowledgeMiss
                             ? NO_KNOWLEDGE_NOTICE + "\n" + answer
                             : answer.toString();
                     Long assistantMessageId = sessionMessagePort.append(sessionId, MessageType.ASSISTANT, fullAnswer);

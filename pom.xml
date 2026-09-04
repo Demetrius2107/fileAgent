@@ -32,7 +32,7 @@
     <properties>
         <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring-ai.version>2.0.0</spring-ai.version>
+        <spring-ai.version>2.0.1</spring-ai.version>
         <springdoc.version>3.1.0</springdoc.version>
         <pdfbox.version>2.0.32</pdfbox.version>
         <poi.version>5.2.5</poi.version>

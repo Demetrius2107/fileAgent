@@ -56,10 +56,15 @@ fileAgent/
 │   ├── domain/                       ActionHandler（接口）
 │   └── infrastructure/               ActionHandlerRegistry
 │
-└── fileagent-starter/             ✅ 启动装配（唯一 Boot 入口）
-    ├── FileAgentApplication.java
-    ├── resources/application.yml
-    └── resources/static/             同源前端工作台（index.html / app.css / app.js）
+├── fileagent-starter/             ✅ 主应用启动装配（自研 RAG Boot 入口）
+│   ├── FileAgentApplication.java
+│   ├── resources/application.yml
+│   └── resources/static/             同源前端工作台（index.html / app.css / app.js）
+│
+└── ragflow-quickstart/            ✅ RAGFlow HTTP API 独立学习模块
+    ├── RagFlowQuickstartApplication.java
+    ├── RagFlowClient / RagFlowController
+    └── resources/static/             Dataset、文档解析、Assistant、Session 和流式问答页面
 ```
 
 ---
@@ -70,6 +75,7 @@ fileAgent/
 fileagent-api → fileagent-common
 fileagent-session / document / chat / action → fileagent-api（各域互不直接依赖）
 fileagent-starter → 全部业务域
+ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块）
 ```
 
 **跨域解耦的两条通道**：
@@ -112,6 +118,7 @@ fileagent-starter → 全部业务域
 | chat | api + web + webflux（流式调用）+ spring-ai-openai + reactor-test(test) |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
 | starter | 全部业务域 + h2(runtime) + springdoc |
+| ragflow-quickstart | webflux + validation（独立调用 RAGFlow HTTP API） |
 
 ### 后续里程碑新增
 | 依赖 | 用途 | 里程碑 |

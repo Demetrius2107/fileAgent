@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAGFlow API Lab</title>
+    <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+    <div>
+        <span class="product-mark">RF</span>
+        <strong>RAGFlow API Lab</strong>
+    </div>
+    <div id="connection-status" class="status-pill" aria-live="polite">正在检查连接</div>
+</header>
+
+<main class="workspace">
+    <aside class="setup-column" aria-label="RAGFlow 配置流程">
+        <section class="tool-panel">
+            <div class="panel-heading">
+                <span class="step-number">1</span>
+                <h2>知识库</h2>
+            </div>
+            <form id="dataset-form" class="stack-form">
+                <label for="dataset-name">名称</label>
+                <div class="inline-control">
+                    <input id="dataset-name" name="name" value="fileagent-quickstart" required>
+                    <button type="submit">创建</button>
+                </div>
+            </form>
+            <label for="dataset-id">Dataset ID</label>
+            <input id="dataset-id" autocomplete="off" placeholder="创建后自动填入，也可粘贴已有 ID">
+        </section>
+
+        <section class="tool-panel">
+            <div class="panel-heading">
+                <span class="step-number">2</span>
+                <h2>文档</h2>
+            </div>
+            <form id="upload-form" class="stack-form">
+                <label for="document-files">选择文件</label>
+                <input id="document-files" type="file" multiple required>
+                <div class="button-row">
+                    <button type="submit">上传并解析</button>
+                    <button id="refresh-documents" type="button" class="secondary">刷新状态</button>
+                </div>
+            </form>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                    <tr>
+                        <th>文件</th>
+                        <th>状态</th>
+                        <th>进度</th>
+                    </tr>
+                    </thead>
+                    <tbody id="document-list">
+                    <tr><td colspan="3" class="empty">暂无文档</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="tool-panel">
+            <div class="panel-heading">
+                <span class="step-number">3</span>
+                <h2>聊天助手</h2>
+            </div>
+            <form id="chat-form" class="stack-form">
+                <label for="chat-name">名称</label>
+                <div class="inline-control">
+                    <input id="chat-name" value="FileAgent Assistant" required>
+                    <button type="submit">创建</button>
+                </div>
+            </form>
+            <label for="chat-id">Chat ID</label>
+            <input id="chat-id" autocomplete="off" placeholder="创建后自动填入，也可粘贴已有 ID">
+
+            <form id="session-form" class="stack-form section-divider">
+                <label for="session-name">会话名称</label>
+                <div class="inline-control">
+                    <input id="session-name" value="Quickstart Session" required>
+                    <button type="submit">新建会话</button>
+                </div>
+            </form>
+            <label for="session-id">Session ID</label>
+            <input id="session-id" autocomplete="off" placeholder="新建后自动填入，也可粘贴已有 ID">
+        </section>
+    </aside>
+
+    <section class="conversation" aria-label="RAGFlow 对话">
+        <div class="conversation-heading">
+            <div>
+                <span class="eyebrow">RAGFLOW CHAT</span>
+                <h1>知识库问答</h1>
+            </div>
+            <button id="clear-chat" type="button" class="secondary">清空消息</button>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite">
+            <div class="empty-state">
+                <strong>等待提问</strong>
+                <span>完成左侧三步后开始对话</span>
+            </div>
+        </div>
+
+        <form id="question-form" class="composer">
+            <label for="question" class="sr-only">问题</label>
+            <textarea id="question" rows="3" placeholder="输入关于已解析文档的问题" required></textarea>
+            <div class="composer-footer">
+                <span id="request-status" class="request-status"></span>
+                <button id="send-question" type="submit">发送</button>
+            </div>
+        </form>
+    </section>
+</main>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script src="/app.js"></script>
+</body>
+</html>

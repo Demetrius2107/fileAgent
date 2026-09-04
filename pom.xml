@@ -26,6 +26,7 @@
         <module>fileagent-chat</module>
         <module>fileagent-action</module>
         <module>fileagent-starter</module>
+        <module>ragflow-quickstart</module>
     </modules>
 
     <properties>

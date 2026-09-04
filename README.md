@@ -13,6 +13,7 @@ fileagent-api      契约层（DTO / 枚举 / 端口 / 领域事件）
 fileagent-session  会话域        fileagent-document  文档域
 fileagent-chat     对话/推理域(核心) fileagent-action    动作执行域
 fileagent-starter  启动装配（唯一 Boot 入口）
+ragflow-quickstart RAGFlow HTTP API 独立学习模块
 ```
 
 每个业务域内部四层：`interfaces → application → domain ← infrastructure`。
@@ -33,6 +34,8 @@ mvn -pl fileagent-starter -am spring-boot:run
 # 工作台: http://localhost:8080/
 # Swagger UI: http://localhost:8080/swagger-ui.html
 ```
+
+RAGFlow 托管式 RAG 的独立调用工程位于 [`ragflow-quickstart`](ragflow-quickstart/README.md)，已加入根 Maven 聚合，可在 IDEA 中作为独立模块运行。
 
 打开 `http://localhost:8080/` 即可使用同源工作台：新建会话 → 右侧「知识库」上传 TXT/MD/PDF/DOCX/XLSX/CSV → 中间提问，回答流式输出并标明来源文件；刷新页面后会话与消息仍在（H2 + 向量库 JSON 落盘于 `storage/`）。
 

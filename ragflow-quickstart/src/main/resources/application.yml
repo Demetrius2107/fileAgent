@@ -1,0 +1,15 @@
+server:
+  port: ${SERVER_PORT:8091}
+
+spring:
+  application:
+    name: ragflow-quickstart
+  webflux:
+    multipart:
+      max-in-memory-size: 1MB
+      max-disk-usage-per-part: 200MB
+      max-parts: 20
+
+ragflow:
+  base-url: ${RAGFLOW_BASE_URL:https://cloud.ragflow.io}
+  api-key: ${RAGFLOW_API_KEY:}

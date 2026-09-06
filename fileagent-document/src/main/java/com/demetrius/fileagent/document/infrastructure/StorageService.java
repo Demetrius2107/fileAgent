@@ -78,6 +78,24 @@ public class StorageService {
     }
 
     /**
+     * 仅计算上传内容指纹，不落盘。上传去重在写盘前据此拦截重复文件。
+     *
+     * @param file 上传文件（不允许为空）
+     * @return 内容 sha256 十六进制串
+     * @throws BizException 读取上传内容失败时
+     */
+    public String sha256(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BizException("上传文件为空");
+        }
+        try (InputStream in = file.getInputStream()) {
+            return sha256(in);
+        } catch (IOException e) {
+            throw new BizException("读取上传文件失败: " + e.getMessage());
+        }
+    }
+
+    /**
      * 把存储的相对路径解析为绝对路径，供解析器读取文件内容。
      * 校验解析结果必须仍在存储根目录内，防止路径穿越。
      *

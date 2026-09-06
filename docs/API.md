@@ -130,8 +130,9 @@ Response `data`:
 | `.xlsx` | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
 | `.csv` | `text/csv` |
 
-- 同步处理：原件落盘（`fileagent.storage-dir`，记录 `storage_path` + `sha256`）→ 解析 → 分块（`fileagent.chunk-size` / `chunk-overlap`）→ embedding → 写入向量库（`fileagent.vector-store-path`），并落库 `rag_file` 记录
-- 文件本体持久化：原件保存到 `storage/files/日期/文件名`，`rag_file` 表回填 `storage_path`/`sha256`；索引失败时整体回滚（删除记录与已落盘原件），列表只保留索引成功的文件
+- 同步处理：sha256 内容去重校验 → 原件落盘（`fileagent.storage-dir`，回填 `storage_path` + `sha256`）→ 解析 → 分块（`fileagent.chunk-size` / `chunk-overlap`）→ embedding → 写入 Elasticsearch 知识索引（`fileagent.elasticsearch.index-alias`），并落库 `rag_file` 记录
+- 上传去重：同一 `name` + `tag` 下存在 `sha256` 相同且索引成功的文件时直接拒绝（`code=400`），不落盘不落库；如需替换内容请先删除原文件
+- 文件本体持久化：原件保存到 `storage/files/日期/文件名`，`rag_file` 表回填 `storage_path`/`sha256`；解析/索引失败时记录保留为 `FAILED`（不进列表），已写入 ES 的数据被清理，原件保留便于排查
 - chunk 元数据：`knowledge`=tag、`ragName`=name、`fileId`、`filename`、`chunkIndex`；检索为全局范围，不按标签过滤
 
 Response:
@@ -139,7 +140,7 @@ Response:
 { "code": 0, "message": "ok", "data": true }
 ```
 
-失败时返回 `code=400` + 失败原因（如 `不支持的文件格式: virus.exe（当前支持 TXT/MD/PDF/DOCX/XLSX/CSV）`）；单文件索引失败时**回滚本次上传记录**（`rag_file` 中不留失败记录，列表只展示索引成功的文件），修正问题后重新上传即可。
+失败时返回 `code=400` + 失败原因（如 `不支持的文件格式: virus.exe（当前支持 TXT/MD/PDF/DOCX/XLSX/CSV）`）；单文件解析/索引失败时该条记录保留为 `FAILED`（不进列表），修正问题后可重新上传同名内容。
 
 ### 3.2 知识文件列表
 `GET /api/rag-files`
@@ -160,6 +161,22 @@ Response `data`: `RagFileSummary[]`
   }
 ]
 ```
+
+### 3.3 删除知识库文件
+`DELETE /api/rag-files/{id}`
+
+删除顺序：查 `rag_file` 记录 → 按 `fileId` 删除 ES 索引 → 删除原件（`storage_path`）→ 删除 H2 记录。
+
+- **必须先删 ES**：记录先没了索引还在，残留数据会继续被召回，且再无 fileId 可清理
+- ES 索引删除（delete-by-query 删不到不报错）与原件删除（文件不存在静默跳过）均幂等，中途失败可直接重试本接口
+- 索引进行中（`PARSING`）的文件不允许删除，避免删除与索引写入竞态
+
+Response:
+```json
+{ "code": 0, "message": "ok", "data": true }
+```
+
+记录不存在或文件正在索引中时返回 `code=400` + 原因。
 
 ---
 

@@ -37,7 +37,7 @@ public class RagFileEntity {
     @Column(name = "file_size")
     private Long fileSize;
 
-    /** 内容指纹，用于同一文件去重/重新索引（本周只记录，去重逻辑下个迭代） */
+    /** 内容指纹：上传时同一知识库名称+标签内按此去重 */
     @Column(name = "sha256")
     private String sha256;
 

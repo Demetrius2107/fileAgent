@@ -7,10 +7,10 @@
 
 ## 1. 项目是什么
 
-- **定位**：文件驱动的智能 Agent 后端。用户上传文件 → 结合会话提示 + 历史上下文 + 文档内容分析 → 输出并执行结构化动作。
-- **技术栈**：Java 21 · Spring Boot 3.3 · Spring AI 1.0 · H2 · Maven · Lombok
+- **定位**：文件驱动的智能 Agent 后端。用户上传文件 → 结合会话提示 + 历史上下文 + 全局知识库（跨会话共享，Elasticsearch 混合检索）→ 流式回答并输出结构化动作。
+- **技术栈**：Java 21 · Spring Boot 4.1 · Spring AI 2.0 · Elasticsearch 9 · H2 · Maven · Lombok
 - **基础包**：`com.demetrius.fileagent`
-- **启动**：`mvn spring-boot:run`（需 JDK 21；本机当前是 JDK 8，跑 Boot 3 会失败，这是环境问题不是代码问题）
+- **启动**：`mvn -pl fileagent-starter -am spring-boot:run`（需 JDK 21 与运行中的 Elasticsearch，先 `docker compose up -d elasticsearch`；本机已配 JDK 21 + Maven 3.9）
 - **包管理**：`mvn clean package` / `mvn compile`
 
 ## 2. 架构约束（写代码前必读）
@@ -28,6 +28,7 @@
 | `fileagent-chat` | 对话/推理域（核心域） |
 | `fileagent-action` | 动作执行域 |
 | `fileagent-starter` | 启动装配（唯一 Boot 入口） |
+| `ragflow-quickstart` | RAGFlow HTTP API 独立学习模块（独立 Boot 进程，不参与主应用装配） |
 
 每个业务域内部四层（依赖方向：`interfaces → application → domain ← infrastructure`）：
 
@@ -50,7 +51,7 @@
 
 - API Key / 密码 / Token **绝不**写入仓库文件。
 - `application.yml` 密钥用 `${FILEAGENT_AI_API_KEY}` 占位，真实值走环境变量。
-- `storage/`（上传文件、H2 库、向量库 JSON）已在 `.gitignore`，**禁止** `git add -f` 强加。
+- `storage/`（上传文件原件、H2 库、模型配置主密钥、历史向量库文件）已在 `.gitignore`，**禁止** `git add -f` 强加。
 - 新增密钥类配置 → 加 `.gitignore` 或环境变量占位。
 
 ## 4. Git 规则（代理提交时）

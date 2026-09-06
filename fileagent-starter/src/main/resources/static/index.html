@@ -94,6 +94,7 @@
             文件（支持 TXT/MD/PDF/DOCX/XLSX/CSV，可多选）
             <input id="upload-files" name="files" type="file" multiple required>
         </label>
+        <p id="upload-file-summary" class="file-summary" hidden></p>
         <p id="upload-error" class="upload-error" hidden></p>
         <div class="dialog-actions">
             <button type="button" id="upload-cancel" class="secondary">取消</button>
@@ -144,6 +145,7 @@
     </form>
 </dialog>
 
+<div id="toast-container" aria-live="polite"></div>
 <script src="app.js"></script>
 </body>
 </html>

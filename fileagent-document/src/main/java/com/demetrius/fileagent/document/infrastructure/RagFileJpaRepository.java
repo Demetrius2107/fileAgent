@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.document.infrastructure;
 
+import com.demetrius.fileagent.api.enums.ParseStatus;
 import com.demetrius.fileagent.document.domain.RagFileEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -15,4 +16,7 @@ public interface RagFileJpaRepository extends JpaRepository<RagFileEntity, Long>
 
     /** 全部知识文件，按创建时间倒序（最新上传在前） */
     List<RagFileEntity> findAllByOrderByCreatedAtDesc();
+
+    boolean existsByRagNameAndKnowledgeTagAndSha256AndStatus(String ragName, String knowledgeTag,
+                                                             String sha256, ParseStatus status);
 }

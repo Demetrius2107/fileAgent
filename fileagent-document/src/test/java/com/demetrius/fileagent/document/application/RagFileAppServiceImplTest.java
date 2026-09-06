@@ -10,15 +10,18 @@ import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import com.demetrius.fileagent.document.infrastructure.DocumentParser;
 import com.demetrius.fileagent.document.infrastructure.DocumentParserRegistry;
+import com.demetrius.fileagent.document.infrastructure.StorageService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -32,6 +35,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -54,6 +58,9 @@ class RagFileAppServiceImplTest {
     @Mock
     private KnowledgeIndexRepository knowledgeIndexRepository;
 
+    @Mock
+    private StorageService storageService;
+
     @InjectMocks
     private RagFileAppServiceImpl ragFileAppService;
 
@@ -69,6 +76,9 @@ class RagFileAppServiceImplTest {
     })
     void storeRagFileShouldRouteByExtensionToExactMime(String filename, String expectedMime) {
         stubSuccessSave();
+        stubDedupMiss();
+        stubStore();
+        stubResolve();
         DocumentParser parser = mock(DocumentParser.class);
         when(parser.parseChunks(any(Path.class), anyString()))
                 .thenReturn(List.of(ParsedChunk.text("知识片段")));
@@ -85,6 +95,8 @@ class RagFileAppServiceImplTest {
     @Test
     void storeRagFileShouldRejectUnknownExtensionWithBizError() {
         stubSuccessSave();
+        stubDedupMiss();
+        stubStore();
 
         assertThatThrownBy(() -> ragFileAppService.storeRagFile("员工知识库", "制度",
                 List.of(new MockMultipartFile("files", "virus.exe", null, "内容".getBytes()))))
@@ -96,8 +108,49 @@ class RagFileAppServiceImplTest {
     }
 
     @Test
+    void storeRagFileShouldRejectDuplicateContentInSameNameAndTag() {
+        when(storageService.sha256(any(MultipartFile.class))).thenReturn("sha-256-value");
+        when(ragFileRepository.existsByRagNameAndKnowledgeTagAndSha256AndStatus(
+                "员工知识库", "制度", "sha-256-value", ParseStatus.SUCCESS)).thenReturn(true);
+
+        assertThatThrownBy(() -> ragFileAppService.storeRagFile("员工知识库", "制度",
+                List.of(new MockMultipartFile("files", "manual.txt", null, "内容".getBytes()))))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("内容相同");
+
+        verify(ragFileRepository, never()).save(any(RagFileEntity.class));
+        verify(storageService, never()).store(any());
+        verify(knowledgeIndexRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void storeRagFileShouldPersistOriginalAndBackfillStorageFields() {
+        stubSuccessSave();
+        stubDedupMiss();
+        stubStore();
+        stubResolve();
+        DocumentParser parser = mock(DocumentParser.class);
+        when(parser.parseChunks(any(Path.class), anyString()))
+                .thenReturn(List.of(ParsedChunk.text("知识片段")));
+        when(parserRegistry.findParser(anyString())).thenReturn(Optional.of(parser));
+
+        ragFileAppService.storeRagFile("员工知识库", "制度",
+                List.of(new MockMultipartFile("files", "manual.txt", null, "内容".getBytes())));
+
+        verify(storageService).resolve("2026/09/06/manual.txt");
+        ArgumentCaptor<RagFileEntity> captor = ArgumentCaptor.forClass(RagFileEntity.class);
+        verify(ragFileRepository, atLeast(3)).save(captor.capture());
+        RagFileEntity backfilled = captor.getAllValues().get(1);
+        assertThat(backfilled.getStoragePath()).isEqualTo("2026/09/06/manual.txt");
+        assertThat(backfilled.getSha256()).isEqualTo("sha-256-value");
+    }
+
+    @Test
     void storeRagFileShouldWriteDeterministicChunksAndKeepGenericMetadata() {
         stubSuccessSave();
+        stubDedupMiss();
+        stubStore();
+        stubResolve();
         DocumentParser parser = mock(DocumentParser.class);
         ParsedChunk chunk = new ParsedChunk(
                 "[目标表] 姓名: 张三 | 目标: 完成系统升级 | 权重: 40%",
@@ -129,6 +182,9 @@ class RagFileAppServiceImplTest {
     @Test
     void storeRagFileShouldCreateOneParentChunkForExplicitChildGroup() {
         stubSuccessSave();
+        stubDedupMiss();
+        stubStore();
+        stubResolve();
         DocumentParser parser = mock(DocumentParser.class);
         ParsedChunk first = new ParsedChunk("目标一", Map.of(
                 "sourceType", "xlsx", "sheetName", "OKR", "rowIndex", 2,
@@ -162,6 +218,9 @@ class RagFileAppServiceImplTest {
     @Test
     void storeRagFileShouldCleanupIndexAndMarkFailedWhenIndexingFails() {
         stubSuccessSave();
+        stubDedupMiss();
+        stubStore();
+        stubResolve();
         DocumentParser parser = mock(DocumentParser.class);
         when(parser.parseChunks(any(Path.class), anyString()))
                 .thenReturn(List.of(ParsedChunk.text("知识片段")));
@@ -178,6 +237,77 @@ class RagFileAppServiceImplTest {
         ArgumentCaptor<RagFileEntity> captor = ArgumentCaptor.forClass(RagFileEntity.class);
         verify(ragFileRepository, atLeast(2)).save(captor.capture());
         assertThat(captor.getAllValues().getLast().getStatus()).isEqualTo(ParseStatus.FAILED);
+    }
+
+    @Test
+    void deleteRagFileShouldDeleteIndexThenOriginalThenRecord() {
+        RagFileEntity entity = entity(7L, "员工知识库", "制度", "手册.pdf",
+                ParseStatus.SUCCESS, 12, LocalDateTime.of(2026, 9, 1, 9, 0));
+        entity.setStoragePath("2026/09/01/手册.pdf");
+        when(ragFileRepository.findById(7L)).thenReturn(Optional.of(entity));
+
+        ragFileAppService.deleteRagFile(7L);
+
+        InOrder order = inOrder(knowledgeIndexRepository, storageService, ragFileRepository);
+        order.verify(knowledgeIndexRepository).deleteByFileId(7L);
+        order.verify(storageService).delete("2026/09/01/手册.pdf");
+        order.verify(ragFileRepository).delete(entity);
+    }
+
+    @Test
+    void deleteRagFileShouldAbortBeforeFileAndRecordWhenIndexDeletionFails() {
+        RagFileEntity entity = entity(7L, "员工知识库", "制度", "手册.pdf",
+                ParseStatus.SUCCESS, 12, LocalDateTime.of(2026, 9, 1, 9, 0));
+        entity.setStoragePath("2026/09/01/手册.pdf");
+        when(ragFileRepository.findById(7L)).thenReturn(Optional.of(entity));
+        doThrow(new BizException("Elasticsearch 清理知识索引失败"))
+                .when(knowledgeIndexRepository).deleteByFileId(7L);
+
+        assertThatThrownBy(() -> ragFileAppService.deleteRagFile(7L))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("Elasticsearch");
+
+        verify(storageService, never()).delete(anyString());
+        verify(ragFileRepository, never()).delete(any(RagFileEntity.class));
+    }
+
+    @Test
+    void deleteRagFileShouldRejectMissingRecord() {
+        when(ragFileRepository.findById(9L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> ragFileAppService.deleteRagFile(9L))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("不存在");
+
+        verify(knowledgeIndexRepository, never()).deleteByFileId(any());
+        verify(ragFileRepository, never()).delete(any(RagFileEntity.class));
+    }
+
+    @Test
+    void deleteRagFileShouldRejectWhileIndexing() {
+        RagFileEntity entity = entity(7L, "员工知识库", "制度", "手册.pdf",
+                ParseStatus.PARSING, 0, LocalDateTime.of(2026, 9, 1, 9, 0));
+        when(ragFileRepository.findById(7L)).thenReturn(Optional.of(entity));
+
+        assertThatThrownBy(() -> ragFileAppService.deleteRagFile(7L))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("索引中");
+
+        verify(knowledgeIndexRepository, never()).deleteByFileId(any());
+        verify(ragFileRepository, never()).delete(any(RagFileEntity.class));
+    }
+
+    @Test
+    void deleteRagFileShouldSkipOriginalDeletionWhenStoragePathBlank() {
+        RagFileEntity entity = entity(7L, "员工知识库", "制度", "manual.txt",
+                ParseStatus.SUCCESS, 3, LocalDateTime.of(2026, 9, 1, 9, 0));
+        when(ragFileRepository.findById(7L)).thenReturn(Optional.of(entity));
+
+        ragFileAppService.deleteRagFile(7L);
+
+        verify(storageService, never()).delete(anyString());
+        verify(knowledgeIndexRepository).deleteByFileId(7L);
+        verify(ragFileRepository).delete(entity);
     }
 
     @Test
@@ -209,6 +339,24 @@ class RagFileAppServiceImplTest {
                     }
                     return entity;
                 });
+    }
+
+    /** 去重未命中：指纹计算 + 仓储查重均放行（所有走到 storeOne 的用例都需要）。 */
+    private void stubDedupMiss() {
+        when(storageService.sha256(any(MultipartFile.class))).thenReturn("sha-256-value");
+        when(ragFileRepository.existsByRagNameAndKnowledgeTagAndSha256AndStatus(
+                anyString(), anyString(), anyString(), any(ParseStatus.class))).thenReturn(false);
+    }
+
+    /** 原件落盘桩（去重之后、格式校验之前发生，未知扩展名用例也会用到）。 */
+    private void stubStore() {
+        when(storageService.store(any(MultipartFile.class)))
+                .thenReturn(new StorageService.StoredFile("2026/09/06/manual.txt", "sha-256-value"));
+    }
+
+    /** 落盘原件按相对路径读回（仅真正走到解析的用例需要）。 */
+    private void stubResolve() {
+        when(storageService.resolve(anyString())).thenReturn(Path.of("stored/manual.txt"));
     }
 
     private RagFileEntity entity(Long id, String ragName, String tag, String filename,

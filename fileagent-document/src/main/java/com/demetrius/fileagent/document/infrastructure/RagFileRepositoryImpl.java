@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.document.infrastructure;
 
+import com.demetrius.fileagent.api.enums.ParseStatus;
 import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import lombok.RequiredArgsConstructor;
@@ -35,6 +36,12 @@ public class RagFileRepositoryImpl implements RagFileRepository {
     @Override
     public List<RagFileEntity> findAllOrderByCreatedAtDesc() {
         return jpaRepository.findAllByOrderByCreatedAtDesc();
+    }
+
+    @Override
+    public boolean existsByRagNameAndKnowledgeTagAndSha256AndStatus(String ragName, String knowledgeTag,
+                                                                    String sha256, ParseStatus status) {
+        return jpaRepository.existsByRagNameAndKnowledgeTagAndSha256AndStatus(ragName, knowledgeTag, sha256, status);
     }
 
     @Override

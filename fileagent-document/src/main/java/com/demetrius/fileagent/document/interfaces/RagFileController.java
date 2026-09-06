@@ -40,4 +40,11 @@ public class RagFileController {
     public ApiResult<List<RagFileSummary>> listRagFiles() {
         return ApiResult.ok(ragFileAppService.list());
     }
+
+    @DeleteMapping("/{id}")
+    public ApiResult<Boolean> deleteRagFile(@PathVariable Long id) {
+        log.info("删除知识库文件: id={}", id);
+        ragFileAppService.deleteRagFile(id);
+        return ApiResult.ok(true);
+    }
 }

@@ -10,15 +10,13 @@ import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import com.demetrius.fileagent.document.infrastructure.DocumentParser;
 import com.demetrius.fileagent.document.infrastructure.DocumentParserRegistry;
+import com.demetrius.fileagent.document.infrastructure.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,7 +27,7 @@ import java.util.stream.Collectors;
 /**
  * 知识库文件应用服务实现。
  * <p>
- * 负责文件解析、通用分块与知识索引写入。
+ * 负责内容去重校验、原件落盘、解析分块、知识索引写入与删除编排。
  */
 @Slf4j
 @Service
@@ -40,6 +38,8 @@ public class RagFileAppServiceImpl implements RagFileAppService {
     private final RagFileRepository ragFileRepository;
 
     private final KnowledgeIndexRepository knowledgeIndexRepository;
+
+    private final StorageService storageService;
 
     @Override
     public void storeRagFile(String name, String tag, List<MultipartFile> files) {
@@ -72,25 +72,51 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             .toList();
     }
 
+    @Override
+    public void deleteRagFile(Long id) {
+        RagFileEntity entity = ragFileRepository.findById(id)
+                .orElseThrow(() -> new BizException("知识库文件不存在: " + id));
+        if (entity.getStatus() == ParseStatus.PARSING) {
+            throw new BizException("文件正在索引中，请等待索引完成后再删除: " + entity.getFilename());
+        }
+        // 删除顺序约束：必须先删 ES 索引再删记录——记录先没了索引还在，会继续被召回且再无 fileId 可清理。
+        // ES 删除（delete-by-query 删不到不报错）与原件删除（文件不存在静默跳过）均幂等，中途失败重试本接口即可。
+        knowledgeIndexRepository.deleteByFileId(id);
+        if (StringUtils.hasText(entity.getStoragePath())) {
+            storageService.delete(entity.getStoragePath());
+        }
+        ragFileRepository.delete(entity);
+        log.info("知识库文件删除完成: id={}, file={}", id, entity.getFilename());
+    }
+
     private void storeOne(String name, String tag, MultipartFile file) {
+        String filename = resolveFilename(file);
+        // 内容指纹先行：同一 name+tag 内已索引成功的相同内容直接拦截，不落盘不落库
+        String sha256 = storageService.sha256(file);
+        if (ragFileRepository.existsByRagNameAndKnowledgeTagAndSha256AndStatus(name, tag, sha256, ParseStatus.SUCCESS)) {
+            throw new BizException("同一知识库与标签下已存在内容相同的文件: " + filename + "，如需替换请先删除原文件");
+        }
+
         RagFileEntity entity = new RagFileEntity();
         entity.setRagName(name);
         entity.setKnowledgeTag(tag);
-        entity.setFilename(resolveFilename(file));
+        entity.setFilename(filename);
         entity.setFileSize(file.getSize());
         entity.setStatus(ParseStatus.PARSING);
         entity = ragFileRepository.save(entity);
 
-        Path tempFile = null;
         try {
-            tempFile = Files.createTempFile("fileagent-rag-", fileExtension(file));
-            file.transferTo(tempFile);
+            // 原件先落盘再解析：解析失败不丢文件，storage_path/sha256 回填记录
+            StorageService.StoredFile stored = storageService.store(file);
+            entity.setStoragePath(stored.relativePath());
+            entity.setSha256(stored.sha256());
+            ragFileRepository.save(entity);
 
             String mimeType = resolveMimeType(file);
             DocumentParser parser = parserRegistry.findParser(mimeType)
                     .orElseThrow(() -> new BizException("暂不支持的文件格式: " + mimeType + "（当前支持 TXT/MD，PDF/Office 随 M2 解析器扩展）"));
 
-            List<ParsedChunk> chunks = parser.parseChunks(tempFile, mimeType);
+            List<ParsedChunk> chunks = parser.parseChunks(storageService.resolve(stored.relativePath()), mimeType);
             if (chunks.isEmpty()) {
                 throw new BizException("文件内容为空，未能切分出有效 chunk: " + entity.getFilename());
             }
@@ -113,14 +139,6 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             BizException biz = new BizException("文件分块/索引失败: " + e.getMessage());
             markFailed(entity, biz);
             throw biz;
-        } finally {
-            if (tempFile != null) {
-                try {
-                    Files.deleteIfExists(tempFile);
-                } catch (IOException e) {
-                    log.warn("临时文件清理失败: {}", tempFile, e);
-                }
-            }
         }
     }
 

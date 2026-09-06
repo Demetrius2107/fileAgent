@@ -112,10 +112,8 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | common | spring-boot-starter-web + spring-boot-starter-test(test) |
 | api | common + reactor-core（Flux 契约） |
 | session | api + web + data-jpa + h2(runtime) |
-| document | api + web + data-jpa + spring-ai-openai + spring-ai-vector-store + pdfbox + poi-ooxml + h2(runtime) |
-| chat | api + web + webflux（流式调用）+ spring-ai-openai + spring-ai-starter-model-deepseek + spring-ai-starter-model-openai（多 Provider 动态构建）+ data-jpa（模型配置实体）+ reactor-test(test) |
-| document | api + web + data-jpa + spring-ai-openai + Elasticsearch Java Client + pdfbox + poi-ooxml + h2(runtime) |
-| chat | api + web + webflux（流式调用）+ spring-ai-openai + reactor-test(test) |
+| document | api + web + data-jpa + spring-ai-starter-model-openai（Embedding）+ spring-boot-starter-elasticsearch（知识索引与检索）+ pdfbox + poi-ooxml + h2(runtime) + testcontainers-elasticsearch / testcontainers-junit-jupiter / spring-boot-data-jpa-test(test) |
+| chat | api + web + webflux（流式调用）+ spring-ai-starter-model-deepseek + spring-ai-starter-model-openai（多 Provider 动态构建）+ data-jpa（模型配置实体）+ reactor-test(test) |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
 | starter | 全部业务域 + h2(runtime) + springdoc |
 | ragflow-quickstart | webflux + validation（独立调用 RAGFlow HTTP API） |

@@ -1,5 +1,7 @@
 # Elasticsearch 企业级混合 RAG 实现计划
 
+> **状态：已完成并合入 master（2026-09）。** 下方勾选框未逐项回填，实际落地以代码为准：ES 知识索引、BM25 + KNN 双路召回、RRF 融合与旧 OKR 代码清理均已上线；知识库文件的删除与上传去重能力见 `docs/API.md` §3.3。
+
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:executing-plans 在当前会话逐任务实现本计划。仓库规则未授权子代理或 worktree，因此不得使用 subagent-driven-development 或创建额外 worktree。
 
 **目标：** 用 Elasticsearch 替换 `SimpleVectorStore`，实现通用文档结构、BM25 + KNN 双路召回、应用层 RRF、列表型查询区域扩展，并删除上一版 OKR 专用代码和失效测试。

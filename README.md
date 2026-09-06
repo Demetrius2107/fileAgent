@@ -20,9 +20,12 @@ ragflow-quickstart RAGFlow HTTP API 独立学习模块
 
 ## 快速开始
 
-要求：JDK 21 + Maven 3.9+。
+要求：JDK 21 + Maven 3.9+ + Docker（Elasticsearch）。
 
 ```bash
+# 0. 启动 Elasticsearch（知识库索引与检索的前置依赖）
+docker compose up -d elasticsearch
+
 # 1. 配置环境变量（必须，密钥绝不写入仓库）
 export FILEAGENT_AI_API_KEY='<由运行者提供>'
 export FILEAGENT_AI_BASE_URL='https://兼容服务地址'
@@ -37,7 +40,7 @@ mvn -pl fileagent-starter -am spring-boot:run
 
 RAGFlow 托管式 RAG 的独立调用工程位于 [`ragflow-quickstart`](ragflow-quickstart/README.md)，已加入根 Maven 聚合，可在 IDEA 中作为独立模块运行。
 
-打开 `http://localhost:8080/` 即可使用同源工作台：新建会话 → 右侧「知识库」上传 TXT/MD/PDF/DOCX/XLSX/CSV → 中间提问，回答流式输出并标明来源文件；刷新页面后会话与消息仍在（H2 + 向量库 JSON 落盘于 `storage/`）。
+打开 `http://localhost:8080/` 即可使用同源工作台：新建会话 → 右侧「知识库」上传 TXT/MD/PDF/DOCX/XLSX/CSV → 中间提问，回答流式输出并标明来源文件；刷新页面后会话与消息仍在（H2 落库，知识索引存于 Elasticsearch）。
 
 > ⚠️ API Key **不要**写进 `application.yml`，只通过环境变量传入，`storage/` 目录已 gitignore。
 
@@ -66,6 +69,8 @@ RAGFlow 托管式 RAG 的独立调用工程位于 [`ragflow-quickstart`](ragflow
 - **M3** Agent 多步规划 + 代码沙箱 + 外部 API
 - **M4** 历史上下文 + 业务库连接
 - **M5** 工程化：审计 / 可观测 / 简单前端
+
+**当前进度（2026-09）**：M1 ✅；M2 大部分 ✅（多格式解析、SSE 流式、RAG 工作台，知识库已重构为 ES 混合检索；导出/图表动作未完成）；M3 的模型多配置管理 ✅（Agent 规划与代码沙箱未做）；知识库文件删除 + 上传内容去重 ✅；M4 未开始。
 
 ## 仓库规范
 

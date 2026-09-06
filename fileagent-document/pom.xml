@@ -67,5 +67,11 @@
             <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Boot 4 切片测试：@DataJpaTest 已从 spring-boot-starter-test 拆分到本模块 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-data-jpa-test</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

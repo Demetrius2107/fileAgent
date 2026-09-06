@@ -11,6 +11,7 @@
         emptyChat: '<svg viewBox="0 0 80 80" fill="none" width="80" height="80"><rect x="10" y="16" width="60" height="40" rx="8" fill="#eef1fe" stroke="#4f6ef7" stroke-width="1.5"/><circle cx="28" cy="36" r="3" fill="#4f6ef7"/><circle cx="40" cy="36" r="3" fill="#4f6ef7"/><circle cx="52" cy="36" r="3" fill="#4f6ef7"/><path d="M24 56 L20 64 L32 56" fill="#eef1fe" stroke="#4f6ef7" stroke-width="1.5" stroke-linejoin="round"/></svg>',
         fileDoc: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M10 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5z"/><path d="M10 1v4h4"/><line x1="6" y1="9" x2="10" y2="9"/><line x1="6" y1="12" x2="9" y2="12"/></svg>',
         sourceIcon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M13 12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h4l4 4z"/><path d="M9 2v4h4"/></svg>',
+        trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
     };
 
     const sessionList = $('session-list');
@@ -28,7 +29,10 @@
     const uploadName = $('upload-name');
     const uploadTag = $('upload-tag');
     const uploadFiles = $('upload-files');
+    const uploadFileSummary = $('upload-file-summary');
     const uploadError = $('upload-error');
+    const uploadSubmitButton = uploadForm.querySelector('button[type="submit"]');
+    const toastContainer = $('toast-container');
     const modelSettingsButton = $('toggle-model-settings');
     const modelSettingsDialog = $('model-settings-dialog');
     const modelSettingsForm = $('model-settings-form');
@@ -74,6 +78,32 @@
         if (className) { node.className = className; }
         if (text !== undefined) { node.textContent = text; }
         return node;
+    }
+
+    /* 轻提示：替代 alert 的全局操作反馈（上传/删除/建会话等） */
+    function showToast(message, ok = true) {
+        const toast = el('div', `toast ${ok ? 'toast-ok' : 'toast-error'}`, message);
+        toastContainer.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('show'));
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    /* ParseStatus → 展示文案/配色（后端列表只返回 SUCCESS，其余为防御性兜底） */
+    const STATUS_LABELS = {
+        PENDING: { text: '待处理', cls: 'status-other' },
+        PARSING: { text: '解析中', cls: 'status-parsing' },
+        SUCCESS: { text: '已索引', cls: 'status-ready' },
+        FAILED: { text: '失败', cls: 'status-failed' }
+    };
+
+    /* 后端 LocalDateTime 无时区且即本机时间，新消息用同格式本地时间保持一致 */
+    function localIsoNow() {
+        const d = new Date();
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
 
     function svgEl(svgString) {
@@ -126,7 +156,7 @@
             return;
         }
         for (const message of messages) {
-            appendMessage(message.role, message.content);
+            appendMessage(message.role, message.content, message.createdAt);
         }
     }
 
@@ -140,13 +170,14 @@
         messageList.appendChild(hint);
     }
 
-    function appendMessage(role, content) {
+    function appendMessage(role, content, createdAt) {
         const wrap = el('div', `message ${role === 'USER' ? 'user' : 'assistant'}`);
         const avatar = el('div', 'message-avatar');
         avatar.innerHTML = role === 'USER' ? SVG.userAvatar : SVG.botAvatar;
         wrap.appendChild(avatar);
         const body = el('div', 'message-body');
         body.appendChild(el('div', 'message-bubble', content));
+        if (createdAt) { body.appendChild(el('div', 'message-time', formatTime(createdAt))); }
         wrap.appendChild(body);
         messageList.appendChild(wrap);
         messageList.scrollTop = messageList.scrollHeight;
@@ -168,11 +199,19 @@
         promptInput.style.height = `${Math.min(promptInput.scrollHeight, 120)}px`;
     });
 
+    /* 占位符承诺的快捷键：Ctrl/⌘ + Enter 发送 */
+    promptInput.addEventListener('keydown', (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+            event.preventDefault();
+            chatForm.requestSubmit();
+        }
+    });
+
     stopButton.addEventListener('click', () => { abortController && abortController.abort(); });
 
     async function sendMessage(prompt) {
         promptInput.value = '';
-        appendMessage('USER', prompt);
+        appendMessage('USER', prompt, localIsoNow());
         const assistant = appendMessage('ASSISTANT', '');
         const bubble = assistant.querySelector('.message-bubble');
 
@@ -204,6 +243,9 @@
         } finally {
             setStreaming(false);
             abortController = null;
+            if (!assistant.querySelector('.message-time')) {
+                assistant.querySelector('.message-body').appendChild(el('div', 'message-time', formatTime(localIsoNow())));
+            }
             messageList.scrollTop = messageList.scrollHeight;
         }
     }
@@ -283,19 +325,50 @@
             return;
         }
         for (const file of files) {
-            const item = el('li');
-            const nameEl = el('div', 'knowledge-file-name');
-            nameEl.appendChild(svgEl(SVG.fileDoc));
-            nameEl.appendChild(document.createTextNode(file.filename));
-            item.appendChild(nameEl);
-            const meta = el('div', 'knowledge-file-meta');
-            const statusSpan = el('span', file.status === 'READY' ? 'status-ready' : 'status-other', `状态 ${file.status || '-'}`);
-            meta.appendChild(statusSpan);
-            meta.appendChild(el('span', null, `分块 ${file.chunkCount == null ? '-' : file.chunkCount}`));
-            meta.appendChild(el('span', null, formatTime(file.createdAt)));
-            item.appendChild(meta);
-            knowledgeList.appendChild(item);
+            knowledgeList.appendChild(renderKnowledgeItem(file));
         }
+    }
+
+    function renderKnowledgeItem(file) {
+        const item = el('li');
+        const head = el('div', 'knowledge-file-head');
+        const nameEl = el('div', 'knowledge-file-name');
+        nameEl.appendChild(svgEl(SVG.fileDoc));
+        nameEl.appendChild(document.createTextNode(file.filename));
+        nameEl.title = file.filename;
+        head.appendChild(nameEl);
+        head.appendChild(buildKnowledgeDeleteButton(file));
+        item.appendChild(head);
+
+        const meta = el('div', 'knowledge-file-meta');
+        const status = STATUS_LABELS[file.status] || { text: file.status || '-', cls: 'status-other' };
+        meta.appendChild(el('span', status.cls, status.text));
+        meta.appendChild(el('span', null, `${file.ragName} · ${file.knowledgeTag}`));
+        meta.appendChild(el('span', null, `分块 ${file.chunkCount == null ? '-' : file.chunkCount}`));
+        meta.appendChild(el('span', null, formatTime(file.createdAt)));
+        item.appendChild(meta);
+        return item;
+    }
+
+    function buildKnowledgeDeleteButton(file) {
+        const button = el('button', 'knowledge-delete-button');
+        button.type = 'button';
+        button.title = '删除该知识文件';
+        button.setAttribute('aria-label', `删除 ${file.filename}`);
+        button.innerHTML = SVG.trash;
+        button.addEventListener('click', async () => {
+            if (!confirm(`删除知识文件「${file.filename}」？其向量索引与原件将一并清除，且不可恢复。`)) { return; }
+            button.disabled = true;
+            try {
+                await api(`/api/rag-files/${file.id}`, { method: 'DELETE' });
+                showToast(`已删除 ${file.filename}`);
+                await loadKnowledge();
+            } catch (e) {
+                button.disabled = false;
+                showToast(`删除失败：${e.message}`, false);
+            }
+        });
+        return button;
     }
 
     function formatTime(iso) {
@@ -311,6 +384,17 @@
 
     $('upload-cancel').addEventListener('click', () => { uploadDialog.close(); });
 
+    /* 选中文件后展示摘要，让用户确认选了什么 */
+    uploadFiles.addEventListener('change', () => {
+        const selected = Array.from(uploadFiles.files || []);
+        uploadFileSummary.hidden = selected.length === 0;
+        if (selected.length === 1) {
+            uploadFileSummary.textContent = selected[0].name;
+        } else if (selected.length > 1) {
+            uploadFileSummary.textContent = `已选 ${selected.length} 个文件：${selected.map((f) => f.name).join('、')}`;
+        }
+    });
+
     uploadForm.addEventListener('submit', async (event) => {
         event.preventDefault();
         const name = uploadName.value.trim();
@@ -323,13 +407,21 @@
         formData.append('name', name);
         formData.append('tag', tag);
         for (const file of uploadFiles.files) { formData.append('files', file); }
+        const fileCount = uploadFiles.files.length;
+        uploadSubmitButton.disabled = true;
+        uploadSubmitButton.textContent = '上传中…';
         try {
             await api('/api/rag-files/upload', { method: 'POST', body: formData });
             uploadDialog.close();
             uploadForm.reset();
+            uploadFileSummary.hidden = true;
             await loadKnowledge();
+            showToast(fileCount === 1 ? '上传完成，已建立索引' : `上传完成，已建立索引（${fileCount} 个文件）`);
         } catch (e) {
             showUploadError(e.message);
+        } finally {
+            uploadSubmitButton.disabled = false;
+            uploadSubmitButton.textContent = '开始上传';
         }
     });
 
@@ -527,7 +619,7 @@
 
     newSessionButton.addEventListener('click', () => {
         newSessionButton.disabled = true;
-        createSession().catch((e) => alert(`创建会话失败：${e.message}`))
+        createSession().catch((e) => showToast(`创建会话失败：${e.message}`, false))
             .finally(() => { newSessionButton.disabled = false; });
     });
 

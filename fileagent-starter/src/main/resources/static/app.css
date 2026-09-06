@@ -219,7 +219,15 @@ body {
 }
 .knowledge-list li:hover { border-color: var(--accent); box-shadow: var(--shadow-sm); }
 
+.knowledge-file-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+}
+
 .knowledge-file-name {
+    flex: 1;
+    min-width: 0;
     font-weight: 600;
     word-break: break-all;
     font-size: 13px;
@@ -227,6 +235,25 @@ body {
     align-items: center;
     gap: 6px;
 }
+
+.knowledge-delete-button {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.45;
+    transition: all var(--transition);
+}
+.knowledge-list li:hover .knowledge-delete-button { opacity: 1; }
+.knowledge-delete-button:hover { background: var(--danger-light); color: var(--danger); }
+.knowledge-delete-button:disabled { opacity: 0.35; cursor: default; }
 
 .knowledge-file-meta {
     margin-top: 6px;
@@ -245,6 +272,8 @@ body {
     background: var(--bg);
 }
 .knowledge-file-meta .status-ready { color: var(--success); background: var(--success-light); }
+.knowledge-file-meta .status-parsing { color: #d97706; background: #fef3c7; }
+.knowledge-file-meta .status-failed { color: var(--danger); background: var(--danger-light); }
 .knowledge-file-meta .status-other { color: var(--text-muted); }
 
 .list-empty {
@@ -688,3 +717,53 @@ dialog.upload-dialog form {
 .badge-success { background: var(--success-light); color: var(--success); }
 .badge-warning { background: #fef3c7; color: #d97706; }
 .badge-error { background: var(--danger-light); color: var(--danger); }
+
+/* ===== 消息时间 ===== */
+.message-time {
+    margin-top: 4px;
+    padding: 0 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.message.user .message-time { text-align: right; }
+
+/* ===== 上传文件摘要 ===== */
+.file-summary {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    background: var(--accent-light);
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin: -6px 0 14px;
+    word-break: break-all;
+}
+
+/* ===== 轻提示 toast ===== */
+#toast-container {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    z-index: 100;
+    pointer-events: none;
+}
+.toast {
+    max-width: min(80vw, 480px);
+    padding: 9px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #fff;
+    background: rgba(26, 26, 46, 0.88);
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    word-break: break-all;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-error { background: rgba(239, 68, 68, 0.92); }

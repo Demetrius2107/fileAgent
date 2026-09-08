@@ -34,7 +34,7 @@ checkout → setup JDK 21 (temurin, maven cache) → mvn -B -ntp verify → 失�
 - Spring AI milestone 仓库在 `pom.xml` 已配置，runner 可直接访问。
 - 失败时把 `**/target/surefire-reports/` 作为 artifact 上传，保留 7 天，便于在 Actions 页面下载排查。
 
-> 当前项目暂无测试类，`mvn verify` 等价于编译校验。协作者按 `docs/TESTING.md` 补测试后，CI 会自动跑起来。
+> 当前 `mvn verify` 会执行各模块单元/集成测试，以及 `fileagent-evaluation` 的评测框架和 30 题 Schema 契约测试。真实检索评测应放在手动或定时工作流，由 CI 携带部署地址和独立评测 Token 调用已部署实例；模型密钥只保留在部署环境中，不能复制到 CI。
 
 ## 4. CD 流水线细节（cd.yml）
 

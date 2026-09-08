@@ -25,6 +25,7 @@
         <module>fileagent-document</module>
         <module>fileagent-chat</module>
         <module>fileagent-action</module>
+        <module>fileagent-evaluation</module>
         <module>fileagent-starter</module>
         <module>ragflow-quickstart</module>
     </modules>
@@ -69,6 +70,11 @@
             <dependency>
                 <groupId>com.demetrius</groupId>
                 <artifactId>fileagent-action</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.demetrius</groupId>
+                <artifactId>fileagent-evaluation</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

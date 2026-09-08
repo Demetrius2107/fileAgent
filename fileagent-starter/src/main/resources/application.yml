@@ -77,6 +77,10 @@ fileagent:
     candidate-top-k: 50
     top-n: 12
     min-relevance-score: ${FILEAGENT_RERANKER_MIN_RELEVANCE_SCORE:0.2}
+  evaluation:
+    endpoint:
+      enabled: ${FILEAGENT_EVALUATION_ENABLED:false}
+      token: ${FILEAGENT_EVALUATION_TOKEN:}
 
 # Swagger
 springdoc:

@@ -16,6 +16,7 @@
 | service | 单元(Mock) | Mock repo/vectorStore，验编排逻辑 |
 | controller | MockMvc | 断言 HTTP 状态/JSON 结构 |
 | 集成 | `@SpringBootTest` | 端到端：上传→问答（M1 至少一条 happy path） |
+| RAG 离线评测 | `fileagent-evaluation` | 固定题库计算检索、回答、引用指标并比较 baseline |
 
 ## 3. 原则
 
@@ -39,3 +40,11 @@ mvn verify            # 含集成（如有）
 ```
 
 提交前确保 `mvn test` 通过；新增功能必须带测试。
+
+## 6. RAG 质量评测
+
+- 评测数据位于 `fileagent-evaluation/src/main/resources/evaluation/<版本>/`。
+- 普通 `mvn verify` 只验证评测框架和数据 Schema，不调用外部模型。
+- 真实 baseline 由脚本调用已部署实例的内部评测接口，通过正式 `KnowledgeSearchPort` 生成。
+- PR 门禁使用 `gate.json` 的绝对下限，并可与已认可的 `report.json` 比较最大回退量。
+- 完整命令、数据格式和指标定义见 `fileagent-evaluation/README.md`。

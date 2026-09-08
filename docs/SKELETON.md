@@ -56,6 +56,10 @@ fileAgent/
 │   ├── domain/                       ActionHandler（接口）
 │   └── infrastructure/               ActionHandlerRegistry
 │
+├── fileagent-evaluation/          ✅ RAG 离线评测工具
+│   ├── evaluation/                   JSONL 加载 / Runner / 指标 / 报告 / 质量门禁
+│   └── resources/evaluation/v1/      固定语料、30 题数据集、门禁阈值
+│
 ├── fileagent-starter/             ✅ 主应用启动装配（自研 RAG Boot 入口）
 │   ├── FileAgentApplication.java
 │   ├── resources/application.yml
@@ -74,7 +78,8 @@ fileAgent/
 ```
 fileagent-api → fileagent-common
 fileagent-session / document / chat / action → fileagent-api（各域互不直接依赖）
-fileagent-starter → 全部业务域
+fileagent-evaluation → fileagent-api（通过 KnowledgeSearchPort 评测正式检索链路）
+fileagent-starter → 全部业务域 + fileagent-evaluation
 ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块）
 ```
 
@@ -115,7 +120,8 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | document | api + web + data-jpa + spring-ai-starter-model-openai（Embedding）+ spring-boot-starter-elasticsearch（知识索引与检索）+ pdfbox + poi-ooxml + h2(runtime) + testcontainers-elasticsearch / testcontainers-junit-jupiter / spring-boot-data-jpa-test(test) |
 | chat | api + web + webflux（流式调用）+ spring-ai-starter-model-deepseek + spring-ai-starter-model-openai（多 Provider 动态构建）+ data-jpa（模型配置实体）+ reactor-test(test) |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
-| starter | 全部业务域 + h2(runtime) + springdoc |
+| evaluation | api + web + Jackson 3（内部接口默认关闭，通过正式 KnowledgeSearchPort 执行） |
+| starter | 全部业务域 + evaluation + h2(runtime) + springdoc |
 | ragflow-quickstart | webflux + validation（独立调用 RAGFlow HTTP API） |
 
 ### 后续里程碑新增
@@ -139,6 +145,8 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | `spring.elasticsearch.*` | Elasticsearch 地址与凭证（环境变量注入） | ❌ 凭证严禁提交 |
 | `fileagent.elasticsearch.*` | 索引别名、BM25/KNN/RRF 与结果数量 | ✅ |
 | `fileagent.chat-history-limit` | 对话注入的历史条数（取最后 N 条） | ✅ |
+| `fileagent.evaluation.endpoint.enabled` | 是否开启内部评测接口，默认 false | ✅ |
+| `fileagent.evaluation.endpoint.token` | `${FILEAGENT_EVALUATION_TOKEN}` | ❌ 严禁提交 |
 
 ## 6. 两人分工建议（按里程碑）
 

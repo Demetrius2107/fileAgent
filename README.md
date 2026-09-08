@@ -12,6 +12,7 @@ fileagent-common   通用支撑（统一响应/异常）
 fileagent-api      契约层（DTO / 枚举 / 端口 / 领域事件）
 fileagent-session  会话域        fileagent-document  文档域
 fileagent-chat     对话/推理域(核心) fileagent-action    动作执行域
+fileagent-evaluation RAG 评测集 / 内部评测接口 / baseline 门禁
 fileagent-starter  启动装配（唯一 Boot 入口）
 ragflow-quickstart RAGFlow HTTP API 独立学习模块
 ```
@@ -39,6 +40,8 @@ mvn -pl fileagent-starter -am spring-boot:run
 ```
 
 RAGFlow 托管式 RAG 的独立调用工程位于 [`ragflow-quickstart`](ragflow-quickstart/README.md)，已加入根 Maven 聚合，可在 IDEA 中作为独立模块运行。
+
+自研 RAG 的评测框架和首批 30 题位于 [`fileagent-evaluation`](fileagent-evaluation/README.md)。
 
 打开 `http://localhost:8080/` 即可使用同源工作台：新建会话 → 右侧「知识库」上传 TXT/MD/PDF/DOCX/XLSX/CSV → 中间提问，回答流式输出并标明来源文件；刷新页面后会话与消息仍在（H2 落库，知识索引存于 Elasticsearch）。
 

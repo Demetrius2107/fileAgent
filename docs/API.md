@@ -19,6 +19,7 @@
 |---|---|
 | 0 | 成功 |
 | 400 | 参数错误 / 业务错误 |
+| 401 | 内部接口认证失败 |
 | 404 | 资源不存在（会话/文档/产物） |
 | 500 | 系统异常 |
 
@@ -248,6 +249,69 @@ Response `data`: `ModelProviderSummary`（同 3.5.1）
 `DELETE /api/model-providers/{id}`
 
 删除启用中的配置时，聊天模型自动回落默认（环境变量）。Response `data`: `true`
+
+---
+
+## 3.6 内部 RAG 评测
+
+### 3.6.1 执行固定数据集评测
+
+`POST /internal/evaluation/rag/run`
+
+该接口默认不存在。部署时同时配置以下环境变量后才会注册：
+
+```bash
+FILEAGENT_EVALUATION_ENABLED=true
+FILEAGENT_EVALUATION_TOKEN=<随机长 Token>
+```
+
+请求头：
+
+```text
+X-FileAgent-Evaluation-Token: <FILEAGENT_EVALUATION_TOKEN>
+Content-Type: application/json
+```
+
+Request（全部字段可省略）：
+
+```json
+{
+  "datasetVersion": "v1",
+  "kValues": [1, 3, 5, 10],
+  "metadata": {
+    "trigger": "manual"
+  },
+  "baseline": null
+}
+```
+
+- 数据集从当前部署包的 `evaluation/{datasetVersion}/cases/*.jsonl` 加载，单次最多 100 题。
+- 使用当前实例的 `KnowledgeSearchPort`，因此复用已经生效的 Embedding、Elasticsearch、RRF 和可选 reranker 配置。
+- 不调用 Chat 模型；不接收也不返回任何模型 API Key。
+- `baseline` 可传上一次的 `report.json`，用于检查核心指标回退。
+- 接口返回逐题 observation、汇总报告和 Markdown 报告文本。Token 缺失或错误返回 HTTP 401。
+- 必须在网关或防火墙限制 `/internal/evaluation/**`，不要暴露给普通用户。
+
+Response `data`：
+
+```json
+{
+  "report": {
+    "datasetVersion": "v1",
+    "totalCases": 30,
+    "scores": {
+      "recall@10": 0.8,
+      "mrr": 0.7
+    },
+    "gate": {
+      "passed": true,
+      "violations": []
+    }
+  },
+  "observations": [],
+  "markdown": "# RAG 评测报告..."
+}
+```
 
 ---
 

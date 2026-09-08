@@ -32,6 +32,10 @@
             <groupId>com.demetrius</groupId>
             <artifactId>fileagent-action</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.demetrius</groupId>
+            <artifactId>fileagent-evaluation</artifactId>
+        </dependency>
 
         <!-- 运行时 -->
         <dependency>

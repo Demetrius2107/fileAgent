@@ -12,7 +12,7 @@
 
     <artifactId>fileagent-evaluation</artifactId>
     <name>fileagent-evaluation</name>
-    <description>RAG 离线评测、baseline 报告与质量门禁</description>
+    <description>RAG 端到端评测、baseline 报告与质量门禁</description>
 
     <dependencies>
         <dependency>

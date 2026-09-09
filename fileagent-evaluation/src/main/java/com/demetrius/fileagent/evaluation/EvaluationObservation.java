@@ -16,6 +16,7 @@ public record EvaluationObservation(
         Boolean refused,
         List<ObservedSource> citations,
         Map<String, Double> judgeScores,
+        Map<String, String> judgeReasons,
         Long durationMs,
         String error
 ) {
@@ -26,6 +27,7 @@ public record EvaluationObservation(
         retrieved = retrieved == null ? List.of() : List.copyOf(retrieved);
         citations = citations == null ? List.of() : List.copyOf(citations);
         judgeScores = judgeScores == null ? Map.of() : Map.copyOf(judgeScores);
+        judgeReasons = judgeReasons == null ? Map.of() : Map.copyOf(judgeReasons);
         durationMs = durationMs == null ? 0L : durationMs;
     }
 

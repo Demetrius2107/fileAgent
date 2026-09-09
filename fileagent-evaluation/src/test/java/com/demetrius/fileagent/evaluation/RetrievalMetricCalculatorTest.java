@@ -78,7 +78,8 @@ class RetrievalMetricCalculatorTest {
     }
 
     private static EvaluationObservation observation(List<EvaluationObservation.ObservedSource> sources) {
-        return new EvaluationObservation("1.0", "case-1", sources, null, null, List.of(), Map.of(), 1L, null);
+        return new EvaluationObservation("1.0", "case-1", sources, null, null,
+                List.of(), Map.of(), Map.of(), 1L, null);
     }
 
     private static org.assertj.core.data.Offset<Double> within(double value) {

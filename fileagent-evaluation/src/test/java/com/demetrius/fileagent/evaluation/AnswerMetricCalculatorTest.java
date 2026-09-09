@@ -24,7 +24,10 @@ class AnswerMetricCalculatorTest {
                                 null, null, null, null),
                         new EvaluationObservation.ObservedSource(null, null, "other.md", null, null,
                                 null, null, null, null)),
-                Map.of("faithfulness", 0.9), 10L, null);
+                Map.of("requiredFactCoverage", 1.0, "forbiddenFactSafety", 1.0,
+                        "answerDecisionAccuracy", 1.0, "unsupportedClaimSafety", 1.0,
+                        "faithfulness", 0.9),
+                Map.of("requiredFactCoverage", "两个要点均已覆盖"), 10L, null);
 
         Map<String, Double> scores = new AnswerMetricCalculator().calculate(evaluationCase, observation);
 
@@ -33,6 +36,7 @@ class AnswerMetricCalculatorTest {
                 .containsEntry("citationPrecision", 0.5)
                 .containsEntry("citationRecall", 1.0)
                 .containsEntry("answerDecisionAccuracy", 1.0)
+                .containsEntry("unsupportedClaimSafety", 1.0)
                 .containsEntry("judge.faithfulness", 0.9);
     }
 
@@ -42,8 +46,26 @@ class AnswerMetricCalculatorTest {
                 List.of(), new EvaluationCase.Filters(null, null, null),
                 new EvaluationCase.Expected(true, List.of(), List.of("事实"), List.of()));
         EvaluationObservation observation = new EvaluationObservation("1.0", "answer-2", List.of(),
-                null, null, List.of(), Map.of(), 2L, null);
+                null, null, List.of(), Map.of(), Map.of(), 2L, null);
 
         assertThat(new AnswerMetricCalculator().calculate(evaluationCase, observation)).isEmpty();
+    }
+
+    @Test
+    void shouldEvaluateDisplayedCitationAtFileLevel() {
+        EvaluationCase evaluationCase = new EvaluationCase("1.0", "table", "TABLE", List.of(), "问题",
+                List.of(), new EvaluationCase.Filters(null, null, null),
+                new EvaluationCase.Expected(true, List.of(
+                        new EvaluationCase.ExpectedSource(null, null, "sales.csv", null, null, 1, 3),
+                        new EvaluationCase.ExpectedSource(null, null, "sales.csv", null, null, 2, 3)
+                ), List.of(), List.of()));
+        EvaluationObservation observation = new EvaluationObservation("1.0", "table", List.of(),
+                "回答", false, List.of(new EvaluationObservation.ObservedSource(
+                null, null, "sales.csv", null, null, null, 0, null, null)),
+                Map.of(), Map.of(), 1L, null);
+
+        assertThat(new AnswerMetricCalculator().calculate(evaluationCase, observation))
+                .containsEntry("citationPrecision", 1.0)
+                .containsEntry("citationRecall", 1.0);
     }
 }

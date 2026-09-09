@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.evaluation;
 
-import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
+import com.demetrius.fileagent.api.port.RagAnswerEvaluationPort;
+import com.demetrius.fileagent.api.port.RagAnswerJudgePort;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
@@ -27,7 +28,8 @@ public class EvaluationEndpointService {
     private static final int MAX_CASES = 100;
     private static final String VERSION_PATTERN = "[a-zA-Z0-9._-]+";
 
-    private final KnowledgeSearchPort knowledgeSearchPort;
+    private final RagAnswerEvaluationPort ragAnswerEvaluationPort;
+    private final RagAnswerJudgePort ragAnswerJudgePort;
     private final ObjectMapper objectMapper;
     private final ResourcePatternResolver resourcePatternResolver;
     private final Environment environment;
@@ -41,13 +43,15 @@ public class EvaluationEndpointService {
             throw new IllegalArgumentException("单次评测题目不能超过 " + MAX_CASES + " 道");
         }
 
-        List<EvaluationObservation> observations = new EvaluationRunner(knowledgeSearchPort).collect(cases);
+        List<EvaluationObservation> observations = new EvaluationRunner(
+                ragAnswerEvaluationPort, ragAnswerJudgePort).collect(cases);
         EvaluationReport report = new EvaluationEngine().evaluate(datasetVersion, cases, observations,
                 actualRequest.kValues(), runtimeMetadata(actualRequest.metadata()));
         QualityGateConfig gate = files.loadGateConfig(resource(
                 "classpath:evaluation/" + datasetVersion + "/gate.json"));
         report = report.withGate(new QualityGateEvaluator().evaluate(report, gate, actualRequest.baseline()));
-        return new EvaluationRunResponse(report, observations, EvaluationReportWriter.toMarkdown(report));
+        return new EvaluationRunResponse(report, observations,
+                EvaluationReportWriter.toMarkdown(report, cases, observations, gate));
     }
 
     private Resource[] findCaseResources(String datasetVersion) {
@@ -73,6 +77,8 @@ public class EvaluationEndpointService {
 
     private Map<String, String> runtimeMetadata(Map<String, String> requestedMetadata) {
         Map<String, String> metadata = new LinkedHashMap<>(requestedMetadata);
+        metadata.put("evaluationMode", "end-to-end");
+        metadata.put("judgeModel", "deepseek-v4-pro");
         addProperty(metadata, "embeddingModel", "spring.ai.openai.embedding.model");
         addProperty(metadata, "embeddingDimensions", "fileagent.elasticsearch.dimensions");
         addProperty(metadata, "indexAlias", "fileagent.elasticsearch.index-alias");

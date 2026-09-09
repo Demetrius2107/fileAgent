@@ -56,7 +56,7 @@ fileAgent/
 │   ├── domain/                       ActionHandler（接口）
 │   └── infrastructure/               ActionHandlerRegistry
 │
-├── fileagent-evaluation/          ✅ RAG 离线评测工具
+├── fileagent-evaluation/          ✅ RAG 端到端评测工具
 │   ├── evaluation/                   JSONL 加载 / Runner / 指标 / 报告 / 质量门禁
 │   └── resources/evaluation/v1/      固定语料、30 题数据集、门禁阈值
 │
@@ -120,7 +120,7 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | document | api + web + data-jpa + spring-ai-starter-model-openai（Embedding）+ spring-boot-starter-elasticsearch（知识索引与检索）+ pdfbox + poi-ooxml + h2(runtime) + testcontainers-elasticsearch / testcontainers-junit-jupiter / spring-boot-data-jpa-test(test) |
 | chat | api + web + webflux（流式调用）+ spring-ai-starter-model-deepseek + spring-ai-starter-model-openai（多 Provider 动态构建）+ data-jpa（模型配置实体）+ reactor-test(test) |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
-| evaluation | api + web + Jackson 3（内部接口默认关闭，通过正式 KnowledgeSearchPort 执行） |
+| evaluation | api + web + Jackson 3（内部接口默认关闭，通过 API Port 执行正式 RAG 并接收 DeepSeek Judge 结果） |
 | starter | 全部业务域 + evaluation + h2(runtime) + springdoc |
 | ragflow-quickstart | webflux + validation（独立调用 RAGFlow HTTP API） |
 
@@ -147,6 +147,7 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | `fileagent.chat-history-limit` | 对话注入的历史条数（取最后 N 条） | ✅ |
 | `fileagent.evaluation.endpoint.enabled` | 是否开启内部评测接口，默认 false | ✅ |
 | `fileagent.evaluation.endpoint.token` | `${FILEAGENT_EVALUATION_TOKEN}` | ❌ 严禁提交 |
+| RAG Judge 模型 | 固定使用 `deepseek-v4-pro`，复用 `FILEAGENT_CHAT_API_KEY` | ❌ API Key 严禁提交 |
 
 ## 6. 两人分工建议（按里程碑）
 

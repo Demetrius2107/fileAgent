@@ -62,7 +62,8 @@ class EvaluationEngineTest {
     private static EvaluationObservation observation(String id,
                                                      List<EvaluationObservation.ObservedSource> sources,
                                                      String error) {
-        return new EvaluationObservation("1.0", id, sources, null, null, List.of(), Map.of(), 3L, error);
+        return new EvaluationObservation("1.0", id, sources, null, null,
+                List.of(), Map.of(), Map.of(), 3L, error);
     }
 
     private static EvaluationObservation.ObservedSource observed(String filename) {

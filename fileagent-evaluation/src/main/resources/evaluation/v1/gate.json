@@ -5,13 +5,25 @@
     "hitRate@5": 0.50,
     "recall@10": 0.60,
     "mrr": 0.30,
-    "ndcg@10": 0.45
+    "ndcg@10": 0.45,
+    "requiredFactCoverage": 0.75,
+    "forbiddenFactSafety": 0.90,
+    "answerDecisionAccuracy": 0.95,
+    "unsupportedClaimSafety": 0.90,
+    "citationPrecision": 0.20,
+    "citationRecall": 0.90
   },
   "maximumRegression": 0.03,
   "regressionMetrics": [
     "hitRate@5",
     "recall@10",
     "mrr",
-    "ndcg@10"
+    "ndcg@10",
+    "requiredFactCoverage",
+    "forbiddenFactSafety",
+    "answerDecisionAccuracy",
+    "unsupportedClaimSafety",
+    "citationPrecision",
+    "citationRecall"
   ]
 }

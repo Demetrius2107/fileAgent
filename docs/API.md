@@ -286,10 +286,12 @@ Request（全部字段可省略）：
 ```
 
 - 数据集从当前部署包的 `evaluation/{datasetVersion}/cases/*.jsonl` 加载，单次最多 100 题。
-- 使用当前实例的 `KnowledgeSearchPort`，因此复用已经生效的 Embedding、Elasticsearch、RRF 和可选 reranker 配置。
-- 不调用 Chat 模型；不接收也不返回任何模型 API Key。
+- 使用当前实例的正式 RAG 评测 Port，因此复用已经生效的 Chat、Embedding、Elasticsearch、RRF 和可选 reranker 配置。
+- 每题执行检索、Prompt 构造和 Chat 回答，再使用 `deepseek-v4-pro` 做结构化语义评判，但不创建或写入用户会话。
+- Judge 复用部署已有的 `FILEAGENT_CHAT_API_KEY` 和 DeepSeek 端点，不需要新增 API Key。
+- 不接收也不返回任何模型 API Key。
 - `baseline` 可传上一次的 `report.json`，用于检查核心指标回退。
-- 接口返回逐题 observation、汇总报告和 Markdown 报告文本。Token 缺失或错误返回 HTTP 401。
+- 接口返回逐题检索片段、实际回答、拒答判断、来源和汇总报告；Markdown 包含指标解释，并只展示未通过门禁指标下最多 3 道代表问题。Token 缺失或错误返回 HTTP 401。
 - 必须在网关或防火墙限制 `/internal/evaluation/**`，不要暴露给普通用户。
 
 Response `data`：
@@ -301,15 +303,34 @@ Response `data`：
     "totalCases": 30,
     "scores": {
       "recall@10": 0.8,
-      "mrr": 0.7
+      "mrr": 0.7,
+      "requiredFactCoverage": 0.9,
+      "unsupportedClaimSafety": 1.0
     },
     "gate": {
       "passed": true,
       "violations": []
     }
   },
-  "observations": [],
-  "markdown": "# RAG 评测报告..."
+  "observations": [
+    {
+      "caseId": "fact-001",
+      "answer": "员工入职第一年享有 5 天年假。",
+      "refused": false,
+      "citations": [{"filename": "employee-handbook.md"}],
+      "judgeScores": {
+        "requiredFactCoverage": 1.0,
+        "answerDecisionAccuracy": 1.0,
+        "unsupportedClaimSafety": 1.0
+      },
+      "judgeReasons": {
+        "requiredFactCoverage": "年假 5 天：回答明确表达了该事实",
+        "answerDecisionAccuracy": "回答给出了问题要求的信息",
+        "unsupportedClaimSafety": "未发现证据不支持的具体结论"
+      }
+    }
+  ],
+  "markdown": "# RAG 端到端评测报告..."
 }
 ```
 

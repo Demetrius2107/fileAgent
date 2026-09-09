@@ -3,16 +3,18 @@ package com.demetrius.fileagent.evaluation;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * 计算可确定复现的回答事实与引用指标。
+ * 汇总 Judge 回答指标并计算确定性的引用指标。
  *
  * @author raosaijie
  */
 public final class AnswerMetricCalculator {
+
+    private static final Set<String> BUILT_IN_JUDGE_METRICS = Set.of(
+            "requiredFactCoverage", "forbiddenFactSafety", "answerDecisionAccuracy", "unsupportedClaimSafety");
 
     public Map<String, Double> calculate(EvaluationCase evaluationCase, EvaluationObservation observation) {
         if (!hasAnswerObservation(observation)) {
@@ -20,25 +22,10 @@ public final class AnswerMetricCalculator {
         }
 
         Map<String, Double> scores = new LinkedHashMap<>();
-        String normalizedAnswer = normalize(observation.answer());
-        List<String> requiredFacts = evaluationCase.expected().requiredFacts();
-        if (!requiredFacts.isEmpty()) {
-            long found = requiredFacts.stream().map(AnswerMetricCalculator::normalize)
-                    .filter(normalizedAnswer::contains).count();
-            scores.put("requiredFactCoverage", found / (double) requiredFacts.size());
-        }
-        List<String> forbiddenFacts = evaluationCase.expected().forbiddenFacts();
-        if (!forbiddenFacts.isEmpty()) {
-            long found = forbiddenFacts.stream().map(AnswerMetricCalculator::normalize)
-                    .filter(normalizedAnswer::contains).count();
-            scores.put("forbiddenFactSafety", 1.0 - found / (double) forbiddenFacts.size());
-        }
-        if (observation.refused() != null) {
-            boolean expectedRefusal = !evaluationCase.expected().shouldAnswer();
-            scores.put("answerDecisionAccuracy", expectedRefusal == observation.refused() ? 1.0 : 0.0);
-        }
         addCitationScores(scores, evaluationCase.expected().relevantSources(), observation.citations());
-        observation.judgeScores().forEach((name, value) -> scores.put("judge." + name, validateJudgeScore(name, value)));
+        observation.judgeScores().forEach((name, value) -> scores.put(
+                BUILT_IN_JUDGE_METRICS.contains(name) ? name : "judge." + name,
+                validateJudgeScore(name, value)));
         return scores;
     }
 
@@ -50,24 +37,32 @@ public final class AnswerMetricCalculator {
     private static void addCitationScores(Map<String, Double> scores,
                                           List<EvaluationCase.ExpectedSource> expected,
                                           List<EvaluationObservation.ObservedSource> citations) {
-        if (expected.isEmpty() && citations.isEmpty()) {
+        List<EvaluationCase.ExpectedSource> expectedCitations = expected.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        EvaluationCase.ExpectedSource::citationIdentity,
+                        source -> source,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new))
+                .values().stream().toList();
+        if (expectedCitations.isEmpty() && citations.isEmpty()) {
             return;
         }
         long correctCitations = citations.stream()
-                .filter(citation -> expected.stream().anyMatch(source -> source.matches(citation)))
+                .filter(citation -> expectedCitations.stream().anyMatch(source -> source.matchesCitation(citation)))
                 .count();
         scores.put("citationPrecision", citations.isEmpty() ? 0.0 : correctCitations / (double) citations.size());
 
         Set<Integer> matched = new HashSet<>();
         for (EvaluationObservation.ObservedSource citation : citations) {
-            for (int i = 0; i < expected.size(); i++) {
-                if (!matched.contains(i) && expected.get(i).matches(citation)) {
+            for (int i = 0; i < expectedCitations.size(); i++) {
+                if (!matched.contains(i) && expectedCitations.get(i).matchesCitation(citation)) {
                     matched.add(i);
                     break;
                 }
             }
         }
-        scores.put("citationRecall", expected.isEmpty() ? 1.0 : matched.size() / (double) expected.size());
+        scores.put("citationRecall", expectedCitations.isEmpty()
+                ? 1.0 : matched.size() / (double) expectedCitations.size());
     }
 
     private static double validateJudgeScore(String name, Double value) {
@@ -77,10 +72,4 @@ public final class AnswerMetricCalculator {
         return value;
     }
 
-    private static String normalize(String text) {
-        if (text == null) {
-            return "";
-        }
-        return text.toLowerCase(Locale.ROOT).replaceAll("\\s+", "");
-    }
 }

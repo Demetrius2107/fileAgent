@@ -6,8 +6,9 @@ repo_dir="$(cd "$script_dir/../.." && pwd)"
 base_url="${FILEAGENT_BASE_URL:-http://127.0.0.1:8080}"
 token="${FILEAGENT_EVALUATION_TOKEN:-}"
 dataset_version="${FILEAGENT_EVALUATION_DATASET_VERSION:-v1}"
-output_dir="${FILEAGENT_EVALUATION_OUTPUT:-$repo_dir/target/evaluation}"
+output_root="${FILEAGENT_EVALUATION_OUTPUT:-$repo_dir/target/evaluation}"
 baseline_file="${FILEAGENT_EVALUATION_BASELINE:-}"
+run_id="${FILEAGENT_EVALUATION_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
 if [[ -z "$token" ]]; then
   printf '缺少 FILEAGENT_EVALUATION_TOKEN。\n' >&2
@@ -19,6 +20,14 @@ if [[ "$token" == *$'\n'* || "$token" == *$'\r'* ]]; then
 fi
 command -v curl >/dev/null || { printf '缺少 curl。\n' >&2; exit 1; }
 command -v jq >/dev/null || { printf '缺少 jq。\n' >&2; exit 1; }
+if [[ ! "$dataset_version" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  printf 'FILEAGENT_EVALUATION_DATASET_VERSION 格式非法。\n' >&2
+  exit 1
+fi
+if [[ ! "$run_id" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  printf 'FILEAGENT_EVALUATION_RUN_ID 格式非法。\n' >&2
+  exit 1
+fi
 
 temp_dir="$(mktemp -d)"
 trap 'rm -rf "$temp_dir"' EXIT
@@ -59,12 +68,19 @@ if [[ "$(jq -r '.code' "$response_file")" != "0" ]]; then
   exit 1
 fi
 
-mkdir -p "$output_dir"
-jq '.data.report' "$response_file" > "$output_dir/report.json"
-jq -r '.data.markdown' "$response_file" > "$output_dir/report.md"
-jq -c '.data.observations[]' "$response_file" > "$output_dir/observations.jsonl"
+dataset_output_root="$output_root/$dataset_version"
+mkdir -p "$dataset_output_root"
+run_dir="$dataset_output_root/$run_id"
+suffix=2
+while ! mkdir "$run_dir" 2>/dev/null; do
+  run_dir="$dataset_output_root/$run_id-$suffix"
+  suffix=$((suffix + 1))
+done
+jq '.data.report' "$response_file" > "$run_dir/report.json"
+jq -r '.data.markdown' "$response_file" > "$run_dir/report.md"
+jq -c '.data.observations[]' "$response_file" > "$run_dir/observations.jsonl"
 
-printf '评测报告已保存到 %s\n' "$output_dir"
+printf '评测报告已保存到 %s\n' "$run_dir"
 if [[ "$(jq -r '.data.report.gate.passed' "$response_file")" != "true" ]]; then
   jq -r '.data.report.gate.violations[]' "$response_file" >&2
   exit 2

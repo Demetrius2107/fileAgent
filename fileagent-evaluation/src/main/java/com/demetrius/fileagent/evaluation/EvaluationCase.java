@@ -44,6 +44,13 @@ public record EvaluationCase(
      * @author raosaijie
      */
     public record HistoryMessage(String role, String content) {
+        public HistoryMessage {
+            role = requireText(role, "history.role").toUpperCase(java.util.Locale.ROOT);
+            content = requireText(content, "history.content");
+            if (!role.equals("USER") && !role.equals("ASSISTANT")) {
+                throw new IllegalArgumentException("history.role 仅支持 USER 或 ASSISTANT");
+            }
+        }
     }
 
     /**
@@ -105,6 +112,44 @@ public record EvaluationCase(
                     && matchesIfPresent(sheetName, source.sheetName())
                     && matchesIfPresent(sectionId, source.sectionId())
                     && matchesIfPresent(chunkIndex, source.chunkIndex());
+        }
+
+        boolean matchesCitation(EvaluationObservation.ObservedSource source) {
+            if (filename != null) {
+                return filename.equals(source.filename());
+            }
+            if (fileId != null) {
+                return fileId.equals(source.fileId());
+            }
+            if (sheetName != null) {
+                return sheetName.equals(source.sheetName());
+            }
+            if (chunkId != null) {
+                return chunkId.equals(source.chunkId());
+            }
+            if (sectionId != null) {
+                return sectionId.equals(source.sectionId());
+            }
+            return chunkIndex != null && chunkIndex.equals(source.chunkIndex());
+        }
+
+        String citationIdentity() {
+            if (filename != null) {
+                return "filename:" + filename;
+            }
+            if (fileId != null) {
+                return "fileId:" + fileId;
+            }
+            if (sheetName != null) {
+                return "sheetName:" + sheetName;
+            }
+            if (chunkId != null) {
+                return "chunkId:" + chunkId;
+            }
+            if (sectionId != null) {
+                return "sectionId:" + sectionId;
+            }
+            return "chunkIndex:" + chunkIndex;
         }
 
         int specificity() {

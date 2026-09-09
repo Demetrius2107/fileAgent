@@ -53,7 +53,7 @@ class EvaluationEndpointControllerTest {
                 Map.of(), List.of(5), 1, 1, 0, Map.of("caseSuccessRate", 1.0),
                 Map.of("caseSuccessRate", 1), List.of(), new EvaluationReport.GateResult(true, List.of()));
         when(evaluationEndpointService.run(any())).thenReturn(
-                new EvaluationRunResponse(report, List.of(), "# RAG 评测报告"));
+                new EvaluationRunResponse(report, List.of(), "# RAG 端到端评测报告"));
 
         mockMvc.perform(post("/internal/evaluation/rag/run")
                         .header(EvaluationEndpointController.TOKEN_HEADER, "evaluation-secret")

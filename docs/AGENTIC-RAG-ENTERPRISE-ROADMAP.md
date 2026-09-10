@@ -193,6 +193,11 @@ flowchart LR
   - Retrieval：Recall@K、MRR、nDCG、命中正确文档率；
   - Generation：事实完整率、忠实度、拒答准确率、引用正确率；
   - System：P50/P95 延迟、Token、模型费用、异常率。
+- 建立最小请求关联能力：
+  - HTTP/SSE 问答入口接收或生成符合 W3C Trace Context 的 `traceId`；
+  - 在 Reactor 异步链路中传播上下文，使问题改写、检索、模型调用和消息落库日志携带同一个 `traceId`；
+  - 通过响应头返回 `traceId`，错误 SSE 事件同时返回该标识，便于用户报障和日志检索；
+  - 评测记录使用 `evaluationRunId`、`caseId` 关联对应的 `traceId`。
 - 固化当前配置、模型版本、索引版本和结果，生成 baseline 报告。
 - 建立 PR 回归门禁：核心指标下降超过阈值时失败。
 
@@ -201,6 +206,7 @@ flowchart LR
 - 评测可通过一个 Maven 命令离线运行。
 - Mock 模型评测进入普通 CI，真实模型评测进入手动或定时流水线。
 - 每次报告能关联 Git commit、模型、Prompt、索引和数据集版本。
+- 根据任意一次问答返回的 `traceId`，可以检索到入口、问题改写、检索、模型调用和消息落库的关键日志；异步切换线程后关联标识不丢失。
 - 当前 RAG 基线结果已保存，且能重复运行。
 
 ---
@@ -491,7 +497,7 @@ ContentUnit
 
 #### Trace 模型
 
-每个请求至少形成以下层级：
+沿用 Phase 0 建立的 `traceId`，在同一套请求关联标识上补充完整 Span，而不是重新定义另一套链路标识。每个请求至少形成以下层级：
 
 ```text
 invoke_agent

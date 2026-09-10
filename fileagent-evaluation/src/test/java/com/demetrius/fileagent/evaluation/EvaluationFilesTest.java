@@ -7,6 +7,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -44,6 +45,21 @@ class EvaluationFilesTest {
         assertThatThrownBy(() -> files.loadCases(unknown))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("2.0");
+    }
+
+    @Test
+    void shouldPersistJudgeRawResponseInObservations() throws Exception {
+        Path output = tempDir.resolve("observations.jsonl");
+        EvaluationObservation observation = new EvaluationObservation(
+                "1.0", "case-1", List.of(), "回答", false, List.of(), Map.of(), Map.of(),
+                "{\"decision\":\"ANSWERED\"}", 10L, null);
+
+        files.writeObservations(output, List.of(observation));
+
+        assertThat(Files.readString(output))
+                .contains("\"judgeRawResponse\":\"{\\\"decision\\\":\\\"ANSWERED\\\"}\"");
+        assertThat(files.loadObservations(output).getFirst().judgeRawResponse())
+                .isEqualTo("{\"decision\":\"ANSWERED\"}");
     }
 
     private static String caseJson(String id) {

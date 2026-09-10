@@ -38,11 +38,37 @@ public interface RagAnswerJudgePort {
             String unsupportedClaimsReason,
             List<FactAssessment> requiredFacts,
             List<FactAssessment> forbiddenFacts,
+            String rawResponse,
             long durationMs
     ) {
+        public Result(Decision decision,
+                      String decisionReason,
+                      boolean hasUnsupportedClaims,
+                      String unsupportedClaimsReason,
+                      List<FactAssessment> requiredFacts,
+                      List<FactAssessment> forbiddenFacts,
+                      long durationMs) {
+            this(decision, decisionReason, hasUnsupportedClaims, unsupportedClaimsReason,
+                    requiredFacts, forbiddenFacts, null, durationMs);
+        }
+
         public Result {
             requiredFacts = requiredFacts == null ? List.of() : List.copyOf(requiredFacts);
             forbiddenFacts = forbiddenFacts == null ? List.of() : List.copyOf(forbiddenFacts);
+        }
+    }
+
+    final class JudgeException extends RuntimeException {
+
+        private final String rawResponse;
+
+        public JudgeException(String message, String rawResponse, Throwable cause) {
+            super(message, cause);
+            this.rawResponse = rawResponse;
+        }
+
+        public String rawResponse() {
+            return rawResponse;
         }
     }
 

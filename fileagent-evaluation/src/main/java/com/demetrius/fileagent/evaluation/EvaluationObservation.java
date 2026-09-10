@@ -17,9 +17,24 @@ public record EvaluationObservation(
         List<ObservedSource> citations,
         Map<String, Double> judgeScores,
         Map<String, String> judgeReasons,
+        String judgeRawResponse,
         Long durationMs,
         String error
 ) {
+
+    public EvaluationObservation(String schemaVersion,
+                                 String caseId,
+                                 List<ObservedSource> retrieved,
+                                 String answer,
+                                 Boolean refused,
+                                 List<ObservedSource> citations,
+                                 Map<String, Double> judgeScores,
+                                 Map<String, String> judgeReasons,
+                                 Long durationMs,
+                                 String error) {
+        this(schemaVersion, caseId, retrieved, answer, refused, citations,
+                judgeScores, judgeReasons, null, durationMs, error);
+    }
 
     public EvaluationObservation {
         schemaVersion = requireText(schemaVersion, "schemaVersion");

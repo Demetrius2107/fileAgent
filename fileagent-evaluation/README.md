@@ -71,7 +71,7 @@ export FILEAGENT_EVALUATION_TOKEN='<与部署实例一致>'
 
 输出文件：
 
-- `target/evaluation/<版本>/<UTC运行时间>/observations.jsonl`：逐题检索、回答与来源原始结果。
+- `target/evaluation/<版本>/<UTC运行时间>/observations.jsonl`：逐题检索、回答、来源和 Judge 原始响应；单条 Judge 原始响应最多保留 4000 个字符。
 - `target/evaluation/<版本>/<UTC运行时间>/report.json`：供程序和 CI 比较。
 - `target/evaluation/<版本>/<UTC运行时间>/report.md`：供人工阅读，包含指标解释，并按未通过门禁的指标展示最多 3 道代表问题。
 
@@ -102,7 +102,8 @@ Markdown 报告不会展开全部题目。代表问题先按单题分数从低�
 - 无答案：`noAnswerEmptyRetrieval` 衡量检索是否返回空结果。
 - 回答：`deepseek-v4-pro` 按语义判断期望事实覆盖、错误事实、回答/拒答决策以及无依据内容，不做答案字符串包含匹配。
 - 无依据内容：`unsupportedClaimSafety` 衡量回答是否避免输出证据不支持的具体结论、数值或规则。
-- 可审计性：Judge 返回逐项理由并写入 observation；Markdown 代表问题会展示对应指标的 Judge 理由。
+- 可审计性：Judge 返回逐项理由并写入 observation；`hasUnsupportedClaims=false` 时允许省略 `unsupportedClaimsReason`，为 `true` 时原因必须非空。Markdown 代表问题会展示已有的 Judge 理由。
+- 失败诊断：Judge 格式校验失败时仍保留已经生成的回答、检索结果和引用，并在 observation 的 `judgeRawResponse` 中保存受控长度的模型原始响应。
 - 扩展 Judge：observation 的 `judgeScores` 仍可承载 `faithfulness` 等 0～1 的扩展分数，报告会输出为 `judge.faithfulness`。
 
 普通 `mvn verify` 会运行评测框架、接口鉴权和 30 题 Schema 契约测试，不调用真实模型。真实检索回归由 CI 调用已部署的评测实例，不在 CI 内重复配置模型供应商密钥。

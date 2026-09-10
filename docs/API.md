@@ -292,6 +292,8 @@ Request（全部字段可省略）：
 - 不接收也不返回任何模型 API Key。
 - `baseline` 可传上一次的 `report.json`，用于检查核心指标回退。
 - 接口返回逐题检索片段、实际回答、拒答判断、来源和汇总报告；Markdown 包含指标解释，并只展示未通过门禁指标下最多 3 道代表问题。Token 缺失或错误返回 HTTP 401。
+- `observations[].judgeRawResponse` 最多保留 4000 个字符；Judge 失败时，已生成的回答、检索结果和引用仍会返回，方便区分回答失败与评判失败。
+- Judge 的 `unsupportedClaimsReason` 仅在 `hasUnsupportedClaims=true` 时必填；核心决策字段、事实数组及逐项判断仍执行结构化格式校验。
 - 必须在网关或防火墙限制 `/internal/evaluation/**`，不要暴露给普通用户。
 
 Response `data`：
@@ -325,9 +327,9 @@ Response `data`：
       },
       "judgeReasons": {
         "requiredFactCoverage": "年假 5 天：回答明确表达了该事实",
-        "answerDecisionAccuracy": "回答给出了问题要求的信息",
-        "unsupportedClaimSafety": "未发现证据不支持的具体结论"
-      }
+        "answerDecisionAccuracy": "回答给出了问题要求的信息"
+      },
+      "judgeRawResponse": "{\"decision\":\"ANSWERED\",\"hasUnsupportedClaims\":false,...}"
     }
   ],
   "markdown": "# RAG 端到端评测报告..."

@@ -28,7 +28,8 @@ class EvaluationRunnerTest {
         };
         RagAnswerJudgePort judgePort = request -> new RagAnswerJudgePort.Result(
                 RagAnswerJudgePort.Decision.ANSWERED, "回答了问题", false, "没有无依据内容",
-                List.of(new RagAnswerJudgePort.FactAssessment("答案要点", true, "语义覆盖")), List.of(), 5L);
+                List.of(new RagAnswerJudgePort.FactAssessment("答案要点", true, "语义覆盖")), List.of(),
+                "{\"decision\":\"ANSWERED\"}", 5L);
         EvaluationRunner runner = new EvaluationRunner(port, judgePort);
 
         List<EvaluationObservation> observations = runner.collect(List.of(
@@ -51,8 +52,33 @@ class EvaluationRunnerTest {
                 .containsEntry("answerDecisionAccuracy", 1.0)
                 .containsEntry("unsupportedClaimSafety", 1.0);
         assertThat(observations.get(0).judgeReasons().get("requiredFactCoverage")).contains("语义覆盖");
+        assertThat(observations.get(0).judgeRawResponse()).isEqualTo("{\"decision\":\"ANSWERED\"}");
         assertThat(observations.get(0).durationMs()).isEqualTo(20L);
         assertThat(observations.get(1).error()).contains("IllegalStateException").contains("ES unavailable");
+    }
+
+    @Test
+    void shouldKeepAnswerRetrievalAndCitationsWhenJudgeFails() {
+        KnowledgeSearchPort.KnowledgeHit hit = new KnowledgeSearchPort.KnowledgeHit(
+                "chunk-1", 1L, "正文", "policy.md",
+                null, "section-1", "parent-1", 2, 0.88);
+        RagAnswerEvaluationPort port = query -> new RagAnswerEvaluationPort.Result(
+                "这是实际回答", List.of(hit), List.of(hit), 15L);
+        RagAnswerJudgePort judgePort = request -> {
+            throw new RagAnswerJudgePort.JudgeException(
+                    "Judge 输出格式错误", "{\"unexpected\":true}", null);
+        };
+        EvaluationRunner runner = new EvaluationRunner(port, judgePort);
+
+        EvaluationObservation observation = runner.collect(List.of(
+                evaluationCase("judge-failed", "正常问题"))).getFirst();
+
+        assertThat(observation.answer()).isEqualTo("这是实际回答");
+        assertThat(observation.retrieved()).hasSize(1);
+        assertThat(observation.citations()).hasSize(1);
+        assertThat(observation.refused()).isNull();
+        assertThat(observation.judgeRawResponse()).isEqualTo("{\"unexpected\":true}");
+        assertThat(observation.error()).contains("Judge 输出格式错误");
     }
 
     private static EvaluationCase evaluationCase(String id, String question) {

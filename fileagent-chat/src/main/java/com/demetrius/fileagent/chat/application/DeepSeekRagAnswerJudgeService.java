@@ -21,22 +21,26 @@ import java.util.List;
 @RequiredArgsConstructor
 public class DeepSeekRagAnswerJudgeService implements RagAnswerJudgePort {
 
+    private static final int MAX_RAW_RESPONSE_LENGTH = 4000;
+
     private final DeepSeekJudgeClient judgeClient;
     private final ObjectMapper objectMapper;
 
     @Override
     public Result judge(Request request) {
         long startedAt = System.nanoTime();
+        String response = null;
         try {
             BeanOutputConverter<JudgeOutput> converter = new BeanOutputConverter<>(JudgeOutput.class);
-            String response = judgeClient.call(buildMessages(request, converter.getFormat()));
+            response = judgeClient.call(buildMessages(request, converter.getFormat()));
             JudgeOutput output = converter.convert(response);
             validateOutput(request, output);
             return new Result(output.decision(), output.decisionReason(), output.hasUnsupportedClaims(),
                     output.unsupportedClaimsReason(), output.requiredFacts(), output.forbiddenFacts(),
-                    elapsedMillis(startedAt));
+                    boundedRawResponse(response), elapsedMillis(startedAt));
         } catch (RuntimeException e) {
-            throw new IllegalStateException("DeepSeek Judge 评判失败: " + e.getMessage(), e);
+            throw new JudgeException("DeepSeek Judge 评判失败: " + e.getMessage(),
+                    boundedRawResponse(response), e);
         }
     }
 
@@ -50,6 +54,7 @@ public class DeepSeekRagAnswerJudgeService implements RagAnswerJudgePort {
                 forbiddenFacts：只有回答把该错误事实当作当前真实结论时才算 matched；否定、纠正或作为历史对比不算。
                 decision：回答明确说明资料不足、无法从证据确定时为 REFUSED，否则为 ANSWERED。
                 hasUnsupportedClaims：回答是否给出了证据和期望事实均不支持的具体结论、数值或规则。
+                hasUnsupportedClaims 为 true 时必须返回非空 unsupportedClaimsReason；为 false 时可以省略该字段。
                 必须原样复制每个 fact 字段，不能遗漏、合并或改写。reason 使用简短中文说明。
                 只输出符合以下格式的 JSON：
                 """ + format;
@@ -66,7 +71,9 @@ public class DeepSeekRagAnswerJudgeService implements RagAnswerJudgePort {
             throw new IllegalStateException("Judge 输出缺少 decision");
         }
         requireReason("decisionReason", output.decisionReason());
-        requireReason("unsupportedClaimsReason", output.unsupportedClaimsReason());
+        if (output.hasUnsupportedClaims()) {
+            requireReason("unsupportedClaimsReason", output.unsupportedClaimsReason());
+        }
         validateFacts("requiredFacts", request.requiredFacts(), output.requiredFacts());
         validateFacts("forbiddenFacts", request.forbiddenFacts(), output.forbiddenFacts());
     }
@@ -93,6 +100,13 @@ public class DeepSeekRagAnswerJudgeService implements RagAnswerJudgePort {
 
     private static long elapsedMillis(long startedAt) {
         return Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
+    }
+
+    private static String boundedRawResponse(String response) {
+        if (response == null || response.length() <= MAX_RAW_RESPONSE_LENGTH) {
+            return response;
+        }
+        return response.substring(0, MAX_RAW_RESPONSE_LENGTH);
     }
 
     private record JudgeOutput(

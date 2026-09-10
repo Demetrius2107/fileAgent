@@ -29,7 +29,8 @@ class EvaluationReportWriterTest {
                 "员工入职第一年享有年假 5 天。", 0.95);
         EvaluationObservation observation = new EvaluationObservation("1.0", "case-1", List.of(source),
                 "员工入职第一年享有年假 5 天。", false, List.of(source), Map.of(),
-                Map.of("requiredFactCoverage", "年假 5 天：回答表达了相同事实"), 12L, null);
+                Map.of("requiredFactCoverage", "年假 5 天：回答表达了相同事实"),
+                "{\"decision\":\"ANSWERED\"}", 12L, null);
         EvaluationReport report = new EvaluationReport("1.0", "v1", "2026-09-07T10:00:00Z",
                 Map.of("gitCommit", "abc"), List.of(1, 5), 1, 1, 0,
                 Map.of("mrr", 0.75, "recall@5", 1.0, "requiredFactCoverage", 0.5),

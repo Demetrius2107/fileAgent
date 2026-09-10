@@ -37,30 +37,50 @@ public final class EvaluationRunner {
 
     private EvaluationObservation collect(EvaluationCase evaluationCase) {
         long startedAt = System.nanoTime();
+        RagAnswerEvaluationPort.Result result;
         try {
             EvaluationCase.Filters filters = evaluationCase.filters();
             RagAnswerEvaluationPort.Query query = new RagAnswerEvaluationPort.Query(
                     evaluationCase.question(), toHistory(evaluationCase.history()),
                     filters.ragName(), filters.knowledgeTag(), filters.fileId());
-            RagAnswerEvaluationPort.Result result = ragAnswerEvaluationPort.evaluate(query);
+            result = ragAnswerEvaluationPort.evaluate(query);
+        } catch (RuntimeException e) {
+            return failedObservation(evaluationCase.id(), List.of(), null, List.of(), null, startedAt, e);
+        }
+
+        List<EvaluationObservation.ObservedSource> sources = result.retrieved().stream()
+                .map(EvaluationRunner::toObservedSource)
+                .toList();
+        List<EvaluationObservation.ObservedSource> citations = result.citations().stream()
+                .map(EvaluationRunner::toObservedSource)
+                .toList();
+        try {
             RagAnswerJudgePort.Result assessment = ragAnswerJudgePort.judge(toJudgeRequest(evaluationCase, result));
-            List<EvaluationObservation.ObservedSource> sources = result.retrieved().stream()
-                    .map(EvaluationRunner::toObservedSource)
-                    .toList();
-            List<EvaluationObservation.ObservedSource> citations = result.citations().stream()
-                    .map(EvaluationRunner::toObservedSource)
-                    .toList();
             Map<String, Double> judgeScores = judgeScores(evaluationCase, assessment);
             Map<String, String> judgeReasons = judgeReasons(assessment);
             return new EvaluationObservation("1.0", evaluationCase.id(), sources,
                     result.answer(), assessment.decision() == RagAnswerJudgePort.Decision.REFUSED, citations,
-                    judgeScores, judgeReasons, result.durationMs() + assessment.durationMs(), null);
+                    judgeScores, judgeReasons, assessment.rawResponse(),
+                    result.durationMs() + assessment.durationMs(), null);
         } catch (RuntimeException e) {
-            String message = e.getClass().getSimpleName()
-                    + (e.getMessage() == null ? "" : ": " + e.getMessage());
-            return new EvaluationObservation("1.0", evaluationCase.id(), List.of(), null, null,
-                    List.of(), Map.of(), Map.of(), elapsedMillis(startedAt), message);
+            String rawResponse = e instanceof RagAnswerJudgePort.JudgeException judgeException
+                    ? judgeException.rawResponse() : null;
+            return failedObservation(evaluationCase.id(), sources, result.answer(), citations,
+                    rawResponse, startedAt, e);
         }
+    }
+
+    private static EvaluationObservation failedObservation(String caseId,
+                                                            List<EvaluationObservation.ObservedSource> sources,
+                                                            String answer,
+                                                            List<EvaluationObservation.ObservedSource> citations,
+                                                            String rawResponse,
+                                                            long startedAt,
+                                                            RuntimeException exception) {
+        String message = exception.getClass().getSimpleName()
+                + (exception.getMessage() == null ? "" : ": " + exception.getMessage());
+        return new EvaluationObservation("1.0", caseId, sources, answer, null, citations,
+                Map.of(), Map.of(), rawResponse, elapsedMillis(startedAt), message);
     }
 
     private static RagAnswerJudgePort.Request toJudgeRequest(EvaluationCase evaluationCase,
@@ -92,7 +112,9 @@ public final class EvaluationRunner {
     private static Map<String, String> judgeReasons(RagAnswerJudgePort.Result assessment) {
         Map<String, String> reasons = new LinkedHashMap<>();
         reasons.put("answerDecisionAccuracy", assessment.decisionReason());
-        reasons.put("unsupportedClaimSafety", assessment.unsupportedClaimsReason());
+        if (assessment.unsupportedClaimsReason() != null && !assessment.unsupportedClaimsReason().isBlank()) {
+            reasons.put("unsupportedClaimSafety", assessment.unsupportedClaimsReason());
+        }
         reasons.put("requiredFactCoverage", factReasons(assessment.requiredFacts()));
         reasons.put("forbiddenFactSafety", factReasons(assessment.forbiddenFacts()));
         return reasons;

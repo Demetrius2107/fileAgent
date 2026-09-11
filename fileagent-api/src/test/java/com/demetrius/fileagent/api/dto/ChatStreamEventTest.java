@@ -28,6 +28,7 @@ class ChatStreamEventTest {
         assertThat(event.messageId()).isNull();
         assertThat(event.code()).isNull();
         assertThat(event.message()).isNull();
+        assertThat(event.traceId()).isNull();
     }
 
     @Test
@@ -63,6 +64,7 @@ class ChatStreamEventTest {
         assertThat(event.type()).isEqualTo("error");
         assertThat(event.code()).isEqualTo("MODEL_STREAM_FAILED");
         assertThat(event.message()).isEqualTo("模型调用失败");
+        assertThat(event.traceId()).isNull();
         assertThat(event.content()).isNull();
         assertThat(event.files()).isEmpty();
         assertThat(event.messageId()).isNull();
@@ -85,5 +87,16 @@ class ChatStreamEventTest {
         assertThat(event.files()).containsExactly("员工手册.pdf");
         assertThatThrownBy(() -> event.files().add("再追加.md"))
                 .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void withTraceIdShouldPreserveEventPayload() {
+        ChatStreamEvent event = ChatStreamEvent.error("MODEL_STREAM_FAILED", "模型调用失败")
+                .withTraceId("0123456789abcdef0123456789abcdef");
+
+        assertThat(event.type()).isEqualTo("error");
+        assertThat(event.code()).isEqualTo("MODEL_STREAM_FAILED");
+        assertThat(event.message()).isEqualTo("模型调用失败");
+        assertThat(event.traceId()).isEqualTo("0123456789abcdef0123456789abcdef");
     }
 }

@@ -229,8 +229,10 @@
                 } else if (event.type === 'done') {
                     assistant.dataset.messageId = String(event.messageId);
                 } else if (event.type === 'error') {
+                    const traceHint = event.traceId ? `（traceId：${event.traceId}）` : '';
                     assistant.querySelector('.message-body')
-                        .appendChild(el('div', 'message-error', `出错了：${event.message || event.code || '未知错误'}`));
+                        .appendChild(el('div', 'message-error',
+                            `出错了：${event.message || event.code || '未知错误'}${traceHint}`));
                 }
             });
         } catch (e) {
@@ -259,10 +261,17 @@
         });
         if (!response.ok || !response.body) {
             let message = `HTTP ${response.status}`;
+            let traceId = response.headers.get('X-Trace-Id');
             try {
-                const body = await response.json();
+                const responseText = await response.text();
+                const contentType = response.headers.get('Content-Type') || '';
+                const body = contentType.includes('text/event-stream')
+                    ? parseSseBlock(responseText)
+                    : JSON.parse(responseText);
                 if (body && body.message) { message = body.message; }
-            } catch (e) { /* 非 JSON 错误体 */ }
+                if (body && body.traceId) { traceId = body.traceId; }
+            } catch (e) { /* 无法解析的错误体 */ }
+            if (traceId) { message += `（traceId：${traceId}）`; }
             throw new Error(message);
         }
 

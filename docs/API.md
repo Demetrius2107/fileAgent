@@ -344,9 +344,10 @@ Response `data`：
 `POST /api/sessions/{id}/chat`
 
 - 请求头 `Accept: text/event-stream`，响应 `Content-Type: text/event-stream`
+- 支持通过 W3C `traceparent` 请求头透传上游 Trace；响应头 `X-Trace-Id` 返回本次问答的 `traceId`
 - 主流程：读取最近 `fileagent.chat-history-limit` 条历史 → 保存本次 USER → 第二轮起调用模型改写独立检索问题 → BM25/KNN 混合召回 → RRF 融合 → 可选 reranker → 最低相关性过滤 → 父块展开 → 组装 Prompt（System 规则 + 历史 + 带来源标记的知识上下文）→ 模型流式调用 → 事件下发 → 完整 ASSISTANT 落库
 - `fileagent.reranker.min-relevance-score` 默认 `0.2`，仅在 reranker 成功返回时过滤低分片段；reranker 关闭或降级为 RRF 时不应用该阈值
-- 前置校验失败（`sessionId` 为空 / `prompt` 空白 / 会话不存在）在流建立前返回 HTTP 400/404 JSON；流建立后的错误以 `error` 事件传递，HTTP 仍为 200
+- 前置校验失败（`sessionId` 为空 / `prompt` 空白 / 会话不存在）在流建立前返回 HTTP 400/404，响应仍为 `text/event-stream`，并携带一条 `error` 事件；流建立后的错误同样以 `error` 事件传递，但 HTTP 已提交为 200
 
 Request:
 ```json
@@ -381,10 +382,17 @@ data:{"type":"done","messageId":20}
 **`error`：流式过程中的错误（HTTP 仍为 200）**
 ```
 event:error
-data:{"type":"error","code":"MODEL_STREAM_FAILED","message":"模型调用失败，请稍后重试"}
+data:{"type":"error","code":"MODEL_STREAM_FAILED","message":"模型调用失败，请稍后重试","traceId":"0123456789abcdef0123456789abcdef"}
 ```
+- `traceId` 与响应头 `X-Trace-Id` 相同，可用于检索本次问答的关联日志
 - `code=KNOWLEDGE_SEARCH_FAILED`：知识检索失败
 - `code=MODEL_STREAM_FAILED`：模型调用失败或模型未返回任何内容
+
+流建立前的业务错误使用相同事件结构，但保留对应 HTTP 状态。例如会话不存在返回 HTTP 404：
+```
+event:error
+data:{"type":"error","code":"404","message":"会话不存在","traceId":"0123456789abcdef0123456789abcdef"}
+```
 
 > 未命中知识时，服务端提示语「未检索到相关知识库内容，以下回答来自模型通用知识。」会作为首条 `message` 事件下发，并计入最终落库的 ASSISTANT 正文。
 

@@ -17,25 +17,30 @@ public record ChatStreamEvent(
         List<String> files,
         Long messageId,
         String code,
-        String message
+        String message,
+        String traceId
 ) {
     public ChatStreamEvent {
         files = files == null ? List.of() : List.copyOf(files);
     }
 
     public static ChatStreamEvent message(String content) {
-        return new ChatStreamEvent("message", content, null, List.of(), null, null, null);
+        return new ChatStreamEvent("message", content, null, List.of(), null, null, null, null);
     }
 
     public static ChatStreamEvent sources(String answerSource, List<String> files) {
-        return new ChatStreamEvent("sources", null, answerSource, files, null, null, null);
+        return new ChatStreamEvent("sources", null, answerSource, files, null, null, null, null);
     }
 
     public static ChatStreamEvent done(Long messageId) {
-        return new ChatStreamEvent("done", null, null, List.of(), messageId, null, null);
+        return new ChatStreamEvent("done", null, null, List.of(), messageId, null, null, null);
     }
 
     public static ChatStreamEvent error(String code, String message) {
-        return new ChatStreamEvent("error", null, null, List.of(), null, code, message);
+        return new ChatStreamEvent("error", null, null, List.of(), null, code, message, null);
+    }
+
+    public ChatStreamEvent withTraceId(String traceId) {
+        return new ChatStreamEvent(type, content, answerSource, files, messageId, code, message, traceId);
     }
 }

@@ -4,6 +4,8 @@ server:
 spring:
   application:
     name: file-agent
+  reactor:
+    context-propagation: auto
 
   # Spring AI: DeepSeek Chat + 通义百炼 OpenAI 兼容 Embedding
   ai:
@@ -90,7 +92,23 @@ springdoc:
   api-docs:
     path: /v3/api-docs
 
+management:
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    sampling:
+      probability: 1.0
+    propagation:
+      type: W3C
+    export:
+      otlp:
+        enabled: false
+
 logging:
+  pattern:
+    correlation: "[traceId=%X{traceId:-},spanId=%X{spanId:-}] "
   level:
     com.demetrius.fileagent: DEBUG
     org.springframework.ai: INFO

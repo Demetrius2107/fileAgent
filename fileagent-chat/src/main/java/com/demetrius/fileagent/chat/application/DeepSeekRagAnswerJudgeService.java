@@ -53,7 +53,9 @@ public class DeepSeekRagAnswerJudgeService implements RagAnswerJudgePort {
                 requiredFacts：逐项判断回答是否表达了相同事实。
                 forbiddenFacts：只有回答把该错误事实当作当前真实结论时才算 matched；否定、纠正或作为历史对比不算。
                 decision：回答明确说明资料不足、无法从证据确定时为 REFUSED，否则为 ANSWERED。
-                hasUnsupportedClaims：回答是否给出了证据和期望事实均不支持的具体结论、数值或规则。
+                hasUnsupportedClaims：回答是否给出了证据和期望事实均不支持的具体结论。
+                不包含事实断言的下一步建议不算无依据内容，例如“请提供相关文件”“请咨询对应负责人”。
+                未被证据支持的具体数字、期限、规则、流程、安全或合规操作、产品能力、行业惯例、公司属性或建议都算无依据内容，即使标记为通用知识也算。
                 hasUnsupportedClaims 为 true 时必须返回非空 unsupportedClaimsReason；为 false 时可以省略该字段。
                 必须原样复制每个 fact 字段，不能遗漏、合并或改写。reason 使用简短中文说明。
                 只输出符合以下格式的 JSON：

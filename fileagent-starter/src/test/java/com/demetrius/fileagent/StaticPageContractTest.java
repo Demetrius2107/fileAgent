@@ -47,6 +47,16 @@ class StaticPageContractTest {
         }
     }
 
+    @Test
+    void sourceRendererShouldDistinguishKnowledgeInsufficiencyFromMissingCitation() throws IOException {
+        String script = readResource("static/app.js");
+
+        assertThat(script)
+                .contains("KNOWLEDGE_INSUFFICIENT")
+                .contains("来源：知识库资料不足")
+                .contains("来源：未标注引用");
+    }
+
     private String readResource(String path) throws IOException {
         try (InputStream in = getClass().getClassLoader().getResourceAsStream(path)) {
             assertThat(in).as("资源应存在: %s", path).isNotNull();

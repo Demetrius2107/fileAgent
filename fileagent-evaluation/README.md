@@ -90,6 +90,8 @@ export FILEAGENT_EVALUATION_BASELINE='fileagent-evaluation/src/main/resources/ev
 
 旧版只包含检索指标的 baseline 缺少回答和来源指标，升级到端到端评测后应重新生成并确认，不能直接作为新基线。
 
+回答提示会要求每个基于资料的事实使用 `[来源：文件名]` 标注。评测中的引用指标只计算回答正文实际标注、且本次检索确实返回的文件名，不会把全部检索候选误算为引用。
+
 门禁失败时进程返回失败。`gate.json` 当前是启动阈值；首次真实运行后，应根据业务验收结果收紧，不能为了让 CI 通过而降低。
 
 Markdown 报告不会展开全部题目。代表问题先按单题分数从低到高选择，同分时优先覆盖不同题型；每题展示期望结果、实际回答、来源和 Top 1 检索片段。完整逐题结果始终保留在 `report.json` 和 `observations.jsonl`。

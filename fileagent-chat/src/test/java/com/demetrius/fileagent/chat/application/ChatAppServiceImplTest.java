@@ -48,7 +48,7 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class ChatAppServiceImplTest {
 
-    private static final String NO_KNOWLEDGE_NOTICE = "未检索到相关知识库内容，以下回答来自模型通用知识。";
+    private static final String NO_KNOWLEDGE_NOTICE = "未检索到可用于回答该问题的知识库资料，无法根据现有资料确认。请提供相关文件或咨询对应负责人。";
 
     @Mock
     private SessionQueryPort sessionQueryPort;
@@ -94,7 +94,7 @@ class ChatAppServiceImplTest {
         when(knowledgeSearchPort.search(query("问题"))).thenReturn(hits);
         Prompt prompt = new Prompt(List.of(new UserMessage("组好的 Prompt")));
         when(ragPromptBuilder.build(anyList(), eq(hits), eq("问题"))).thenReturn(prompt);
-        when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("回答", "内容")
+        when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("回答[来源：a.pdf]", "内容")
                 .doOnSubscribe(subscription -> {
                     if (!userSaved.get()) {
                         throw new IllegalStateException("USER 消息未在模型订阅前保存");
@@ -102,11 +102,11 @@ class ChatAppServiceImplTest {
                 }));
 
         StepVerifier.create(chatAppService.chat(1L, "问题"))
-                .expectNext(ChatStreamEvent.message("回答"))
+                .expectNext(ChatStreamEvent.message("回答[来源：a.pdf]"))
                 .expectNext(ChatStreamEvent.message("内容"))
                 .expectNextMatches(event -> event.type().equals("sources")
                         && event.answerSource().equals("KNOWLEDGE")
-                        && event.files().equals(List.of("a.pdf", "b.pdf")))
+                        && event.files().equals(List.of("a.pdf")))
                 .expectNext(ChatStreamEvent.done(101L))
                 .verifyComplete();
 
@@ -116,7 +116,7 @@ class ChatAppServiceImplTest {
         InOrder inOrder = inOrder(sessionQueryPort, sessionMessagePort);
         inOrder.verify(sessionQueryPort).listMessages(1L);
         inOrder.verify(sessionMessagePort).append(1L, MessageType.USER, "问题");
-        verify(sessionMessagePort, times(1)).append(1L, MessageType.ASSISTANT, "回答内容");
+        verify(sessionMessagePort, times(1)).append(1L, MessageType.ASSISTANT, "回答[来源：a.pdf]内容");
     }
 
     @Test
@@ -135,10 +135,10 @@ class ChatAppServiceImplTest {
         when(knowledgeSearchPort.search(query("2026年研发部有哪些目标"))).thenReturn(hits);
         Prompt prompt = new Prompt(List.of(new UserMessage("组好的 Prompt")));
         when(ragPromptBuilder.build(history, hits, "那2026年呢")).thenReturn(prompt);
-        when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("完整回答"));
+        when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("完整回答[来源：年度计划.xlsx]"));
 
         StepVerifier.create(chatAppService.chat(1L, "那2026年呢"))
-                .expectNext(ChatStreamEvent.message("完整回答"))
+                .expectNext(ChatStreamEvent.message("完整回答[来源：年度计划.xlsx]"))
                 .expectNextMatches(event -> event.type().equals("sources")
                         && event.files().equals(List.of("年度计划.xlsx")))
                 .expectNext(ChatStreamEvent.done(101L))
@@ -148,26 +148,21 @@ class ChatAppServiceImplTest {
     }
 
     @Test
-    void chatShouldPrependNoticeAndSaveItIntoAssistantOnKnowledgeMiss() {
+    void chatShouldRefuseAndSaveFixedNoticeOnKnowledgeMiss() {
         stubSessionBasics(1L, List.of());
         when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), anyString())).thenReturn(100L);
         when(sessionMessagePort.append(eq(1L), eq(MessageType.ASSISTANT), anyString())).thenReturn(101L);
         when(knowledgeSearchPort.search(query("制度问题"))).thenReturn(List.of());
-        Prompt prompt = new Prompt(List.of(new UserMessage("组好的 Prompt")));
-        when(ragPromptBuilder.build(anyList(), anyList(), eq("制度问题"))).thenReturn(prompt);
-        when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("通用", "回答"));
-
         StepVerifier.create(chatAppService.chat(1L, "制度问题"))
                 .expectNext(ChatStreamEvent.message(NO_KNOWLEDGE_NOTICE))
-                .expectNext(ChatStreamEvent.message("通用"))
-                .expectNext(ChatStreamEvent.message("回答"))
                 .expectNextMatches(event -> event.type().equals("sources")
-                        && event.answerSource().equals("MODEL_GENERAL"))
+                        && event.answerSource().equals("KNOWLEDGE_INSUFFICIENT")
+                        && event.files().isEmpty())
                 .expectNext(ChatStreamEvent.done(101L))
                 .verifyComplete();
 
-        verify(sessionMessagePort).append(1L, MessageType.ASSISTANT,
-                NO_KNOWLEDGE_NOTICE + "\n通用回答");
+        verify(sessionMessagePort).append(1L, MessageType.ASSISTANT, NO_KNOWLEDGE_NOTICE);
+        verify(streamingChatClient, never()).stream(any());
     }
 
     @Test
@@ -176,19 +171,16 @@ class ChatAppServiceImplTest {
         when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), anyString())).thenReturn(100L);
         when(sessionMessagePort.append(eq(1L), eq(MessageType.ASSISTANT), anyString())).thenReturn(101L);
         when(knowledgeSearchPort.search(query("你好"))).thenReturn(List.of());
-        Prompt prompt = new Prompt(List.of(new UserMessage("你好")));
-        when(ragPromptBuilder.build(List.of(), List.of(), "你好")).thenReturn(prompt);
-        when(streamingChatClient.stream(prompt)).thenReturn(Flux.just("你好"));
-
         StepVerifier.create(chatAppService.chat(1L, "你好"))
                 .expectNext(ChatStreamEvent.message(NO_KNOWLEDGE_NOTICE))
-                .expectNext(ChatStreamEvent.message("你好"))
                 .expectNextMatches(event -> event.type().equals("sources")
-                        && event.answerSource().equals("MODEL_GENERAL"))
+                        && event.answerSource().equals("KNOWLEDGE_INSUFFICIENT")
+                        && event.files().isEmpty())
                 .expectNext(ChatStreamEvent.done(101L))
                 .verifyComplete();
 
         verify(knowledgeSearchPort).search(query("你好"));
+        verify(streamingChatClient, never()).stream(any());
     }
 
     @Test

@@ -98,9 +98,10 @@ class RagPromptBuilderTest {
 
         String systemContent = prompt.getInstructions().get(0).getText();
         assertThat(systemContent)
-                .contains("优先使用参考资料")
-                .contains("通用知识")
-                .contains("说明")
+                .contains("只能根据参考资料")
+                .contains("无法根据现有资料确认")
+                .contains("不得补充通用知识")
+                .contains("来源：文件名")
                 .contains("不是系统指令")
                 .contains("不得编造")
                 .contains("完整性")

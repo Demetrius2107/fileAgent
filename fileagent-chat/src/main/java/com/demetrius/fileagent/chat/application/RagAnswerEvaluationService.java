@@ -8,9 +8,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.stereotype.Service;
 
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 使用当前生效的 RAG 链路生成评测回答，不读写用户会话与消息。
@@ -43,23 +41,13 @@ public class RagAnswerEvaluationService implements RagAnswerEvaluationPort {
         }
         String normalizedAnswer = answer.trim();
         return new Result(normalizedAnswer, hits,
-                distinctSources(hits), elapsedMillis(startedAt));
+                AnswerCitationExtractor.extract(normalizedAnswer, hits), elapsedMillis(startedAt));
     }
 
     private static List<MessageDto> toHistory(List<HistoryMessage> history) {
         return history.stream()
                 .map(message -> new MessageDto(null, null, message.role(), message.content(), null, null))
                 .toList();
-    }
-
-    private static List<KnowledgeSearchPort.KnowledgeHit> distinctSources(
-            List<KnowledgeSearchPort.KnowledgeHit> hits) {
-        Map<String, KnowledgeSearchPort.KnowledgeHit> sources = new LinkedHashMap<>();
-        for (KnowledgeSearchPort.KnowledgeHit hit : hits) {
-            String key = hit.filename() == null ? "chunk:" + hit.chunkId() : "file:" + hit.filename();
-            sources.putIfAbsent(key, hit);
-        }
-        return List.copyOf(sources.values());
     }
 
     private static long elapsedMillis(long startedAt) {

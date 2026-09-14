@@ -313,8 +313,12 @@
     function renderSources(assistant, event) {
         const files = event.files || [];
         let text;
-        if (event.answerSource === 'MODEL_GENERAL' || files.length === 0) {
+        if (event.answerSource === 'KNOWLEDGE_INSUFFICIENT') {
+            text = '来源：知识库资料不足';
+        } else if (event.answerSource === 'MODEL_GENERAL') {
             text = '来源：模型通用知识';
+        } else if (files.length === 0) {
+            text = '来源：未标注引用';
         } else {
             text = `来源：${files.join('、')}`;
         }

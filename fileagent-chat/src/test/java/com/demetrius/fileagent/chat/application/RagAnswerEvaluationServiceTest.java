@@ -51,15 +51,37 @@ class RagAnswerEvaluationServiceTest {
         when(ragPromptBuilder.build(org.mockito.ArgumentMatchers.anyList(),
                 org.mockito.ArgumentMatchers.eq(hits), org.mockito.ArgumentMatchers.eq("那今年呢？")))
                 .thenReturn(prompt);
+        when(streamingChatClient.call(prompt)).thenReturn("员工入职第一年享有年假 5 天。[来源：employee-handbook.md]");
+
+        RagAnswerEvaluationPort.Result result = service.evaluate(query);
+
+        assertThat(result.answer()).isEqualTo("员工入职第一年享有年假 5 天。[来源：employee-handbook.md]");
+        assertThat(result.retrieved()).isEqualTo(hits);
+        assertThat(result.citations()).extracting(KnowledgeSearchPort.KnowledgeHit::filename)
+                .containsExactly("employee-handbook.md");
+        verify(streamingChatClient).call(prompt);
+    }
+
+    @Test
+    void shouldNotTreatEveryRetrievedFileAsAnAnswerCitation() {
+        RagAnswerEvaluationPort.Query query = new RagAnswerEvaluationPort.Query(
+                "问题", List.of(), "fileagent-eval-v1", "baseline", null);
+        List<KnowledgeSearchPort.KnowledgeHit> hits = List.of(
+                hit("1:0", "employee-handbook.md", "年假 5 天"),
+                hit("2:0", "other.md", "其他资料"));
+        when(ragQueryRewriter.rewrite(org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.eq("问题"))).thenReturn("问题");
+        when(knowledgeSearchPort.search(new KnowledgeSearchPort.SearchQuery(
+                "问题", "fileagent-eval-v1", "baseline", null))).thenReturn(hits);
+        Prompt prompt = new Prompt(List.of(new UserMessage("组装后的 Prompt")));
+        when(ragPromptBuilder.build(org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.eq(hits), org.mockito.ArgumentMatchers.eq("问题")))
+                .thenReturn(prompt);
         when(streamingChatClient.call(prompt)).thenReturn("员工入职第一年享有年假 5 天。");
 
         RagAnswerEvaluationPort.Result result = service.evaluate(query);
 
-        assertThat(result.answer()).isEqualTo("员工入职第一年享有年假 5 天。");
-        assertThat(result.retrieved()).isEqualTo(hits);
-        assertThat(result.citations()).extracting(KnowledgeSearchPort.KnowledgeHit::filename)
-                .containsExactly("employee-handbook.md", "other.md");
-        verify(streamingChatClient).call(prompt);
+        assertThat(result.citations()).isEmpty();
     }
 
     private static KnowledgeSearchPort.KnowledgeHit hit(String chunkId, String filename, String content) {

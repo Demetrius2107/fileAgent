@@ -370,8 +370,8 @@ data:{"type":"message","content":"更多正文增量……"}
 event:sources
 data:{"type":"sources","answerSource":"KNOWLEDGE","files":["员工手册.pdf","制度.docx"]}
 ```
-- `answerSource=KNOWLEDGE`：命中知识，`files` 为通过 reranker 最低分过滤后的来源文件名，去重并保持首次出现顺序
-- `answerSource=MODEL_GENERAL`：未命中知识，`files` 为空数组
+- `answerSource=KNOWLEDGE`：命中知识，`files` 仅包含回答正文中实际标注、且本次检索确实返回的来源文件名，去重并保持检索首次出现顺序
+- `answerSource=KNOWLEDGE_INSUFFICIENT`：未命中知识，服务端不会调用模型补充通用事实，`files` 为空数组
 
 **`done`：流结束（最后一条）**
 ```
@@ -394,7 +394,7 @@ event:error
 data:{"type":"error","code":"404","message":"会话不存在","traceId":"0123456789abcdef0123456789abcdef"}
 ```
 
-> 未命中知识时，服务端提示语「未检索到相关知识库内容，以下回答来自模型通用知识。」会作为首条 `message` 事件下发，并计入最终落库的 ASSISTANT 正文。
+> 未命中知识时，服务端返回「未检索到可用于回答该问题的知识库资料，无法根据现有资料确认。请提供相关文件或咨询对应负责人。」并计入最终落库的 ASSISTANT 正文；不会调用模型生成通用知识回答。
 
 ---
 

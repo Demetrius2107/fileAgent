@@ -15,9 +15,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * RAG 流式聊天编排：多轮问题改写 -> 混合检索 -> Prompt 组装 -> 模型回答 -> 落库。
@@ -31,9 +29,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ChatAppServiceImpl implements ChatAppService {
 
-    private static final String NO_KNOWLEDGE_NOTICE = "未检索到相关知识库内容，以下回答来自模型通用知识。";
+    private static final String NO_KNOWLEDGE_NOTICE = "未检索到可用于回答该问题的知识库资料，无法根据现有资料确认。请提供相关文件或咨询对应负责人。";
     private static final String ANSWER_SOURCE_KNOWLEDGE = "KNOWLEDGE";
-    private static final String ANSWER_SOURCE_MODEL_GENERAL = "MODEL_GENERAL";
+    private static final String ANSWER_SOURCE_KNOWLEDGE_INSUFFICIENT = "KNOWLEDGE_INSUFFICIENT";
     private static final String CODE_KNOWLEDGE_SEARCH_FAILED = "KNOWLEDGE_SEARCH_FAILED";
     private static final String CODE_MODEL_STREAM_FAILED = "MODEL_STREAM_FAILED";
 
@@ -74,36 +72,33 @@ public class ChatAppServiceImpl implements ChatAppService {
             log.warn("知识检索失败: sessionId={}", sessionId, e);
             return Flux.just(ChatStreamEvent.error(CODE_KNOWLEDGE_SEARCH_FAILED, "知识检索失败，请稍后重试"));
         }
-        boolean knowledgeMiss = hits.isEmpty();
+        if (hits.isEmpty()) {
+            Long assistantMessageId = sessionMessagePort.append(sessionId, MessageType.ASSISTANT, NO_KNOWLEDGE_NOTICE);
+            return Flux.just(
+                    ChatStreamEvent.message(NO_KNOWLEDGE_NOTICE),
+                    ChatStreamEvent.sources(ANSWER_SOURCE_KNOWLEDGE_INSUFFICIENT, List.of()),
+                    ChatStreamEvent.done(assistantMessageId));
+        }
 
-      Prompt modelPrompt = ragPromptBuilder.build(history, hits, prompt);
+        Prompt modelPrompt = ragPromptBuilder.build(history, hits, prompt);
         StringBuilder answer = new StringBuilder();
 
         Flux<ChatStreamEvent> messageEvents = streamingChatClient.stream(modelPrompt)
                 .doOnNext(answer::append)
                 .map(ChatStreamEvent::message);
-        if (knowledgeMiss) {
-            messageEvents = Flux.concat(
-                    Flux.just(ChatStreamEvent.message(NO_KNOWLEDGE_NOTICE)),
-                    messageEvents);
-        }
 
         return messageEvents
                 // 模型零片段正常结束视为模型错误，不落空消息
                 .switchIfEmpty(Flux.error(new IllegalStateException("模型未返回任何内容")))
                 // 模型完整结束后才保存 ASSISTANT 并收尾；取消/异常不会进入该分支
                 .concatWith(Flux.defer(() -> {
-                    String fullAnswer = knowledgeMiss
-                            ? NO_KNOWLEDGE_NOTICE + "\n" + answer
-                            : answer.toString();
+                    String fullAnswer = answer.toString();
                     Long assistantMessageId = sessionMessagePort.append(sessionId, MessageType.ASSISTANT, fullAnswer);
-                    String answerSource = knowledgeMiss ? ANSWER_SOURCE_MODEL_GENERAL : ANSWER_SOURCE_KNOWLEDGE;
-                    List<String> files = hits.stream()
+                    List<String> files = AnswerCitationExtractor.extract(fullAnswer, hits).stream()
                             .map(KnowledgeSearchPort.KnowledgeHit::filename)
-                            .collect(Collectors.toCollection(LinkedHashSet::new))
-                            .stream().toList();
+                            .toList();
                     return Flux.just(
-                            ChatStreamEvent.sources(answerSource, files),
+                            ChatStreamEvent.sources(ANSWER_SOURCE_KNOWLEDGE, files),
                             ChatStreamEvent.done(assistantMessageId));
                 }))
                 .onErrorResume(e -> {

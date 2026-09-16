@@ -12,6 +12,7 @@ fileagent-common   通用支撑（统一响应/异常）
 fileagent-api      契约层（DTO / 枚举 / 端口 / 领域事件）
 fileagent-session  会话域        fileagent-document  文档域
 fileagent-chat     对话/推理域(核心) fileagent-action    动作执行域
+fileagent-agent    Agent 运行域（Phase 1 最小 Agentic RAG）
 fileagent-evaluation RAG 评测集 / 内部评测接口 / baseline 门禁
 fileagent-starter  启动装配（唯一 Boot 入口）
 ragflow-quickstart RAGFlow HTTP API 独立学习模块
@@ -42,6 +43,15 @@ mvn -pl fileagent-starter -am spring-boot:run
 RAGFlow 托管式 RAG 的独立调用工程位于 [`ragflow-quickstart`](ragflow-quickstart/README.md)，已加入根 Maven 聚合，可在 IDEA 中作为独立模块运行。
 
 自研 RAG 的评测框架和首批 30 题位于 [`fileagent-evaluation`](fileagent-evaluation/README.md)。
+
+## Agent 模式（Phase 1）
+
+> 最小 Agentic RAG：由 AI 自主检索知识库并分步作答。默认**关闭**，不影响既有 `/chat` 流程。
+
+- **启用**：`fileagent.agent.enabled=true`（默认 `false`）；模型沿用 chat 域启用配置（`spring.ai.deepseek.*`），不新增密钥配置。
+- **接口**：`POST /api/sessions/{id}/agent-runs`（SSE 流式）、`GET /api/agent-runs/{runId}`（快照）、`POST /api/agent-runs/{runId}/cancel`（取消），见 `docs/API.md` §4.2。
+- **运行限制**：每次运行 ≤4 步推理/工具调用、≤45 秒、单次工具结果 ≤12000 字符；Agent 仅拥有 `search_docs` / `list_knowledge_files` / `read_document_context` 三个只读工具。
+- **评测**：离线评测 `./fileagent-evaluation/scripts/run-agent-evaluation.sh`（答案质量 + Agent 行为门禁），见 `docs/TESTING.md` §7。
 
 打开 `http://localhost:8080/` 即可使用同源工作台：新建会话 → 右侧「知识库」上传 TXT/MD/PDF/DOCX/XLSX/CSV → 中间提问，回答流式输出并标明来源文件；刷新页面后会话与消息仍在（H2 落库，知识索引存于 Elasticsearch）。
 

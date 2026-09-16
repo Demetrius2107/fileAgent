@@ -5,7 +5,10 @@ import co.elastic.clients.elasticsearch._types.Refresh;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
+import co.elastic.clients.elasticsearch.core.MgetRequest;
+import co.elastic.clients.elasticsearch.core.MgetResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
+import co.elastic.clients.elasticsearch.core.mget.MultiGetResponseItem;
 import com.demetrius.fileagent.common.exception.BizException;
 import com.demetrius.fileagent.document.domain.KnowledgeChunk;
 import com.demetrius.fileagent.document.domain.KnowledgeIndexRepository;
@@ -20,6 +23,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Elasticsearch 知识索引仓储实现。
@@ -122,6 +126,68 @@ public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepo
         } catch (IOException e) {
             throw new BizException("Elasticsearch 清理知识索引失败: " + e.getMessage());
         }
+    }
+
+    @Override
+    public List<KnowledgeChunk> findByChunkIds(List<String> chunkIds) {
+        if (chunkIds == null || chunkIds.isEmpty()) {
+            return List.of();
+        }
+        try {
+            MgetRequest request = new MgetRequest.Builder()
+                    .index(properties.getIndexAlias())
+                    .ids(chunkIds)
+                    .sourceExcludes("embedding")
+                    .build();
+            @SuppressWarnings("unchecked")
+            MgetResponse<Map> response = elasticsearchClient.mget(request, Map.class);
+            Map<String, KnowledgeChunk> byId = new LinkedHashMap<>();
+            for (MultiGetResponseItem<Map> item : response.docs()) {
+                if (item.isResult() && item.result().found() && item.result().source() != null) {
+                    byId.put(item.result().id(), toChunk(item.result().id(), item.result().source()));
+                }
+            }
+            return chunkIds.stream()
+                    .map(byId::get)
+                    .filter(Objects::nonNull)
+                    .toList();
+        } catch (IOException e) {
+            throw new BizException("Elasticsearch 读取知识片段失败: " + e.getMessage());
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private KnowledgeChunk toChunk(String id, Map<String, Object> source) {
+        Object metadata = source.get("metadata");
+        Map<String, Object> metadataMap = metadata instanceof Map ? (Map<String, Object>) metadata : Map.of();
+        return new KnowledgeChunk(
+                stringValue(source, "chunkId", id),
+                longValue(source.get("fileId")),
+                stringValue(source, "ragName", null),
+                stringValue(source, "knowledgeTag", null),
+                stringValue(source, "filename", null),
+                stringValue(source, "content", null),
+                intValue(source.get("chunkIndex")),
+                metadataMap);
+    }
+
+    private String stringValue(Map<String, Object> source, String key, String defaultValue) {
+        Object value = source.get(key);
+        return value == null ? defaultValue : String.valueOf(value);
+    }
+
+    private Long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return value == null ? null : Long.valueOf(String.valueOf(value));
+    }
+
+    private int intValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return value == null ? 0 : Integer.parseInt(String.valueOf(value));
     }
 
     private Map<String, Object> toSource(KnowledgeChunk chunk, float[] embedding) {

@@ -4,7 +4,10 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.core.BulkRequest;
 import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
+import co.elastic.clients.elasticsearch.core.MgetRequest;
+import co.elastic.clients.elasticsearch.core.MgetResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
+import co.elastic.clients.elasticsearch.core.mget.MultiGetResponseItem;
 import com.demetrius.fileagent.common.exception.BizException;
 import com.demetrius.fileagent.document.domain.KnowledgeChunk;
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +19,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.embedding.EmbeddingModel;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
@@ -24,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -208,5 +214,44 @@ class ElasticsearchKnowledgeIndexRepositoryTest {
                         "sheetName", "目标",
                         "rowIndex", index + 2,
                         "sectionId", "sheet-0-section-0"));
+    }
+
+    @Test
+    void findByChunkIdsShouldKeepRequestedOrderAndExcludeEmbedding() throws IOException {
+        MgetResponse<Map> response = mgetResponse(
+                chunkDoc("chunk-b", "正文B"),
+                chunkDoc("chunk-a", "正文A"));
+        when(elasticsearchClient.mget(any(MgetRequest.class), eq(Map.class))).thenReturn(response);
+
+        List<KnowledgeChunk> chunks = repository.findByChunkIds(List.of("chunk-b", "chunk-a"));
+
+        ArgumentCaptor<MgetRequest> captor = ArgumentCaptor.forClass(MgetRequest.class);
+        verify(elasticsearchClient).mget(captor.capture(), eq(Map.class));
+        assertThat(captor.getValue().sourceExcludes()).contains("embedding");
+        assertThat(chunks).extracting(KnowledgeChunk::chunkId).containsExactly("chunk-b", "chunk-a");
+        assertThat(chunks).extracting(KnowledgeChunk::content).containsExactly("正文B", "正文A");
+        assertThat(chunks).extracting(KnowledgeChunk::fileId).containsExactly(7L, 7L);
+    }
+
+    @SafeVarargs
+    private MgetResponse<Map> mgetResponse(Map<String, Object>... sources) {
+        List<MultiGetResponseItem<Map>> items = new ArrayList<>();
+        for (Map<String, Object> source : sources) {
+            String id = (String) source.get("chunkId");
+            items.add(MultiGetResponseItem.<Map>of(item -> item.result(result -> result
+                    .index(properties.getIndexAlias()).id(id).found(true).source(source))));
+        }
+        return MgetResponse.of(response -> response.docs(items));
+    }
+
+    private Map<String, Object> chunkDoc(String chunkId, String content) {
+        Map<String, Object> source = new LinkedHashMap<>();
+        source.put("chunkId", chunkId);
+        source.put("fileId", "7");
+        source.put("filename", "目标.xlsx");
+        source.put("content", content);
+        source.put("chunkIndex", 1);
+        source.put("metadata", Map.of("sheetName", "目标"));
+        return source;
     }
 }

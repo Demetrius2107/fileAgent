@@ -24,6 +24,7 @@
         <module>fileagent-session</module>
         <module>fileagent-document</module>
         <module>fileagent-chat</module>
+        <module>fileagent-agent</module>
         <module>fileagent-action</module>
         <module>fileagent-evaluation</module>
         <module>fileagent-starter</module>
@@ -37,6 +38,7 @@
         <springdoc.version>3.1.0</springdoc.version>
         <pdfbox.version>2.0.32</pdfbox.version>
         <poi.version>5.2.5</poi.version>
+        <agentscope.version>2.0.1</agentscope.version>
     </properties>
 
     <dependencyManagement>
@@ -76,6 +78,23 @@
                 <groupId>com.demetrius</groupId>
                 <artifactId>fileagent-evaluation</artifactId>
                 <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.demetrius</groupId>
+                <artifactId>fileagent-agent</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- AgentScope 2.x：Agent Runtime 核心 + OpenAI 兼容模型扩展 -->
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-core</artifactId>
+                <version>${agentscope.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.agentscope</groupId>
+                <artifactId>agentscope-extensions-model-openai</artifactId>
+                <version>${agentscope.version}</version>
             </dependency>
 
             <!-- Spring AI BOM -->

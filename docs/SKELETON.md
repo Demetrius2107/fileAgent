@@ -49,7 +49,13 @@ fileAgent/
 │   ├── application/                  ChatAppService（接口，extends ChatExecutionPort）+ ChatAppServiceImpl（RAG 编排）+ RagPromptBuilder
 │   ├── domain/                       待建（Action / 意图模型）
 │   └── infrastructure/               StreamingChatClient（模型流适配）/ DocumentParsedEventListener（索引订阅）
-│
+
+├── fileagent-agent/               ✅ Agent 运行域（Phase 1 最小 Agentic RAG）
+│   ├── interfaces/                   AgentRunController（SSE / 状态查询 / 取消）
+│   ├── application/                  AgentRunAppService（编排落库）/ AgentPromptFactory / AgentToolContext
+│   ├── domain/                       AgentRun / AgentRunBudget（状态机与预算）
+│   └── infrastructure/               AgentScopeRuntimeAdapter / AgentScopeModelFactory / 三个只读工具 / 内存 Run Registry
+
 ├── fileagent-action/              ✅ 动作执行域
 │   ├── interfaces/                   待建（风险确认接口）
 │   ├── application/                  ActionExecutorService（接口）
@@ -77,7 +83,7 @@ fileAgent/
 
 ```
 fileagent-api → fileagent-common
-fileagent-session / document / chat / action → fileagent-api（各域互不直接依赖）
+fileagent-session / document / chat / action / agent → fileagent-api（各域互不直接依赖）
 fileagent-evaluation → fileagent-api（通过 KnowledgeSearchPort 评测正式检索链路）
 fileagent-starter → 全部业务域 + fileagent-evaluation
 ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块）
@@ -119,6 +125,7 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | session | api + web + data-jpa + h2(runtime) |
 | document | api + web + data-jpa + spring-ai-starter-model-openai（Embedding）+ spring-boot-starter-elasticsearch（知识索引与检索）+ pdfbox + poi-ooxml + h2(runtime) + testcontainers-elasticsearch / testcontainers-junit-jupiter / spring-boot-data-jpa-test(test) |
 | chat | api + web + webflux（流式调用）+ spring-ai-starter-model-deepseek + spring-ai-starter-model-openai（多 Provider 动态构建）+ data-jpa（模型配置实体）+ micrometer-tracing + reactor-test(test) |
+| agent | api + web + webflux（SSE）+ agentscope-core + agentscope-extensions-model-openai + swagger-annotations-jakarta + micrometer-tracing + reactor-test(test) |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
 | evaluation | api + web + Jackson 3（内部接口默认关闭，通过 API Port 执行正式 RAG 并接收 DeepSeek Judge 结果） |
 | starter | 全部业务域 + evaluation + h2(runtime) + springdoc + spring-boot-starter-opentelemetry |

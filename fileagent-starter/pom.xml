@@ -30,6 +30,10 @@
         </dependency>
         <dependency>
             <groupId>com.demetrius</groupId>
+            <artifactId>fileagent-agent</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.demetrius</groupId>
             <artifactId>fileagent-action</artifactId>
         </dependency>
         <dependency>

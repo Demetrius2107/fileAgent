@@ -43,6 +43,7 @@ public class ListKnowledgeFilesTool extends ToolBase {
         String effectiveTag = context.scope().knowledgeTag() != null ? context.scope().knowledgeTag() : knowledgeTag;
         List<KnowledgeCatalogPort.KnowledgeFile> files = context.knowledgeCatalogPort()
                 .list(new KnowledgeCatalogPort.Query(effectiveRagName, effectiveTag, MAX_FILES));
+        context.run().recordToolResult(files.size());
         return ToolResultBlock.text(render(files));
     }
 

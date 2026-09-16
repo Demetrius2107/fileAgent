@@ -52,6 +52,7 @@ public class SearchDocsTool extends ToolBase {
                 .limit(MAX_HITS)
                 .toList();
         hits.forEach(hit -> context.run().addAllowedChunk(hit.chunkId()));
+        context.run().recordToolResult(hits.size());
         return ToolResultBlock.text(render(hits, context.singleToolResultCharacters()));
     }
 

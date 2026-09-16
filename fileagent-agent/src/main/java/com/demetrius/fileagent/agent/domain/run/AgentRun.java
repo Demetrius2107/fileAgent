@@ -28,6 +28,7 @@ public class AgentRun {
     private volatile boolean cancelRequested;
     private Long assistantMessageId;
     private String failureCode;
+    private volatile int lastToolResultCount;
 
     private AgentRun(String runId, Long sessionId, String traceId) {
         this.runId = runId;
@@ -74,6 +75,11 @@ public class AgentRun {
     /** 记录最终落库的 assistant 消息 ID（成功前调用）。 */
     public void recordAssistantMessage(Long messageId) {
         this.assistantMessageId = messageId;
+    }
+
+    /** 记录最近一次工具调用的结果数量（供 tool.completed 事件使用）。 */
+    public void recordToolResult(int count) {
+        this.lastToolResultCount = count;
     }
 
     public void addAllowedChunk(String chunkId) {
@@ -161,5 +167,9 @@ public class AgentRun {
 
     public String failureCode() {
         return failureCode;
+    }
+
+    public int lastToolResultCount() {
+        return lastToolResultCount;
     }
 }

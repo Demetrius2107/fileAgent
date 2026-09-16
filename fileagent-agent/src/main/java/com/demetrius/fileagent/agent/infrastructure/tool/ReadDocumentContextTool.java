@@ -47,6 +47,7 @@ public class ReadDocumentContextTool extends ToolBase {
             }
         }
         List<KnowledgeContextPort.KnowledgeChunkContext> chunks = context.knowledgeContextPort().read(chunkIds);
+        context.run().recordToolResult(chunks.size());
         return ToolResultBlock.text(render(chunks, context.singleToolResultCharacters()));
     }
 

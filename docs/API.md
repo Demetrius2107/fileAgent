@@ -396,6 +396,52 @@ data:{"type":"error","code":"404","message":"会话不存在","traceId":"0123456
 
 > 未命中知识时，服务端返回「未检索到可用于回答该问题的知识库资料，无法根据现有资料确认。请提供相关文件或咨询对应负责人。」并计入最终落库的 ASSISTANT 正文；不会调用模型生成通用知识回答。
 
+### 4.2 Agent 模式流式运行
+`POST /api/sessions/{id}/agent-runs`
+
+- 请求头 `Accept: text/event-stream`，响应 `Content-Type: text/event-stream`；响应头 `X-Trace-Id` 返回本次运行的 `traceId`
+- 流程：会话校验 → 读取最近 `fileagent.agent-history-limit` 条历史 → 保存 USER → 创建 Agent Run → ReAct 循环（只读知识工具检索）→ 事件下发 → 完整 ASSISTANT 落库
+- Agent 只能调用服务端固定的只读知识工具（检索文档 / 列知识文件 / 读文档上下文），禁止任意文件路径、URL 或写操作
+- 敏感配置（模型 apiKey/baseUrl）绝不进入任何事件；工具正文、思维链不外发
+
+Request:
+```json
+{ "prompt": "年假如何申请？", "knowledgeScope": { "ragName": null, "knowledgeTag": null } }
+```
+- `knowledgeScope` 可省略（默认全局知识范围）；两个字段均为 null 表示全局范围
+
+事件类型（`event` 名即 `type`，`data` 为 `AgentRunEvent` JSON）：
+- `run.started`：运行开始，`status=RUNNING`
+- `tool.started`：`{ "step": 1, "tool": "search_docs" }`
+- `tool.completed`：`{ "step": 1, "tool": "search_docs", "resultCount": 3, "durationMs": 42 }`（只带结果数量与耗时，不带正文）
+- `message.delta`：`{ "content": "模型增量正文" }`
+- `sources`：`{ "files": ["员工手册.pdf"] }` 回答实际引用的文件名
+- `run.completed`：`{ "status": "SUCCEEDED", "messageId": 21 }`
+- `run.failed`：`{ "status": "FAILED", "code": "...", "message": "...", "traceId": "..." }`
+
+错误码（`run.failed` 事件的 `code`）：
+| code | 含义 |
+|---|---|
+| `AGENT_RUN_TIMEOUT` | 运行超时（超 `fileagent.agent.run-timeout`） |
+| `AGENT_BUDGET_EXCEEDED` | 超出步骤/模型调用/最大迭代预算 |
+| `AGENT_RUN_CANCELLED` | 运行已取消 |
+| `AGENT_MODEL_UNAVAILABLE` | 模型调用失败 |
+| `AGENT_PERSIST_FAILED` | 回答落库失败 |
+
+流建立前校验失败（会话不存在 / prompt 空白）返回对应 HTTP 状态 + 一条 `run.failed` 事件。
+
+### 4.3 Agent Run 快照查询
+`GET /api/agent-runs/{runId}`
+
+返回 `ApiResult<AgentRunSnapshot>`，含 `runId`/`status`/`stepCount`/`modelCallCount`/`assistantMessageId`/`failureCode`/`traceId`；不含思维链与工具正文。Run 不存在返回 HTTP 404 + `code=404`。
+
+> Run 快照保存在进程内存，进程重启后不可查询。
+
+### 4.4 Agent Run 取消
+`POST /api/agent-runs/{runId}/cancel`
+
+结束运行中的 Run（状态转 `CANCELLED` 并中断模型调用），返回最新快照；对已结束 Run 幂等。
+
 ---
 
 ## 5. 产物管理

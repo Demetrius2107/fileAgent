@@ -49,6 +49,10 @@
         <form id="chat-form" class="chat-form">
             <textarea id="prompt-input" rows="2" placeholder="输入问题，Ctrl/⌘ + Enter 发送" autocomplete="off"></textarea>
             <div class="chat-actions">
+                <label class="agent-mode-toggle" title="Agent 模式：由 AI 自主检索知识并分步作答（默认关闭）">
+                    <input type="checkbox" id="agent-mode-toggle">
+                    <span>Agent 模式</span>
+                </label>
                 <button id="send-button" type="submit" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                     发送

@@ -21,7 +21,7 @@ class StaticPageContractTest {
     private static final List<String> STABLE_IDS = List.of(
             "session-panel", "new-session-button", "session-list",
             "chat-panel", "chat-title", "message-list", "chat-form", "prompt-input",
-            "send-button", "stop-button",
+            "send-button", "stop-button", "agent-mode-toggle",
             "knowledge-panel", "upload-button", "knowledge-list",
             "upload-dialog", "upload-form", "upload-name", "upload-tag", "upload-files",
             "toggle-model-settings", "model-settings-dialog", "model-settings-form",
@@ -55,6 +55,19 @@ class StaticPageContractTest {
                 .contains("KNOWLEDGE_INSUFFICIENT")
                 .contains("来源：知识库资料不足")
                 .contains("来源：未标注引用");
+    }
+
+    @Test
+    void agentModeShouldTargetAgentRuntimeEndpointAndHandleRunEvents() throws IOException {
+        String script = readResource("static/app.js");
+
+        assertThat(script)
+                .as("app.js 应接入 Agent 运行端点 /agent-runs")
+                .contains("/agent-runs")
+                .as("app.js 应处理运行开始/完成/失败事件")
+                .contains("run.started")
+                .contains("run.completed")
+                .contains("run.failed");
     }
 
     private String readResource(String path) throws IOException {

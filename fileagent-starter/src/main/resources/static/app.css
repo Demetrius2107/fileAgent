@@ -402,6 +402,17 @@ body {
     width: fit-content;
 }
 
+/* Agent 工具进行态：进行中/完成后的短暂提示，自动收起 */
+.agent-tool-status {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #d97706;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: #fef3c7;
+    width: fit-content;
+}
+
 /* 空状态 */
 .chat-hint {
     align-self: center;
@@ -448,6 +459,31 @@ body {
     justify-content: flex-end;
     gap: 8px;
 }
+
+/* Agent 模式开关：靠左，与右侧发送/停止按钮分离 */
+.agent-mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: auto;
+    padding: 7px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    transition: all var(--transition);
+}
+.agent-mode-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.agent-mode-toggle input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+.agent-mode-toggle input:checked + span { color: var(--accent); font-weight: 600; }
 
 #send-button, #stop-button, .dialog-actions button {
     font: inherit;

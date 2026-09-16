@@ -22,6 +22,7 @@
     const promptInput = $('prompt-input');
     const sendButton = $('send-button');
     const stopButton = $('stop-button');
+    const agentModeToggle = $('agent-mode-toggle');
     const knowledgeList = $('knowledge-list');
     const uploadButton = $('upload-button');
     const uploadDialog = $('upload-dialog');
@@ -50,6 +51,8 @@
     let streaming = false;
     /* 当前正在编辑的模型配置 id；null 表示表单处于"新建"模式 */
     let editingConfigId = null;
+    /* Agent 模式当前运行的 runId；用于停止/卸载时尽力取消后端运行 */
+    let currentRunId = null;
 
     /* ---------- 通用 ---------- */
 
@@ -207,7 +210,21 @@
         }
     });
 
-    stopButton.addEventListener('click', () => { abortController && abortController.abort(); });
+    stopButton.addEventListener('click', () => {
+        abortController && abortController.abort();
+        cancelActiveRun();
+    });
+
+    /* 页面卸载时尽力取消后端仍在运行的 Agent，避免残留算力 */
+    window.addEventListener('beforeunload', cancelActiveRun);
+
+    function cancelActiveRun() {
+        if (currentRunId) {
+            const runId = currentRunId;
+            currentRunId = null;
+            fetch(`/api/agent-runs/${runId}/cancel`, { method: 'POST' }).catch(() => {});
+        }
+    }
 
     async function sendMessage(prompt) {
         promptInput.value = '';
@@ -218,23 +235,33 @@
         abortController = new AbortController();
         setStreaming(true);
         let content = '';
+        const useAgent = agentModeToggle.checked;
         try {
-            await streamChat(prompt, (event) => {
-                if (event.type === 'message') {
-                    content += event.content;
+            const onEvent = (event) => {
+                if (event.type === 'message' || event.type === 'message.delta') {
+                    content += event.content || '';
                     bubble.textContent = content;
                     messageList.scrollTop = messageList.scrollHeight;
                 } else if (event.type === 'sources') {
                     renderSources(assistant, event);
-                } else if (event.type === 'done') {
+                } else if (event.type === 'done' || event.type === 'run.completed') {
                     assistant.dataset.messageId = String(event.messageId);
-                } else if (event.type === 'error') {
+                } else if (event.type === 'error' || event.type === 'run.failed') {
                     const traceHint = event.traceId ? `（traceId：${event.traceId}）` : '';
                     assistant.querySelector('.message-body')
                         .appendChild(el('div', 'message-error',
                             `出错了：${event.message || event.code || '未知错误'}${traceHint}`));
+                } else if (event.type === 'run.started') {
+                    currentRunId = event.runId;
+                } else if (event.type === 'tool.started' || event.type === 'tool.completed') {
+                    renderToolStatus(assistant, event);
                 }
-            });
+            };
+            if (useAgent) {
+                await streamAgentRun(prompt, onEvent);
+            } else {
+                await streamChat(prompt, onEvent);
+            }
         } catch (e) {
             const body = assistant.querySelector('.message-body');
             if (e.name === 'AbortError') {
@@ -245,6 +272,7 @@
         } finally {
             setStreaming(false);
             abortController = null;
+            currentRunId = null;
             if (!assistant.querySelector('.message-time')) {
                 assistant.querySelector('.message-body').appendChild(el('div', 'message-time', formatTime(localIsoNow())));
             }
@@ -252,11 +280,11 @@
         }
     }
 
-    async function streamChat(prompt, onEvent) {
-        const response = await fetch(`/api/sessions/${currentSessionId}/chat`, {
+    async function streamSse(url, body, onEvent) {
+        const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-            body: JSON.stringify({ prompt }),
+            body: JSON.stringify(body),
             signal: abortController.signal
         });
         if (!response.ok || !response.body) {
@@ -265,11 +293,11 @@
             try {
                 const responseText = await response.text();
                 const contentType = response.headers.get('Content-Type') || '';
-                const body = contentType.includes('text/event-stream')
+                const parsed = contentType.includes('text/event-stream')
                     ? parseSseBlock(responseText)
                     : JSON.parse(responseText);
-                if (body && body.message) { message = body.message; }
-                if (body && body.traceId) { traceId = body.traceId; }
+                if (parsed && parsed.message) { message = parsed.message; }
+                if (parsed && parsed.traceId) { traceId = parsed.traceId; }
             } catch (e) { /* 无法解析的错误体 */ }
             if (traceId) { message += `（traceId：${traceId}）`; }
             throw new Error(message);
@@ -292,6 +320,14 @@
         }
         const rest = parseSseBlock(buffer);
         if (rest) { onEvent(rest); }
+    }
+
+    function streamChat(prompt, onEvent) {
+        return streamSse(`/api/sessions/${currentSessionId}/chat`, { prompt }, onEvent);
+    }
+
+    function streamAgentRun(prompt, onEvent) {
+        return streamSse(`/api/sessions/${currentSessionId}/agent-runs`, { prompt }, onEvent);
     }
 
     function parseSseBlock(block) {
@@ -326,6 +362,30 @@
         sources.appendChild(svgEl(SVG.sourceIcon));
         sources.appendChild(document.createTextNode(text));
         assistant.querySelector('.message-body').appendChild(sources);
+    }
+
+    /* Agent 工具进行态：只渲染简短状态，完成后自动收起，不展示参数与原始资料 */
+    const TOOL_LABELS = {
+        search_docs: '检索知识',
+        list_knowledge_files: '列出知识文件',
+        read_document_context: '读取文档上下文'
+    };
+
+    function renderToolStatus(assistant, event) {
+        const body = assistant.querySelector('.message-body');
+        let statusEl = body.querySelector('.agent-tool-status');
+        if (event.type === 'tool.started') {
+            if (!statusEl) {
+                statusEl = el('div', 'agent-tool-status');
+                body.appendChild(statusEl);
+            }
+            statusEl.textContent = `正在${TOOL_LABELS[event.tool] || event.tool}（第 ${event.step} 步）…`;
+        } else if (event.type === 'tool.completed') {
+            if (statusEl) {
+                statusEl.textContent = `${TOOL_LABELS[event.tool] || event.tool} 完成（${event.resultCount || 0} 条）`;
+                setTimeout(() => { statusEl && statusEl.remove(); }, 2000);
+            }
+        }
     }
 
     /* ---------- 知识库 ---------- */

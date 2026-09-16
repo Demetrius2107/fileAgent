@@ -1,11 +1,14 @@
 package com.demetrius.fileagent.agent.domain.run;
 
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
+import com.demetrius.fileagent.api.port.KnowledgeSearchPort.KnowledgeHit;
 
 import java.time.Instant;
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Agent Run 聚合根：单机内存运行态与状态机。
@@ -25,6 +28,7 @@ public class AgentRun {
     private int stepCount;
     private int modelCallCount;
     private final Set<String> allowedChunkIds = ConcurrentHashMap.newKeySet();
+    private final List<KnowledgeHit> retrievedHits = new CopyOnWriteArrayList<>();
     private volatile boolean cancelRequested;
     private Long assistantMessageId;
     private String failureCode;
@@ -85,6 +89,13 @@ public class AgentRun {
     public void addAllowedChunk(String chunkId) {
         if (chunkId != null) {
             this.allowedChunkIds.add(chunkId);
+        }
+    }
+
+    /** 记录一次检索命中的完整片段（供离线评测收集检索证据）。 */
+    public void addRetrievedHit(KnowledgeHit hit) {
+        if (hit != null) {
+            this.retrievedHits.add(hit);
         }
     }
 
@@ -159,6 +170,10 @@ public class AgentRun {
 
     public Set<String> allowedChunkIds() {
         return Collections.unmodifiableSet(allowedChunkIds);
+    }
+
+    public List<KnowledgeHit> retrievedHits() {
+        return List.copyOf(retrievedHits);
     }
 
     public Long assistantMessageId() {

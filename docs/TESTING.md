@@ -50,3 +50,12 @@ mvn verify            # 含集成（如有）
 - PR 门禁使用 `gate.json` 的绝对下限，并可与已认可的 `report.json` 比较最大回退量。
 - `citationPrecision` 和 `citationRecall` 只统计回答正文实际标注、且本次检索命中的文件名；它们不再把所有检索候选误当作回答引用。
 - 完整命令、数据格式和指标定义见 `fileagent-evaluation/README.md`。
+
+## 7. Agent 模式评测
+
+- 评测数据位于 `fileagent-evaluation/src/main/resources/evaluation/agent-v1/`（`cases/agent.jsonl` 题库 + `gate.json` 门禁）。
+- Agent 评测把指标拆成两类，独立追踪：
+  - **答案质量（复用 Judge）**：`answer.answerDecisionAccuracy` / `answer.requiredFactCoverage` / `answer.forbiddenFactSafety` / `answer.unsupportedClaimSafety`。
+  - **Agent 行为（运行时受控性）**：`agent.budgetComplianceRate`（预算遵守）/ `agent.toolWhitelistPassRate`（工具白名单）/ `agent.citationOnlyFromRetrievedRate`（引用仅来自检索）/ `agent.refusalDecisionAccuracy`（拒答正确）。
+- 离线入口：`fileagent-evaluation/scripts/run-agent-evaluation.sh`（跑 `AgentEvaluationRunnerTest`，不依赖运行中的服务、不调用真实模型）。
+- 评测路径 `AgentAnswerEvaluationPort -> AgentScopeRuntimeAdapter.evaluate()` 复用生产运行时，但**不创建会话、不写数据库**，只保留受控观察供离线分析。

@@ -14,6 +14,7 @@ import com.demetrius.fileagent.api.dto.AgentRunSnapshot;
 import com.demetrius.fileagent.api.dto.MessageDto;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.MessageType;
+import com.demetrius.fileagent.api.port.AgentAnswerEvaluationPort;
 import com.demetrius.fileagent.api.port.AgentRuntimePort;
 import com.demetrius.fileagent.api.port.KnowledgeCatalogPort;
 import com.demetrius.fileagent.api.port.KnowledgeContextPort;
@@ -44,6 +45,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
@@ -88,32 +90,10 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         registry.save(run);
 
         try {
-            Toolkit toolkit = new Toolkit();
-            toolkit.registerAgentTool(searchDocsTool);
-            toolkit.registerAgentTool(listKnowledgeFilesTool);
-            toolkit.registerAgentTool(readDocumentContextTool);
-
-            Model model = modelFactory.create();
-            ReActAgent agent = ReActAgent.builder()
-                    .name("fileagent-knowledge-agent")
-                    .description("文件知识助手")
-                    .sysPrompt(promptFactory.systemInstruction())
-                    .model(model)
-                    .toolkit(toolkit)
-                    .maxIters(properties.getMaxSteps())
-                    .build();
-
-            AgentToolContext toolContext = new AgentToolContext(
-                    run, knowledgeSearchPort, knowledgeCatalogPort, knowledgeContextPort,
-                    command.knowledgeScope(), properties.getSingleToolResultCharacters());
-
-            RuntimeContext ctx = RuntimeContext.builder()
-                    .sessionId(String.valueOf(command.sessionId()))
-                    .userId("server")
-                    .put(AgentToolContext.class, toolContext)
-                    .build();
-
-            Msg userMessage = buildUserMessage(command);
+            AgentAssembly assembly = assemble(command, run);
+            ReActAgent agent = assembly.agent();
+            RuntimeContext ctx = assembly.context();
+            Msg userMessage = assembly.userMessage();
 
             registry.registerCancelHandle(command.runId(), () -> {
                 run.requestCancel();
@@ -133,7 +113,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                             Flux.just(eventMapper.started(run.runId(), run.traceId())),
                             agent.streamEvents(userMessage, ctx)
                                     .concatMap(ev -> mapEvent(ev, run, agent, ctx, step, modelCalls,
-                                            toolStartNanos, answer)))
+                                            toolStartNanos, answer, null)))
                     .timeout(properties.getRunTimeout())
                     .onErrorResume(e -> onError(e, run))
                     .doOnCancel(() -> {
@@ -156,16 +136,102 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         }
     }
 
+    private AgentAssembly assemble(AgentRunCommand command, AgentRun run) {
+        Toolkit toolkit = new Toolkit();
+        toolkit.registerAgentTool(searchDocsTool);
+        toolkit.registerAgentTool(listKnowledgeFilesTool);
+        toolkit.registerAgentTool(readDocumentContextTool);
+
+        Model model = modelFactory.create();
+        ReActAgent agent = ReActAgent.builder()
+                .name("fileagent-knowledge-agent")
+                .description("文件知识助手")
+                .sysPrompt(promptFactory.systemInstruction())
+                .model(model)
+                .toolkit(toolkit)
+                .maxIters(properties.getMaxSteps())
+                .build();
+
+        AgentToolContext toolContext = new AgentToolContext(
+                run, knowledgeSearchPort, knowledgeCatalogPort, knowledgeContextPort,
+                command.knowledgeScope(), properties.getSingleToolResultCharacters());
+
+        RuntimeContext ctx = RuntimeContext.builder()
+                .sessionId(String.valueOf(command.sessionId()))
+                .userId("server")
+                .put(AgentToolContext.class, toolContext)
+                .build();
+
+        return new AgentAssembly(agent, ctx, buildUserMessage(command));
+    }
+
+    /**
+     * 评测模式运行：复用同一 Agent 组装逻辑，同步等待完成后返回完整观察。
+     * 不创建会话、不落库消息；只收集受控观察（答案、检索命中、引用、步数/调用数与终态）。
+     */
+    public AgentAnswerEvaluationPort.Result evaluate(AgentRunCommand command) {
+        AgentRun run = AgentRun.pending(command.runId(), command.sessionId(), command.traceId());
+        run.start(Instant.now());
+        registry.save(run);
+        long startedAt = System.nanoTime();
+        try {
+            AgentAssembly assembly = assemble(command, run);
+            List<String> toolCalls = new CopyOnWriteArrayList<>();
+            StringBuilder answer = new StringBuilder();
+            AtomicInteger step = new AtomicInteger(0);
+            AtomicInteger modelCalls = new AtomicInteger(0);
+            Map<String, Long> toolStartNanos = new ConcurrentHashMap<>();
+
+            Flux.concat(
+                            Flux.just(eventMapper.started(run.runId(), run.traceId())),
+                            assembly.agent().streamEvents(assembly.userMessage(), assembly.context())
+                                    .concatMap(ev -> mapEvent(ev, run, assembly.agent(), assembly.context(),
+                                            step, modelCalls, toolStartNanos, answer, toolCalls)))
+                    .timeout(properties.getRunTimeout())
+                    .onErrorResume(e -> onError(e, run))
+                    .blockLast();
+
+            String finalAnswer = answer.toString();
+            return new AgentAnswerEvaluationPort.Result(
+                    finalAnswer,
+                    finalAnswer.isBlank(),
+                    run.retrievedHits(),
+                    extractSources(finalAnswer),
+                    run.stepCount(),
+                    run.modelCallCount(),
+                    toolCalls,
+                    durationMs(startedAt),
+                    run.status(),
+                    run.failureCode());
+        } catch (Exception e) {
+            log.warn("Agent 评测运行失败 runId={}: {}", command.runId(), e.getMessage());
+            if (run.isRunning()) {
+                run.fail(CODE_RUNTIME_UNAVAILABLE, Instant.now());
+            }
+            return new AgentAnswerEvaluationPort.Result(
+                    "", true, List.of(), List.of(), run.stepCount(), run.modelCallCount(),
+                    List.of(), durationMs(startedAt), run.status(), run.failureCode());
+        }
+    }
+
+    private record AgentAssembly(ReActAgent agent, RuntimeContext context, Msg userMessage) {
+    }
+
     private Flux<AgentRunEvent> mapEvent(AgentEvent event, AgentRun run, ReActAgent agent, RuntimeContext ctx,
                                          AtomicInteger step, AtomicInteger modelCalls,
-                                         Map<String, Long> toolStartNanos, StringBuilder answer) {
+                                         Map<String, Long> toolStartNanos, StringBuilder answer,
+                                         List<String> toolCalls) {
         switch (event.getType()) {
             case TOOL_CALL_START -> {
                 ToolCallStartEvent start = (ToolCallStartEvent) event;
+                run.incrementStep();
                 int currentStep = step.incrementAndGet();
                 if (currentStep > properties.getMaxSteps()) {
                     agent.interrupt(ctx);
                     return failIfRunning(run, CODE_BUDGET_EXCEEDED, "超出步骤预算");
+                }
+                if (toolCalls != null) {
+                    toolCalls.add(start.getToolCallName());
                 }
                 toolStartNanos.put(start.getToolCallId(), System.nanoTime());
                 return Flux.just(eventMapper.toolStarted(run.runId(), start.getToolCallName(), currentStep));
@@ -182,6 +248,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 return Flux.just(eventMapper.delta(run.runId(), delta.getDelta()));
             }
             case MODEL_CALL_START -> {
+                run.incrementModelCall();
                 int calls = modelCalls.incrementAndGet();
                 if (calls > properties.getMaxModelCalls()) {
                     agent.interrupt(ctx);

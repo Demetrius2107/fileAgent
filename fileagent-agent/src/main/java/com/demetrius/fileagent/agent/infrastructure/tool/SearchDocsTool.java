@@ -51,7 +51,10 @@ public class SearchDocsTool extends ToolBase {
                 .search(KnowledgeSearchPort.SearchQuery.of(trimmed)).stream()
                 .limit(MAX_HITS)
                 .toList();
-        hits.forEach(hit -> context.run().addAllowedChunk(hit.chunkId()));
+        hits.forEach(hit -> {
+            context.run().addAllowedChunk(hit.chunkId());
+            context.run().addRetrievedHit(hit);
+        });
         context.run().recordToolResult(hits.size());
         return ToolResultBlock.text(render(hits, context.singleToolResultCharacters()));
     }

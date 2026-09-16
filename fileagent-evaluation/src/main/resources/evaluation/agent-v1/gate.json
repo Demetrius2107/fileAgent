@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "1.0",
+  "minimumScores": {
+    "answer.answerDecisionAccuracy": 0.8,
+    "agent.budgetComplianceRate": 1.0,
+    "agent.toolWhitelistPassRate": 1.0,
+    "agent.citationOnlyFromRetrievedRate": 0.9
+  },
+  "maximumRegression": 0.1,
+  "regressionMetrics": [
+    "answer.answerDecisionAccuracy"
+  ]
+}

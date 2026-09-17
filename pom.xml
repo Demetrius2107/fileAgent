@@ -39,6 +39,7 @@
         <pdfbox.version>2.0.32</pdfbox.version>
         <poi.version>5.2.5</poi.version>
         <agentscope.version>2.0.1</agentscope.version>
+        <victools-jsonschema.version>5.0.0</victools-jsonschema.version>
     </properties>
 
     <dependencyManagement>
@@ -104,6 +105,23 @@
                 <version>${spring-ai.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+
+            <!-- Spring AI 2.x 与 AgentScope 共用 JSON Schema 组件，必须使用同一套版本。 -->
+            <dependency>
+                <groupId>com.github.victools</groupId>
+                <artifactId>jsonschema-generator</artifactId>
+                <version>${victools-jsonschema.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.victools</groupId>
+                <artifactId>jsonschema-module-jackson</artifactId>
+                <version>${victools-jsonschema.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.victools</groupId>
+                <artifactId>jsonschema-module-swagger-2</artifactId>
+                <version>${victools-jsonschema.version}</version>
             </dependency>
 
             <!-- Swagger -->

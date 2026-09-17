@@ -336,6 +336,27 @@ Response `data`：
 }
 ```
 
+### 3.6.2 执行真实 Agent 评测
+
+`POST /internal/evaluation/agent/run`
+
+与 RAG 评测共用 `FILEAGENT_EVALUATION_ENABLED=true`、`FILEAGENT_EVALUATION_TOKEN` 和请求头 `X-FileAgent-Evaluation-Token`；该接口默认不存在。
+
+Request（字段可省略）：
+
+```json
+{
+  "datasetVersion": "agent-v1",
+  "baseline": null
+}
+```
+
+- 调用当前部署实例中的 `AgentAnswerEvaluationPort -> AgentScopeRuntimeAdapter.evaluate()`，真实执行 Agent 模型调用、只读工具和当前 Elasticsearch 知识库；之后使用 `deepseek-v4-pro` Judge 评判答案。
+- 评测不创建会话、不写入 USER/ASSISTANT 消息，也不输出思维链、工具正文或模型 API Key。
+- 不要求 `fileagent.agent.enabled=true`：前端功能开关可保持关闭，内部评测仍能安全检查即将发布的 Agent 行为。
+- `expected.groundingMode=KNOWLEDGE_BASED` 表示企业事实，必须从本次检索证据回答；`GENERAL_KNOWLEDGE` 表示稳定通用知识或正常创作，允许无检索、无引用直接回答；`REFUSE` 只用于提示词注入、数据泄露等安全越界请求。
+- 响应的 `report`、`observations`、`markdown` 分别保存汇总指标、逐题 Agent 行为/回答/Judge 结果和人工阅读报告；`baseline` 使用上一次 Agent `report.json` 比较回退。
+
 ---
 
 ## 4. 对话（SSE 流式）

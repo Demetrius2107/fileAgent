@@ -56,6 +56,8 @@ mvn verify            # 含集成（如有）
 - 评测数据位于 `fileagent-evaluation/src/main/resources/evaluation/agent-v1/`（`cases/agent.jsonl` 题库 + `gate.json` 门禁）。
 - Agent 评测把指标拆成两类，独立追踪：
   - **答案质量（复用 Judge）**：`answer.answerDecisionAccuracy` / `answer.requiredFactCoverage` / `answer.forbiddenFactSafety` / `answer.unsupportedClaimSafety`。
-  - **Agent 行为（运行时受控性）**：`agent.budgetComplianceRate`（预算遵守）/ `agent.toolWhitelistPassRate`（工具白名单）/ `agent.citationOnlyFromRetrievedRate`（引用仅来自检索）/ `agent.refusalDecisionAccuracy`（拒答正确）。
-- 离线入口：`fileagent-evaluation/scripts/run-agent-evaluation.sh`（跑 `AgentEvaluationRunnerTest`，不依赖运行中的服务、不调用真实模型）。
-- 评测路径 `AgentAnswerEvaluationPort -> AgentScopeRuntimeAdapter.evaluate()` 复用生产运行时，但**不创建会话、不写数据库**，只保留受控观察供离线分析。
+  - **Agent 行为（运行时受控性）**：`agent.budgetComplianceRate`（预算遵守）/ `agent.toolWhitelistPassRate`（工具白名单）/ `agent.citationOnlyFromRetrievedRate`（实际引用仅来自检索）/ `agent.refusalDecisionAccuracy`（拒答正确）。
+- 每道题在 `expected.groundingMode` 明确回答依据：`KNOWLEDGE_BASED` 为企业事实，必须检索；`GENERAL_KNOWLEDGE` 为通用知识或正常创作，可直接回答；`REFUSE` 仅用于提示词注入、数据泄露等安全越界请求。
+- 端到端入口：`fileagent-evaluation/scripts/run-agent-evaluation.sh` 调用已部署实例的 `/internal/evaluation/agent/run`，真实执行 AgentScope、当前知识库、当前启用的聊天模型和 `deepseek-v4-pro` Judge。它不启动新应用，也不要求重复配置模型 API Key。
+- `mvn test` 中的 `AgentEvaluationRunnerTest` 只是评测器单元测试，验证数据解析、指标与门禁计算，不能替代真实报告。
+- 真实评测路径 `AgentAnswerEvaluationPort -> AgentScopeRuntimeAdapter.evaluate()` 复用生产运行时，但**不创建会话、不写数据库**，只保留受控观察供评测分析。

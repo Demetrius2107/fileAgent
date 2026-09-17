@@ -1,30 +1,90 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Agent 离线评测入口：用固定 Judge 与评测夹具（resources/evaluation/agent-v1/）
-# 跑 JUnit，验证「答案质量」与「Agent 行为」两类指标及质量门禁。
-# 与 run-evaluation.sh（经 HTTP 调已部署实例）不同，本脚本不依赖运行中的服务、不调用真实模型。
-
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 repo_dir="$(cd "$script_dir/../.." && pwd)"
-mvn="${FILEAGENT_MVN:-mvn}"
+base_url="${FILEAGENT_BASE_URL:-http://127.0.0.1:8080}"
+token="${FILEAGENT_EVALUATION_TOKEN:-}"
 dataset_version="${FILEAGENT_EVALUATION_DATASET_VERSION:-agent-v1}"
+output_root="${FILEAGENT_EVALUATION_OUTPUT:-$repo_dir/target/evaluation}"
+baseline_file="${FILEAGENT_EVALUATION_BASELINE:-}"
+run_id="${FILEAGENT_EVALUATION_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
-maven_args=()
-if [[ -n "${FILEAGENT_MAVEN_SETTINGS:-}" ]]; then
-  maven_args+=(-s "$FILEAGENT_MAVEN_SETTINGS")
+if [[ -z "$token" ]]; then
+  printf '缺少 FILEAGENT_EVALUATION_TOKEN。\n' >&2
+  exit 1
 fi
-if [[ -n "${FILEAGENT_MAVEN_REPO:-}" ]]; then
-  maven_args+=(-Dmaven.repo.local="$FILEAGENT_MAVEN_REPO")
+if [[ "$token" == *$'\n'* || "$token" == *$'\r'* ]]; then
+  printf 'FILEAGENT_EVALUATION_TOKEN 不能包含换行符。\n' >&2
+  exit 1
+fi
+command -v curl >/dev/null || { printf '缺少 curl。\n' >&2; exit 1; }
+command -v jq >/dev/null || { printf '缺少 jq。\n' >&2; exit 1; }
+if [[ ! "$dataset_version" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  printf 'FILEAGENT_EVALUATION_DATASET_VERSION 格式非法。\n' >&2
+  exit 1
+fi
+if [[ ! "$run_id" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+  printf 'FILEAGENT_EVALUATION_RUN_ID 格式非法。\n' >&2
+  exit 1
 fi
 
-printf 'Agent 离线评测（JUnit，数据集 %s）\n' "$dataset_version"
+temp_dir="$(mktemp -d)"
+trap 'rm -rf "$temp_dir"' EXIT
+chmod 700 "$temp_dir"
+header_file="$temp_dir/headers"
+request_file="$temp_dir/request.json"
+response_file="$temp_dir/response.json"
+printf 'X-FileAgent-Evaluation-Token: %s\n' "$token" > "$header_file"
+chmod 600 "$header_file"
 
-"$mvn" -q -f "$repo_dir/pom.xml" \
-  "${maven_args[@]}" \
-  -pl fileagent-evaluation -am \
-  test \
-  -Dtest=AgentEvaluationRunnerTest \
-  -Dsurefire.failIfNoSpecifiedTests=false
+if [[ -n "$baseline_file" ]]; then
+  if [[ ! -f "$baseline_file" ]]; then
+    printf 'baseline 文件不存在: %s\n' "$baseline_file" >&2
+    exit 1
+  fi
+  jq -n --arg datasetVersion "$dataset_version" --slurpfile baseline "$baseline_file" \
+    '{datasetVersion: $datasetVersion, baseline: $baseline[0]}' > "$request_file"
+else
+  jq -n --arg datasetVersion "$dataset_version" \
+    '{datasetVersion: $datasetVersion}' > "$request_file"
+fi
 
-printf 'Agent 评测通过（含质量门禁断言）。\n'
+printf 'Agent 端到端评测：调用 %s 的真实模型与知识库（数据集 %s）\n' "$base_url" "$dataset_version"
+http_code="$(curl --silent --show-error \
+  --output "$response_file" \
+  --write-out '%{http_code}' \
+  --request POST "${base_url%/}/internal/evaluation/agent/run" \
+  --header "@$header_file" \
+  --header 'Content-Type: application/json' \
+  --data-binary "@$request_file")"
+
+if [[ "$http_code" != "200" ]]; then
+  message="$(jq -r '.message // empty' "$response_file" 2>/dev/null || true)"
+  printf 'Agent 评测请求失败: HTTP %s%s\n' "$http_code" "${message:+, $message}" >&2
+  exit 1
+fi
+if [[ "$(jq -r '.code' "$response_file")" != "0" ]]; then
+  jq -r '.message // "Agent 评测请求失败"' "$response_file" >&2
+  exit 1
+fi
+
+dataset_output_root="$output_root/$dataset_version"
+mkdir -p "$dataset_output_root"
+run_dir="$dataset_output_root/$run_id"
+suffix=2
+while ! mkdir "$run_dir" 2>/dev/null; do
+  run_dir="$dataset_output_root/$run_id-$suffix"
+  suffix=$((suffix + 1))
+done
+jq '.data.report' "$response_file" > "$run_dir/report.json"
+jq -r '.data.markdown' "$response_file" > "$run_dir/report.md"
+jq -c '.data.observations[]' "$response_file" > "$run_dir/observations.jsonl"
+
+printf 'Agent 评测报告已保存到 %s\n' "$run_dir"
+if [[ "$(jq -r '.data.report.gate.passed' "$response_file")" != "true" ]]; then
+  jq -r '.data.report.gate.violations[]' "$response_file" >&2
+  exit 2
+fi
+
+printf 'Agent 质量门禁通过。\n'

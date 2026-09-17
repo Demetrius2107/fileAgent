@@ -10,10 +10,11 @@ class AgentPromptFactoryTest {
     void promptShouldLayerJudgmentAndKeepEvidenceRules() {
         String prompt = new AgentPromptFactory().systemInstruction();
 
-        // 分层判断：常识直答 / 企业事实检索 / 创作越界拒绝
+        // 分层判断：常识和正常创作直答 / 企业事实检索 / 安全越界拒绝
         assertThat(prompt).contains("先判断问题类型");
         assertThat(prompt).contains("直接简短回答，无需检索");
-        assertThat(prompt).contains("创作或越界请求");
+        assertThat(prompt).contains("正常创作请求");
+        assertThat(prompt).contains("安全越界请求");
 
         // 证据与反幻觉核心
         assertThat(prompt).contains("[来源：文件名]");

@@ -1,5 +1,7 @@
 package com.demetrius.fileagent.api.port;
 
+import com.demetrius.fileagent.api.enums.AnswerGroundingMode;
+
 import java.util.List;
 
 /**
@@ -16,12 +18,31 @@ public interface RagAnswerJudgePort {
     record Request(
             String question,
             boolean shouldAnswer,
+            AnswerGroundingMode groundingMode,
             List<String> requiredFacts,
             List<String> forbiddenFacts,
             String answer,
             List<Evidence> evidence
     ) {
+
+        public Request(String question,
+                       boolean shouldAnswer,
+                       List<String> requiredFacts,
+                       List<String> forbiddenFacts,
+                       String answer,
+                       List<Evidence> evidence) {
+            this(question, shouldAnswer,
+                    shouldAnswer ? AnswerGroundingMode.KNOWLEDGE_BASED : AnswerGroundingMode.REFUSE,
+                    requiredFacts, forbiddenFacts, answer, evidence);
+        }
+
         public Request {
+            groundingMode = groundingMode == null
+                    ? (shouldAnswer ? AnswerGroundingMode.KNOWLEDGE_BASED : AnswerGroundingMode.REFUSE)
+                    : groundingMode;
+            if (groundingMode.shouldAnswer() != shouldAnswer) {
+                throw new IllegalArgumentException("groundingMode 与 shouldAnswer 不一致");
+            }
             requiredFacts = requiredFacts == null ? List.of() : List.copyOf(requiredFacts);
             forbiddenFacts = forbiddenFacts == null ? List.of() : List.copyOf(forbiddenFacts);
             evidence = evidence == null ? List.of() : List.copyOf(evidence);

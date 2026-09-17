@@ -1,16 +1,49 @@
 package com.demetrius.fileagent.evaluation;
 
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
+import com.demetrius.fileagent.api.enums.AnswerGroundingMode;
 import com.demetrius.fileagent.api.port.AgentAnswerEvaluationPort;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
 import com.demetrius.fileagent.api.port.RagAnswerJudgePort;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AgentEvaluationRunnerTest {
+
+    @Test
+    void generalKnowledgeShouldPassWithoutRetrievalOrCitation() {
+        AtomicReference<RagAnswerJudgePort.Request> judgeRequest = new AtomicReference<>();
+        RagAnswerJudgePort judgePort = request -> {
+            judgeRequest.set(request);
+            return new RagAnswerJudgePort.Result(RagAnswerJudgePort.Decision.ANSWERED,
+                    "回答了通用知识", false, null,
+                    List.of(new RagAnswerJudgePort.FactAssessment("HTTP 404 表示请求的资源未找到", true, "语义正确")),
+                    List.of(), "{}", 1L);
+        };
+        AgentAnswerEvaluationPort agentPort = query -> new AgentAnswerEvaluationPort.Result(
+                "HTTP 404 表示服务器找不到请求的资源。", false,
+                List.of(), List.of(), 0, 1, List.of(), 50L,
+                AgentRunStatus.SUCCEEDED, null);
+        EvaluationCase evaluationCase = new EvaluationCase("1.0", "general-001", "GENERAL_KNOWLEDGE",
+                List.of(), "HTTP 404 是什么意思？", List.of(), new EvaluationCase.Filters(null, null, null),
+                new EvaluationCase.Expected(true, List.of(),
+                        List.of("HTTP 404 表示请求的资源未找到"), List.of(),
+                        AnswerGroundingMode.GENERAL_KNOWLEDGE));
+
+        AgentEvaluationRunner runner = new AgentEvaluationRunner(judgePort);
+        AgentEvaluationReport report = runner.evaluate("agent-v1", List.of(evaluationCase),
+                runner.collect(List.of(evaluationCase), agentPort));
+
+        assertThat(judgeRequest.get().groundingMode()).isEqualTo(AnswerGroundingMode.GENERAL_KNOWLEDGE);
+        assertThat(judgeRequest.get().evidence()).isEmpty();
+        assertThat(report.answerMetrics().answerDecisionAccuracy()).isEqualTo(1.0d);
+        assertThat(report.answerMetrics().unsupportedClaimSafety()).isEqualTo(1.0d);
+        assertThat(report.agentMetrics().citationOnlyFromRetrievedRate()).isEqualTo(0.0d);
+    }
 
     @Test
     void reportShouldSeparateAnswerQualityFromAgentBehavior() {

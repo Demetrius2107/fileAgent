@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.chat.application;
 
 import com.demetrius.fileagent.api.port.RagAnswerJudgePort;
+import com.demetrius.fileagent.api.enums.AnswerGroundingMode;
 import com.demetrius.fileagent.chat.infrastructure.DeepSeekJudgeClient;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -17,6 +18,36 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class DeepSeekRagAnswerJudgeServiceTest {
+
+    @Test
+    void shouldAllowGeneralKnowledgeWithoutRetrievedEvidence() {
+        DeepSeekJudgeClient client = mock(DeepSeekJudgeClient.class);
+        when(client.call(anyList())).thenReturn("""
+                {
+                  "decision": "ANSWERED",
+                  "decisionReason": "回答了通用知识",
+                  "hasUnsupportedClaims": false,
+                  "requiredFacts": [
+                    {"fact": "HTTP 404 表示请求的资源未找到", "matched": true, "reason": "语义一致"}
+                  ],
+                  "forbiddenFacts": []
+                }
+                """);
+        DeepSeekRagAnswerJudgeService service = new DeepSeekRagAnswerJudgeService(client, new ObjectMapper());
+        RagAnswerJudgePort.Request request = new RagAnswerJudgePort.Request(
+                "HTTP 404 是什么意思？", true, AnswerGroundingMode.GENERAL_KNOWLEDGE,
+                List.of("HTTP 404 表示请求的资源未找到"), List.of(),
+                "HTTP 404 表示服务器找不到请求的资源。", List.of());
+
+        RagAnswerJudgePort.Result result = service.judge(request);
+
+        assertThat(result.hasUnsupportedClaims()).isFalse();
+        ArgumentCaptor<List<Message>> messages = ArgumentCaptor.forClass(List.class);
+        verify(client).call(messages.capture());
+        assertThat(messages.getValue().getFirst().getText())
+                .contains("GENERAL_KNOWLEDGE")
+                .contains("不得仅因没有检索证据或引用判为无依据");
+    }
 
     @Test
     void shouldReturnSemanticFactAndRefusalAssessment() {
@@ -58,7 +89,7 @@ class DeepSeekRagAnswerJudgeServiceTest {
                 .contains("不包含事实断言的下一步建议")
                 .contains("请提供相关文件")
                 .contains("具体数字、期限、规则、流程")
-                .contains("即使标记为通用知识也算");
+                .contains("KNOWLEDGE_BASED 下");
     }
 
     @Test

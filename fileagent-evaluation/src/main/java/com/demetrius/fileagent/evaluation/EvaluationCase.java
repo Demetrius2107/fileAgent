@@ -1,5 +1,7 @@
 package com.demetrius.fileagent.evaluation;
 
+import com.demetrius.fileagent.api.enums.AnswerGroundingMode;
+
 import java.util.List;
 
 /**
@@ -70,13 +72,28 @@ public record EvaluationCase(
             Boolean shouldAnswer,
             List<ExpectedSource> relevantSources,
             List<String> requiredFacts,
-            List<String> forbiddenFacts
+            List<String> forbiddenFacts,
+            AnswerGroundingMode groundingMode
     ) {
+
+        public Expected(Boolean shouldAnswer,
+                        List<ExpectedSource> relevantSources,
+                        List<String> requiredFacts,
+                        List<String> forbiddenFacts) {
+            this(shouldAnswer, relevantSources, requiredFacts, forbiddenFacts, null);
+        }
+
         public Expected {
             shouldAnswer = shouldAnswer == null ? Boolean.TRUE : shouldAnswer;
             relevantSources = relevantSources == null ? List.of() : List.copyOf(relevantSources);
             requiredFacts = requiredFacts == null ? List.of() : List.copyOf(requiredFacts);
             forbiddenFacts = forbiddenFacts == null ? List.of() : List.copyOf(forbiddenFacts);
+            groundingMode = groundingMode == null
+                    ? (shouldAnswer ? AnswerGroundingMode.KNOWLEDGE_BASED : AnswerGroundingMode.REFUSE)
+                    : groundingMode;
+            if (groundingMode.shouldAnswer() != shouldAnswer) {
+                throw new IllegalArgumentException("expected.groundingMode 与 shouldAnswer 不一致");
+            }
         }
     }
 

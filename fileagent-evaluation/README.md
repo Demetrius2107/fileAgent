@@ -67,6 +67,9 @@ export FILEAGENT_EVALUATION_TOKEN='<与部署实例一致>'
 
 # 调用已部署实例，下载评测结果
 ./fileagent-evaluation/scripts/run-evaluation.sh
+
+# 调用已部署实例，真实运行 AgentScope、知识库和 Judge
+./fileagent-evaluation/scripts/run-agent-evaluation.sh
 ```
 
 输出文件：
@@ -77,7 +80,9 @@ export FILEAGENT_EVALUATION_TOKEN='<与部署实例一致>'
 
 每次运行会创建新目录；同一秒内重复执行会自动追加 `-2`、`-3`，不会覆盖历史报告。可用 `FILEAGENT_EVALUATION_RUN_ID` 设置便于识别的运行名，例如 `release-2026-09-09`。
 
-v1 每次运行会真实生成 30 个回答，并逐题调用 `deepseek-v4-pro` 评判，因此会产生 30 次回答调用和 30 次 Judge 调用。Judge 复用部署已有的 `FILEAGENT_CHAT_API_KEY` 与 DeepSeek 端点，不需要新增 API Key。评测接口是同步批量执行，反向代理的请求超时时间应覆盖整批运行耗时。
+Agent 评测默认使用 `agent-v1`，输出到 `target/evaluation/agent-v1/<UTC运行时间>/`。它通过 `/internal/evaluation/agent/run` 真实调用部署实例的 AgentScope Runtime、当前知识库和 Judge；不需要另行配置聊天、向量或 reranker 的 API Key。`GENERAL_KNOWLEDGE` 题允许直接回答通用知识且无需引用，`KNOWLEDGE_BASED` 题才要求以本次检索证据回答，`REFUSE` 题仅用于安全越界请求。当前 `agent-v1` 有 8 题，每次会产生最多 8 次 Agent 调用和 8 次 Judge 调用。
+
+普通 RAG 的 `v1` 每次运行会真实生成 30 个回答，并逐题调用 `deepseek-v4-pro` 评判，因此会产生 30 次回答调用和 30 次 Judge 调用。Judge 复用部署已有的 `FILEAGENT_CHAT_API_KEY` 与 DeepSeek 端点，不需要新增 API Key。评测接口是同步批量执行，反向代理的请求超时时间应覆盖整批运行耗时。
 
 服务端会自动把 Judge 模型、当前实际生效的 Embedding 模型、向量维度、索引、BM25/KNN/RRF 参数和 reranker 配置写入报告，不记录 API Key。
 

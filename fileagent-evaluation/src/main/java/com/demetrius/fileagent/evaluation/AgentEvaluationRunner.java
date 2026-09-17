@@ -23,6 +23,7 @@ import java.util.Set;
 public final class AgentEvaluationRunner {
 
     private static final String VERSION_PATTERN = "[a-zA-Z0-9._-]+";
+    private static final int MAX_CASES = 100;
 
     private static final Set<String> TOOL_WHITELIST =
             Set.of("search_docs", "list_knowledge_files", "read_document_context");
@@ -47,9 +48,17 @@ public final class AgentEvaluationRunner {
     }
 
     public AgentEvaluationReport run(String datasetVersion, AgentAnswerEvaluationPort agentPort) {
+        return runWithObservations(datasetVersion, agentPort).report();
+    }
+
+    public RunResult runWithObservations(String datasetVersion, AgentAnswerEvaluationPort agentPort) {
         String version = validateVersion(datasetVersion);
         List<EvaluationCase> cases = evaluationFiles.loadCases(findCaseResources(version));
-        return evaluate(version, cases, collect(cases, agentPort));
+        if (cases.size() > MAX_CASES) {
+            throw new IllegalArgumentException("单次评测题目不能超过 " + MAX_CASES + " 道");
+        }
+        List<AgentEvaluationObservation> observations = collect(cases, agentPort);
+        return new RunResult(evaluate(version, cases, observations), observations);
     }
 
     public List<AgentEvaluationObservation> collect(List<EvaluationCase> cases,
@@ -260,6 +269,7 @@ public final class AgentEvaluationRunner {
                 .toList();
         return new RagAnswerJudgePort.Request(evaluationCase.question(),
                 evaluationCase.expected().shouldAnswer(),
+                evaluationCase.expected().groundingMode(),
                 evaluationCase.expected().requiredFacts(),
                 evaluationCase.expected().forbiddenFacts(),
                 result.answer(), evidence);
@@ -296,5 +306,12 @@ public final class AgentEvaluationRunner {
     private static String message(RuntimeException exception) {
         return exception.getClass().getSimpleName()
                 + (exception.getMessage() == null ? "" : ": " + exception.getMessage());
+    }
+
+    public record RunResult(AgentEvaluationReport report,
+                            List<AgentEvaluationObservation> observations) {
+        public RunResult {
+            observations = observations == null ? List.of() : List.copyOf(observations);
+        }
     }
 }

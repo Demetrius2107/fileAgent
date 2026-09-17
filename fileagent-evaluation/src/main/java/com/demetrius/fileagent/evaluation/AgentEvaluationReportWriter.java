@@ -36,6 +36,8 @@ public final class AgentEvaluationReportWriter {
         sb.append(row("拒答正确率", agent.refusalDecisionAccuracy()));
         sb.append("| 平均步骤数 | ").append(format(agent.avgStepCount())).append(" |\n");
         sb.append("| 平均耗时(ms) | ").append(format(agent.avgDurationMs())).append(" |\n");
+        sb.append("\n> 引用指标只校验回答中实际标出的来源是否来自本次检索；"
+                + "`GENERAL_KNOWLEDGE` 题允许无检索、无引用，不会因此判错。\n");
 
         if (report.gate() != null) {
             sb.append("\n## 质量门禁\n\n");

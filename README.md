@@ -51,7 +51,7 @@ RAGFlow 托管式 RAG 的独立调用工程位于 [`ragflow-quickstart`](ragflow
 - **启用**：`fileagent.agent.enabled=true`（默认 `false`）；模型沿用 chat 域启用配置（`spring.ai.deepseek.*`），不新增密钥配置。
 - **接口**：`POST /api/sessions/{id}/agent-runs`（SSE 流式）、`GET /api/agent-runs/{runId}`（快照）、`POST /api/agent-runs/{runId}/cancel`（取消），见 `docs/API.md` §4.2。
 - **运行限制**：每次运行 ≤4 步推理/工具调用、≤45 秒、单次工具结果 ≤12000 字符；Agent 仅拥有 `search_docs` / `list_knowledge_files` / `read_document_context` 三个只读工具。
-- **评测**：离线评测 `./fileagent-evaluation/scripts/run-agent-evaluation.sh`（答案质量 + Agent 行为门禁），见 `docs/TESTING.md` §7。
+- **评测**：`./fileagent-evaluation/scripts/run-agent-evaluation.sh` 调用已部署实例，真实执行 AgentScope、检索和 Judge；通用知识可直接回答，企业事实才要求检索依据，见 `docs/TESTING.md` §7。
 
 打开 `http://localhost:8080/` 即可使用同源工作台：新建会话 → 右侧「知识库」上传 TXT/MD/PDF/DOCX/XLSX/CSV → 中间提问，回答流式输出并标明来源文件；刷新页面后会话与消息仍在（H2 落库，知识索引存于 Elasticsearch）。
 

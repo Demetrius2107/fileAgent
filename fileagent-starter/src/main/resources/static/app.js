@@ -364,7 +364,7 @@
         assistant.querySelector('.message-body').appendChild(sources);
     }
 
-    /* Agent 工具进行态：只渲染简短状态，完成后自动收起，不展示参数与原始资料 */
+    /* Agent 工具过程轨迹：每一步追加一行，回答完成后保留，展示 Agent 做了什么 */
     const TOOL_LABELS = {
         search_docs: '检索知识',
         list_knowledge_files: '列出知识文件',
@@ -379,11 +379,18 @@
                 statusEl = el('div', 'agent-tool-status');
                 body.appendChild(statusEl);
             }
-            statusEl.textContent = `正在${TOOL_LABELS[event.tool] || event.tool}（第 ${event.step} 步）…`;
+            const step = el('div', 'agent-tool-step',
+                `第 ${event.step} 步：${TOOL_LABELS[event.tool] || event.tool} 中…`);
+            step.dataset.tool = event.tool;
+            statusEl.appendChild(step);
         } else if (event.type === 'tool.completed') {
             if (statusEl) {
-                statusEl.textContent = `${TOOL_LABELS[event.tool] || event.tool} 完成（${event.resultCount || 0} 条）`;
-                setTimeout(() => { statusEl && statusEl.remove(); }, 2000);
+                const steps = statusEl.querySelectorAll('.agent-tool-step');
+                const last = steps[steps.length - 1];
+                if (last) {
+                    last.textContent = `第 ${event.step} 步：${TOOL_LABELS[event.tool] || event.tool} 完成（${event.resultCount || 0} 条）`;
+                    last.classList.add('agent-tool-step-done');
+                }
             }
         }
     }

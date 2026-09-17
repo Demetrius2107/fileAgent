@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.agent.interfaces;
 
+import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.api.dto.AgentRunSnapshot;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.port.AgentRuntimePort;
@@ -15,6 +16,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
 
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -26,12 +28,15 @@ class AgentRunQueryControllerTest {
 
     @Mock
     private AgentRuntimePort agentRuntimePort;
+    @Mock
+    private AgentProperties properties;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        AgentRunQueryController controller = new AgentRunQueryController(agentRuntimePort);
+        when(properties.isEnabled()).thenReturn(true);
+        AgentRunQueryController controller = new AgentRunQueryController(agentRuntimePort, properties);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -69,5 +74,16 @@ class AgentRunQueryControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+    }
+
+    @Test
+    void shouldReturn403WhenFeatureDisabled() throws Exception {
+        when(properties.isEnabled()).thenReturn(false);
+
+        mockMvc.perform(get("/api/agent-runs/run-1"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(403));
+
+        verifyNoInteractions(agentRuntimePort);
     }
 }

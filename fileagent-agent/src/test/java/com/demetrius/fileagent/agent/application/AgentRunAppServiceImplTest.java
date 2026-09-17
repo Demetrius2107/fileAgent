@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.agent.application;
 
+import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.interfaces.dto.StartAgentRunRequest;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
@@ -8,6 +9,7 @@ import com.demetrius.fileagent.api.port.AgentRuntimePort;
 import com.demetrius.fileagent.api.port.SessionMessagePort;
 import com.demetrius.fileagent.api.port.SessionQueryPort;
 import com.demetrius.fileagent.common.exception.BizException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -36,9 +38,16 @@ class AgentRunAppServiceImplTest {
     private SessionMessagePort sessionMessagePort;
     @Mock
     private AgentRuntimePort agentRuntimePort;
+    @Mock
+    private AgentProperties properties;
 
     @InjectMocks
     private AgentRunAppServiceImpl service;
+
+    @BeforeEach
+    void enableAgentByDefault() {
+        when(properties.isEnabled()).thenReturn(true);
+    }
 
     @Test
     void shouldPersistUserThenAssistantOnCompletion() {
@@ -93,5 +102,17 @@ class AgentRunAppServiceImplTest {
         assertThatThrownBy(() -> service.run(1L, new StartAgentRunRequest("  ", null), "trace-1"))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("prompt");
+    }
+
+    @Test
+    void shouldReturnFeatureDisabledWhenFlagOff() {
+        when(properties.isEnabled()).thenReturn(false);
+
+        List<AgentRunEvent> events = service.run(1L, new StartAgentRunRequest("问题", null), "trace-1")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentRunEvent::type).containsExactly("run.failed");
+        assertThat(events.get(0).code()).isEqualTo("AGENT_FEATURE_DISABLED");
+        verifyNoInteractions(agentRuntimePort, sessionMessagePort, sessionQueryPort);
     }
 }

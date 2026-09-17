@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.agent.application;
 
+import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.interfaces.dto.StartAgentRunRequest;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
@@ -30,16 +31,22 @@ import java.util.UUID;
 public class AgentRunAppServiceImpl implements AgentRunAppService {
 
     private static final String CODE_PERSIST_FAILED = "AGENT_PERSIST_FAILED";
+    private static final String CODE_FEATURE_DISABLED = "AGENT_FEATURE_DISABLED";
 
     private final SessionQueryPort sessionQueryPort;
     private final SessionMessagePort sessionMessagePort;
     private final AgentRuntimePort agentRuntimePort;
+    private final AgentProperties properties;
 
     @Value("${fileagent.agent-history-limit:10}")
     private int historyLimit;
 
     @Override
     public Flux<AgentRunEvent> run(Long sessionId, StartAgentRunRequest request, String traceId) {
+        if (!properties.isEnabled()) {
+            return Flux.just(AgentRunEvent.failed(null, CODE_FEATURE_DISABLED,
+                    "Agent 模式未启用，请先在配置中开启", traceId));
+        }
         if (sessionId == null) {
             throw new BizException("sessionId 不能为空");
         }

@@ -59,6 +59,9 @@ fileagent:
   storage-dir: ./storage/files
   secret-key-path: ./storage/secret.key
   chat-history-limit: 10
+  # Agent 模式（Phase 1）：默认关闭，本地测试可设 FILEAGENT_AGENT_ENABLED=true 开启
+  agent:
+    enabled: ${FILEAGENT_AGENT_ENABLED:false}
   chunk-size: 800
   chunk-overlap: 120
   elasticsearch:

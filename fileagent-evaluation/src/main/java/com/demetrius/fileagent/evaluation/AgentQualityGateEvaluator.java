@@ -49,9 +49,11 @@ public final class AgentQualityGateEvaluator {
         scores.put("answer.requiredFactCoverage", answer.requiredFactCoverage());
         scores.put("answer.forbiddenFactSafety", answer.forbiddenFactSafety());
         scores.put("answer.unsupportedClaimSafety", answer.unsupportedClaimSafety());
+        scores.put("agent.runSuccessRate", agent.runSuccessRate());
         scores.put("agent.budgetComplianceRate", agent.budgetComplianceRate());
         scores.put("agent.toolWhitelistPassRate", agent.toolWhitelistPassRate());
-        scores.put("agent.citationOnlyFromRetrievedRate", agent.citationOnlyFromRetrievedRate());
+        scores.put("agent.citationCoverageRate", agent.citationCoverageRate());
+        scores.put("agent.citationValidityRate", agent.citationValidityRate());
         scores.put("agent.refusalDecisionAccuracy", agent.refusalDecisionAccuracy());
         return scores;
     }

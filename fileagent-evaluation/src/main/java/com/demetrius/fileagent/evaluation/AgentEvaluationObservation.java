@@ -39,10 +39,10 @@ public record AgentEvaluationObservation(
     }
 
     public boolean agentSucceeded() {
-        return error == null;
+        return error == null && terminalStatus == AgentRunStatus.SUCCEEDED;
     }
 
     public boolean judgeSucceeded() {
-        return error == null && judgeDecision != null;
+        return agentSucceeded() && judgeDecision != null;
     }
 }

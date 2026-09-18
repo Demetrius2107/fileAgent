@@ -1,5 +1,7 @@
 package com.demetrius.fileagent.evaluation;
 
+import com.demetrius.fileagent.api.enums.AgentRunStatus;
+
 import java.util.List;
 
 /**
@@ -38,12 +40,32 @@ public record AgentEvaluationReport(
 
     /** Agent 行为指标（受控运行时行为）。 */
     public record AgentMetrics(
+            double runSuccessRate,
             double budgetComplianceRate,
             double toolWhitelistPassRate,
-            double citationOnlyFromRetrievedRate,
+            double citationCoverageRate,
+            double citationValidityRate,
             double refusalDecisionAccuracy,
             double avgStepCount,
             double avgDurationMs) {
+    }
+
+    /** 单题引用状态。 */
+    public enum CitationStatus {
+        PASSED("通过"),
+        MISSING("未覆盖"),
+        INVALID("无效"),
+        NOT_APPLICABLE("不适用");
+
+        private final String displayName;
+
+        CitationStatus(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public String displayName() {
+            return displayName;
+        }
     }
 
     /** 单题明细。 */
@@ -51,9 +73,20 @@ public record AgentEvaluationReport(
             String caseId,
             String category,
             String question,
+            String answerText,
+            List<String> retrievedFilenames,
+            List<String> citedFilenames,
+            AgentRunStatus terminalStatus,
+            String failureCode,
+            CitationStatus citationStatus,
             AnswerMetrics answer,
             AgentMetrics agent,
             String error) {
+
+        public CaseResult {
+            retrievedFilenames = retrievedFilenames == null ? List.of() : List.copyOf(retrievedFilenames);
+            citedFilenames = citedFilenames == null ? List.of() : List.copyOf(citedFilenames);
+        }
     }
 
     /** 质量门禁结果。 */

@@ -2,9 +2,11 @@
   "schemaVersion": "1.0",
   "minimumScores": {
     "answer.answerDecisionAccuracy": 0.8,
+    "agent.runSuccessRate": 1.0,
     "agent.budgetComplianceRate": 1.0,
     "agent.toolWhitelistPassRate": 1.0,
-    "agent.citationOnlyFromRetrievedRate": 0.9
+    "agent.citationCoverageRate": 0.9,
+    "agent.citationValidityRate": 1.0
   },
   "maximumRegression": 0.1,
   "regressionMetrics": [

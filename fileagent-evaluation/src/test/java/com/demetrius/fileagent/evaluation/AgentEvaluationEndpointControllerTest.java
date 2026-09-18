@@ -50,7 +50,7 @@ class AgentEvaluationEndpointControllerTest {
     void shouldRunAgentEvaluationWhenTokenIsValid() throws Exception {
         AgentEvaluationReport report = new AgentEvaluationReport("1.0", "agent-v1", "2026-09-17T00:00:00Z",
                 8, 8, 0, new AgentEvaluationReport.AnswerMetrics(1, 1, 1, 1),
-                new AgentEvaluationReport.AgentMetrics(1, 1, 1, 1, 1, 1),
+                new AgentEvaluationReport.AgentMetrics(1, 1, 1, 1, 1, 1, 1, 1),
                 List.of(), new AgentEvaluationReport.GateResult(true, List.of()));
         when(agentEvaluationEndpointService.run(any())).thenReturn(
                 new AgentEvaluationRunResponse(report, List.of(), "# Agent 评测报告"));

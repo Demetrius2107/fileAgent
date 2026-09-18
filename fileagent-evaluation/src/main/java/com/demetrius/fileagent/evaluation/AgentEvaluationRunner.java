@@ -1,6 +1,8 @@
 package com.demetrius.fileagent.evaluation;
 
 import com.demetrius.fileagent.api.enums.MessageType;
+import com.demetrius.fileagent.api.enums.AgentRunStatus;
+import com.demetrius.fileagent.api.enums.AnswerGroundingMode;
 import com.demetrius.fileagent.api.port.AgentAnswerEvaluationPort;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
 import com.demetrius.fileagent.api.port.RagAnswerJudgePort;
@@ -85,32 +87,37 @@ public final class AgentEvaluationRunner {
                     null, false, List.of(), List.of(), message(e));
         }
 
+        if (result.terminalStatus() != AgentRunStatus.SUCCEEDED) {
+            return observation(evaluationCase, result, null, null);
+        }
         try {
             RagAnswerJudgePort.Result assessment = judgePort.judge(toJudgeRequest(evaluationCase, result));
-            return new AgentEvaluationObservation(
-                    evaluationCase.id(), evaluationCase.category(), evaluationCase.question(),
-                    result.answer(), result.refused(),
-                    filenames(result.retrieved()), result.citedFilenames(),
-                    result.stepCount(), result.modelCallCount(), result.toolCalls(),
-                    result.durationMs(), result.terminalStatus(), result.failureCode(),
-                    assessment.decision(), assessment.hasUnsupportedClaims(),
-                    assessment.requiredFacts(), assessment.forbiddenFacts(), null);
+            return observation(evaluationCase, result, assessment, null);
         } catch (RuntimeException e) {
-            return new AgentEvaluationObservation(
-                    evaluationCase.id(), evaluationCase.category(), evaluationCase.question(),
-                    result.answer(), result.refused(),
-                    filenames(result.retrieved()), result.citedFilenames(),
-                    result.stepCount(), result.modelCallCount(), result.toolCalls(),
-                    result.durationMs(), result.terminalStatus(), result.failureCode(),
-                    null, false, List.of(), List.of(), message(e));
+            return observation(evaluationCase, result, null, message(e));
         }
+    }
+
+    private AgentEvaluationObservation observation(EvaluationCase evaluationCase,
+                                                   AgentAnswerEvaluationPort.Result result,
+                                                   RagAnswerJudgePort.Result assessment,
+                                                   String error) {
+        return new AgentEvaluationObservation(
+                evaluationCase.id(), evaluationCase.category(), evaluationCase.question(),
+                result.answer(), result.refused(), filenames(result.retrieved()), result.citedFilenames(),
+                result.stepCount(), result.modelCallCount(), result.toolCalls(), result.durationMs(),
+                result.terminalStatus(), result.failureCode(),
+                assessment == null ? null : assessment.decision(),
+                assessment != null && assessment.hasUnsupportedClaims(),
+                assessment == null ? List.of() : assessment.requiredFacts(),
+                assessment == null ? List.of() : assessment.forbiddenFacts(), error);
     }
 
     public AgentEvaluationReport evaluate(String datasetVersion,
                                           List<EvaluationCase> cases,
                                           List<AgentEvaluationObservation> observations) {
         int total = cases.size();
-        int succeeded = (int) observations.stream().filter(o -> o.error() == null).count();
+        int succeeded = (int) observations.stream().filter(AgentEvaluationObservation::agentSucceeded).count();
         int failed = total - succeeded;
         return new AgentEvaluationReport("1.0", datasetVersion, Instant.now().toString(),
                 total, succeeded, failed,
@@ -128,7 +135,7 @@ public final class AgentEvaluationRunner {
         double unsupportedSum = 0, unsupportedCount = 0;
         for (int i = 0; i < observations.size(); i++) {
             AgentEvaluationObservation o = observations.get(i);
-            if (o.error() != null) {
+            if (!o.agentSucceeded()) {
                 continue;
             }
             EvaluationCase c = cases.get(i);
@@ -158,25 +165,33 @@ public final class AgentEvaluationRunner {
 
     private AgentEvaluationReport.AgentMetrics aggregateAgentMetrics(
             List<EvaluationCase> cases, List<AgentEvaluationObservation> observations) {
+        double runSuccessSum = 0, runSuccessCount = 0;
         double budgetSum = 0, budgetCount = 0;
         double whitelistSum = 0, whitelistCount = 0;
-        double citationSum = 0, citationCount = 0;
+        double citationCoverageSum = 0, citationCoverageCount = 0;
+        double citationValiditySum = 0, citationValidityCount = 0;
         double refusalSum = 0, refusalCount = 0;
         double stepSum = 0, stepCount = 0;
         double durationSum = 0, durationCount = 0;
         for (int i = 0; i < observations.size(); i++) {
             AgentEvaluationObservation o = observations.get(i);
-            if (!o.agentSucceeded()) {
-                continue;
-            }
-            EvaluationCase c = cases.get(i);
+            runSuccessSum += o.agentSucceeded() ? 1.0 : 0.0;
+            runSuccessCount++;
             budgetSum += budgetCompliant(o) ? 1.0 : 0.0;
             budgetCount++;
             whitelistSum += toolWhitelistPass(o) ? 1.0 : 0.0;
             whitelistCount++;
-            if (!o.citedFilenames().isEmpty()) {
-                citationSum += citationsOnlyFromRetrieved(o) ? 1.0 : 0.0;
-                citationCount++;
+            if (!o.agentSucceeded()) {
+                continue;
+            }
+            EvaluationCase c = cases.get(i);
+            if (c.expected().groundingMode() == AnswerGroundingMode.KNOWLEDGE_BASED) {
+                citationCoverageSum += hasRetrievedCitation(o) ? 1.0 : 0.0;
+                citationCoverageCount++;
+                if (!o.citedFilenames().isEmpty()) {
+                    citationValiditySum += citationsOnlyFromRetrieved(o) ? 1.0 : 0.0;
+                    citationValidityCount++;
+                }
             }
             refusalSum += o.refused() == !c.expected().shouldAnswer() ? 1.0 : 0.0;
             refusalCount++;
@@ -186,9 +201,11 @@ public final class AgentEvaluationRunner {
             durationCount++;
         }
         return new AgentEvaluationReport.AgentMetrics(
+                ratio(runSuccessSum, runSuccessCount),
                 ratio(budgetSum, budgetCount),
                 ratio(whitelistSum, whitelistCount),
-                ratio(citationSum, citationCount),
+                ratio(citationCoverageSum, citationCoverageCount),
+                citationValidityCount == 0 ? 1.0 : ratio(citationValiditySum, citationValidityCount),
                 ratio(refusalSum, refusalCount),
                 ratio(stepSum, stepCount),
                 ratio(durationSum, durationCount));
@@ -202,6 +219,8 @@ public final class AgentEvaluationRunner {
             EvaluationCase c = cases.get(i);
             results.add(new AgentEvaluationReport.CaseResult(
                     o.caseId(), o.category(), o.question(),
+                    o.answer(), o.retrievedFilenames(), o.citedFilenames(),
+                    o.terminalStatus(), o.failureCode(), citationStatus(c, o),
                     answerMetricsOf(c, o), agentMetricsOf(c, o), o.error()));
         }
         return results;
@@ -224,12 +243,16 @@ public final class AgentEvaluationRunner {
     private AgentEvaluationReport.AgentMetrics agentMetricsOf(EvaluationCase c,
                                                               AgentEvaluationObservation o) {
         if (!o.agentSucceeded()) {
-            return new AgentEvaluationReport.AgentMetrics(0, 0, 0, 0, 0, 0);
+            return new AgentEvaluationReport.AgentMetrics(0, 0, 0, 0, 1, 0, 0, 0);
         }
         return new AgentEvaluationReport.AgentMetrics(
+                1.0,
                 budgetCompliant(o) ? 1.0 : 0.0,
                 toolWhitelistPass(o) ? 1.0 : 0.0,
-                o.citedFilenames().isEmpty() || citationsOnlyFromRetrieved(o) ? 1.0 : 0.0,
+                c.expected().groundingMode() == AnswerGroundingMode.KNOWLEDGE_BASED
+                        && hasRetrievedCitation(o) ? 1.0 : 0.0,
+                c.expected().groundingMode() == AnswerGroundingMode.KNOWLEDGE_BASED
+                        && (o.citedFilenames().isEmpty() || citationsOnlyFromRetrieved(o)) ? 1.0 : 0.0,
                 o.refused() == !c.expected().shouldAnswer() ? 1.0 : 0.0,
                 o.stepCount(),
                 o.durationMs());
@@ -247,6 +270,25 @@ public final class AgentEvaluationRunner {
     private static boolean citationsOnlyFromRetrieved(AgentEvaluationObservation observation) {
         return new java.util.HashSet<>(observation.retrievedFilenames())
                 .containsAll(observation.citedFilenames());
+    }
+
+    private static boolean hasRetrievedCitation(AgentEvaluationObservation observation) {
+        java.util.Set<String> retrieved = new java.util.HashSet<>(observation.retrievedFilenames());
+        return observation.citedFilenames().stream().anyMatch(retrieved::contains);
+    }
+
+    private static AgentEvaluationReport.CitationStatus citationStatus(
+            EvaluationCase evaluationCase, AgentEvaluationObservation observation) {
+        if (!observation.agentSucceeded()
+                || evaluationCase.expected().groundingMode() != AnswerGroundingMode.KNOWLEDGE_BASED) {
+            return AgentEvaluationReport.CitationStatus.NOT_APPLICABLE;
+        }
+        if (observation.citedFilenames().isEmpty()) {
+            return AgentEvaluationReport.CitationStatus.MISSING;
+        }
+        return citationsOnlyFromRetrieved(observation)
+                ? AgentEvaluationReport.CitationStatus.PASSED
+                : AgentEvaluationReport.CitationStatus.INVALID;
     }
 
     private static double matchedRatio(List<RagAnswerJudgePort.FactAssessment> facts) {

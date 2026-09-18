@@ -53,6 +53,7 @@ class AgentEvaluationReportWriterTest {
                 new AgentEvaluationReport.GateResult(true, List.of())));
 
         assertThat(markdown).contains("通过 ✅");
+        assertThat(markdown).contains("无已标注引用样本");
         assertThat(markdown).doesNotContain("## 典型失败题");
         assertThat(markdown).doesNotContain("case-good");
     }

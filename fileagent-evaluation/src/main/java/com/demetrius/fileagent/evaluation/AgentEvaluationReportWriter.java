@@ -42,9 +42,7 @@ public final class AgentEvaluationReportWriter {
         sb.append(row("拒答正确率", agent.refusalDecisionAccuracy()));
         sb.append("| 平均步骤数 | ").append(format(agent.avgStepCount())).append(" |\n");
         sb.append("| 平均耗时(ms) | ").append(format(agent.avgDurationMs())).append(" |\n");
-        sb.append("\n> 运行成功率只统计终态为 `SUCCEEDED` 且无评测错误的题；引用覆盖率只统计成功的"
-                + " `KNOWLEDGE_BASED` 题，引用有效性只统计其中实际标注了来源的题。"
-                + " `GENERAL_KNOWLEDGE`、`REFUSE` 和失败 Run 的引用状态为不适用。\n");
+        appendMetricScope(sb, report);
 
         if (report.gate() != null) {
             sb.append("\n## 质量门禁\n\n");
@@ -57,6 +55,23 @@ public final class AgentEvaluationReportWriter {
             }
         }
         return sb.toString();
+    }
+
+    private static void appendMetricScope(StringBuilder sb, AgentEvaluationReport report) {
+        long coverageDenominator = report.cases().stream()
+                .filter(c -> c.citationStatus() != AgentEvaluationReport.CitationStatus.NOT_APPLICABLE)
+                .count();
+        long validityDenominator = report.cases().stream()
+                .filter(c -> c.citationStatus() == AgentEvaluationReport.CitationStatus.PASSED
+                        || c.citationStatus() == AgentEvaluationReport.CitationStatus.INVALID)
+                .count();
+        sb.append("\n> 运行成功率只统计终态为 `SUCCEEDED` 且无评测错误的题；引用覆盖率分母是成功的"
+                + " `KNOWLEDGE_BASED` 题（").append(coverageDenominator).append(" 道），"
+                + "引用有效性分母是其中实际标注了来源的题（").append(validityDenominator).append(" 道").append('）');
+        if (validityDenominator == 0) {
+            sb.append("，无已标注引用样本");
+        }
+        sb.append("。`GENERAL_KNOWLEDGE`、`REFUSE` 和失败 Run 的引用状态为不适用。\n");
     }
 
     private static void appendRepresentativeCases(StringBuilder sb, AgentEvaluationReport report) {

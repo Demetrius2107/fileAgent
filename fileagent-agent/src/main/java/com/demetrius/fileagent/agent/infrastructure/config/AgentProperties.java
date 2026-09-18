@@ -21,7 +21,7 @@ public class AgentProperties {
     /** Feature Flag：是否启用 Agent 入口，默认关闭。 */
     private boolean enabled = false;
 
-    private int maxSteps = 4;
+    private int maxSteps = 8;
     private int maxModelCalls = 4;
     private Duration runTimeout = Duration.ofSeconds(45);
     private Duration toolTimeout = Duration.ofSeconds(5);

@@ -1,12 +1,14 @@
 package com.demetrius.fileagent.agent.infrastructure.tool;
 
 import com.demetrius.fileagent.agent.application.tool.AgentToolContext;
+import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort.KnowledgeHit;
 import com.demetrius.fileagent.common.exception.BizException;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.ToolBase;
 import io.agentscope.core.tool.ToolCallParam;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
@@ -18,6 +20,7 @@ import java.util.Map;
  * query 去首尾空格后 1..200 字，最多返回 5 条命中；命中的 chunkId 写入本次
  * Run 的证据白名单；单条片段按上限截断。
  */
+@Slf4j
 public class SearchDocsTool extends ToolBase {
 
     private static final int MAX_QUERY_LENGTH = 200;
@@ -47,10 +50,20 @@ public class SearchDocsTool extends ToolBase {
         if (trimmed.length() > MAX_QUERY_LENGTH) {
             throw new BizException("search_docs 检索关键词不能超过 " + MAX_QUERY_LENGTH + " 字");
         }
-        List<KnowledgeHit> hits = context.knowledgeSearchPort()
-                .search(KnowledgeSearchPort.SearchQuery.of(trimmed)).stream()
-                .limit(MAX_HITS)
-                .toList();
+        List<KnowledgeHit> hits;
+        try {
+            KnowledgeSearchPort.SearchQuery searchQuery = new KnowledgeSearchPort.SearchQuery(
+                    trimmed, context.scope().ragName(), context.scope().knowledgeTag(), null);
+            hits = context.knowledgeSearchPort().search(searchQuery).stream()
+                    .limit(MAX_HITS)
+                    .toList();
+        } catch (RuntimeException exception) {
+            log.warn("search_docs 检索失败 runId={}, queryLength={}",
+                    context.run().runId(), trimmed.length(), exception);
+            context.run().recordToolFailure(AgentRun.KNOWLEDGE_SEARCH_FAILURE_CODE);
+            context.run().recordToolResult(0);
+            return ToolResultBlock.text("知识库检索暂时不可用，当前运行将结束。");
+        }
         hits.forEach(hit -> {
             context.run().addAllowedChunk(hit.chunkId());
             context.run().addRetrievedHit(hit);

@@ -64,6 +64,18 @@ class AgentRunTest {
     }
 
     @Test
+    void shouldRecordPendingToolFailureWithoutChangingRunStatus() {
+        AgentRun run = AgentRun.pending("run-1", 8L, "trace-1");
+        run.start(NOW);
+
+        run.recordToolFailure(AgentRun.KNOWLEDGE_SEARCH_FAILURE_CODE);
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.RUNNING);
+        assertThat(run.pendingToolFailureCode())
+                .isEqualTo(AgentRun.KNOWLEDGE_SEARCH_FAILURE_CODE);
+    }
+
+    @Test
     void shouldRecordAssistantMessageAndCancelRequest() {
         AgentRun run = AgentRun.pending("run-1", 8L, "trace-1");
         run.start(NOW);

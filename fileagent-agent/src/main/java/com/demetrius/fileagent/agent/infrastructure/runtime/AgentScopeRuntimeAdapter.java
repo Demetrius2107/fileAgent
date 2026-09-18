@@ -113,7 +113,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                             Flux.just(eventMapper.started(run.runId(), run.traceId())),
                             agent.streamEvents(userMessage, ctx)
                                     .concatMap(ev -> mapEvent(ev, run, agent, ctx, step, modelCalls,
-                                            toolStartNanos, answer, null)))
+                                            toolStartNanos, answer, assembly.toolContext(), null)))
                     .timeout(properties.getRunTimeout())
                     .onErrorResume(e -> onError(e, run))
                     .doOnCancel(() -> {
@@ -162,7 +162,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 .put(AgentToolContext.class, toolContext)
                 .build();
 
-        return new AgentAssembly(agent, ctx, buildUserMessage(command));
+        return new AgentAssembly(agent, ctx, buildUserMessage(command), toolContext);
     }
 
     /**
@@ -186,7 +186,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                             Flux.just(eventMapper.started(run.runId(), run.traceId())),
                             assembly.agent().streamEvents(assembly.userMessage(), assembly.context())
                                     .concatMap(ev -> mapEvent(ev, run, assembly.agent(), assembly.context(),
-                                            step, modelCalls, toolStartNanos, answer, toolCalls)))
+                                            step, modelCalls, toolStartNanos, answer,
+                                            assembly.toolContext(), toolCalls)))
                     .timeout(properties.getRunTimeout())
                     .onErrorResume(e -> onError(e, run))
                     .blockLast();
@@ -214,12 +215,14 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         }
     }
 
-    private record AgentAssembly(ReActAgent agent, RuntimeContext context, Msg userMessage) {
+    private record AgentAssembly(ReActAgent agent, RuntimeContext context, Msg userMessage,
+                                 AgentToolContext toolContext) {
     }
 
     private Flux<AgentRunEvent> mapEvent(AgentEvent event, AgentRun run, ReActAgent agent, RuntimeContext ctx,
                                          AtomicInteger step, AtomicInteger modelCalls,
                                          Map<String, Long> toolStartNanos, StringBuilder answer,
+                                         AgentToolContext toolContext,
                                          List<String> toolCalls) {
         switch (event.getType()) {
             case TOOL_CALL_START -> {
@@ -239,8 +242,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             case TOOL_RESULT_END -> {
                 ToolResultEndEvent end = (ToolResultEndEvent) event;
                 long durationMs = durationMs(toolStartNanos.remove(end.getToolCallId()));
-                return Flux.just(eventMapper.toolCompleted(run.runId(), end.getToolCallName(),
-                        step.get(), run.lastToolResultCount(), durationMs));
+                return handleToolResultEnd(run, agent, ctx, end.getToolCallName(), step.get(), durationMs);
             }
             case TEXT_BLOCK_DELTA -> {
                 TextBlockDeltaEvent delta = (TextBlockDeltaEvent) event;
@@ -275,6 +277,18 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 return Flux.empty();
             }
         }
+    }
+
+    Flux<AgentRunEvent> handleToolResultEnd(AgentRun run, ReActAgent agent,
+                                            RuntimeContext context, String toolName,
+                                            int step, long durationMs) {
+        String failureCode = run.pendingToolFailureCode();
+        if (failureCode != null) {
+            agent.interrupt(context);
+            return failIfRunning(run, failureCode, "知识库检索暂时不可用");
+        }
+        return Flux.just(eventMapper.toolCompleted(run.runId(), toolName, step,
+                run.lastToolResultCount(), durationMs));
     }
 
     private Flux<AgentRunEvent> complete(AgentRun run, String finalText) {

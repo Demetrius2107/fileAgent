@@ -18,6 +18,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public class AgentRun {
 
+    public static final String KNOWLEDGE_SEARCH_FAILURE_CODE = "AGENT_KNOWLEDGE_SEARCH_FAILED";
+
     private final String runId;
     private final Long sessionId;
     private final String traceId;
@@ -32,6 +34,7 @@ public class AgentRun {
     private volatile boolean cancelRequested;
     private Long assistantMessageId;
     private String failureCode;
+    private volatile String pendingToolFailureCode;
     private volatile int lastToolResultCount;
 
     private AgentRun(String runId, Long sessionId, String traceId) {
@@ -84,6 +87,13 @@ public class AgentRun {
     /** 记录最近一次工具调用的结果数量（供 tool.completed 事件使用）。 */
     public void recordToolResult(int count) {
         this.lastToolResultCount = count;
+    }
+
+    /** 记录尚待运行时消费的工具失败，不改变当前 Run 终态。 */
+    public void recordToolFailure(String code) {
+        if (isRunning()) {
+            this.pendingToolFailureCode = code;
+        }
     }
 
     public void addAllowedChunk(String chunkId) {
@@ -182,6 +192,10 @@ public class AgentRun {
 
     public String failureCode() {
         return failureCode;
+    }
+
+    public String pendingToolFailureCode() {
+        return pendingToolFailureCode;
     }
 
     public int lastToolResultCount() {

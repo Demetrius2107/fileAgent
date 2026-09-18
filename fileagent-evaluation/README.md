@@ -82,6 +82,8 @@ export FILEAGENT_EVALUATION_TOKEN='<与部署实例一致>'
 
 Agent 评测默认使用 `agent-v1`，输出到 `target/evaluation/agent-v1/<UTC运行时间>/`。它通过 `/internal/evaluation/agent/run` 真实调用部署实例的 AgentScope Runtime、当前知识库和 Judge；不需要另行配置聊天、向量或 reranker 的 API Key。`GENERAL_KNOWLEDGE` 题允许直接回答通用知识且无需引用，`KNOWLEDGE_BASED` 题才要求以本次检索证据回答，`REFUSE` 题仅用于安全越界请求。当前 `agent-v1` 有 8 题，每次会产生最多 8 次 Agent 调用和 8 次 Judge 调用。
 
+Agent 报告中的 `agent.runSuccessRate` 衡量 Run 是否以 `SUCCEEDED` 结束；非成功 Run 不调用 Judge，但仍保留回答、检索文件、引用文件、终态和失败码。`agent.citationCoverageRate` 衡量成功的知识库题是否至少引用一个本次检索命中的文件，`agent.citationValidityRate` 衡量已经写出的引用是否全部来自本次检索结果。通用知识题、拒答题和失败 Run 的引用状态为 `NOT_APPLICABLE`。
+
 普通 RAG 的 `v1` 每次运行会真实生成 30 个回答，并逐题调用 `deepseek-v4-pro` 评判，因此会产生 30 次回答调用和 30 次 Judge 调用。Judge 复用部署已有的 `FILEAGENT_CHAT_API_KEY` 与 DeepSeek 端点，不需要新增 API Key。评测接口是同步批量执行，反向代理的请求超时时间应覆盖整批运行耗时。
 
 服务端会自动把 Judge 模型、当前实际生效的 Embedding 模型、向量维度、索引、BM25/KNN/RRF 参数和 reranker 配置写入报告，不记录 API Key。

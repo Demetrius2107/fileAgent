@@ -356,6 +356,8 @@ Request（字段可省略）：
 - 不要求 `fileagent.agent.enabled=true`：前端功能开关可保持关闭，内部评测仍能安全检查即将发布的 Agent 行为。
 - `expected.groundingMode=KNOWLEDGE_BASED` 表示企业事实，必须从本次检索证据回答；`GENERAL_KNOWLEDGE` 表示稳定通用知识或正常创作，允许无检索、无引用直接回答；`REFUSE` 只用于提示词注入、数据泄露等安全越界请求。
 - 响应的 `report`、`observations`、`markdown` 分别保存汇总指标、逐题 Agent 行为/回答/Judge 结果和人工阅读报告；`baseline` 使用上一次 Agent `report.json` 比较回退。
+- 非 `SUCCEEDED` 的 Run 计入 `agent.runSuccessRate` 分母，但不调用 Judge；已生成的回答、检索文件、引用文件、终态和失败码仍保留在 `observations` 与 `report.cases` 中。
+- `agent.citationCoverageRate` 只统计成功的 `KNOWLEDGE_BASED` 题中是否至少引用一个本次检索命中的文件；`agent.citationValidityRate` 只统计这些题实际写出引用时，引用文件是否全部来自本次检索结果。`GENERAL_KNOWLEDGE`、`REFUSE` 和失败 Run 的引用状态为 `NOT_APPLICABLE`。
 
 ---
 

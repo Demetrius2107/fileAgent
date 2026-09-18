@@ -56,7 +56,9 @@ mvn verify            # 含集成（如有）
 - 评测数据位于 `fileagent-evaluation/src/main/resources/evaluation/agent-v1/`（`cases/agent.jsonl` 题库 + `gate.json` 门禁）。
 - Agent 评测把指标拆成两类，独立追踪：
   - **答案质量（复用 Judge）**：`answer.answerDecisionAccuracy` / `answer.requiredFactCoverage` / `answer.forbiddenFactSafety` / `answer.unsupportedClaimSafety`。
-  - **Agent 行为（运行时受控性）**：`agent.budgetComplianceRate`（预算遵守）/ `agent.toolWhitelistPassRate`（工具白名单）/ `agent.citationOnlyFromRetrievedRate`（实际引用仅来自检索）/ `agent.refusalDecisionAccuracy`（拒答正确）。
+  - **Agent 行为（运行时受控性）**：`agent.runSuccessRate`（Run 以 `SUCCEEDED` 结束）/ `agent.budgetComplianceRate`（预算遵守）/ `agent.toolWhitelistPassRate`（工具白名单）/ `agent.citationCoverageRate`（知识库题至少引用一个检索文件）/ `agent.citationValidityRate`（实际引用全部来自检索结果）/ `agent.refusalDecisionAccuracy`（拒答正确）。
+- 非 `SUCCEEDED` 的 Run 不调用 Judge，但保留回答、检索结果、引用、终态和失败码，便于定位运行时问题。
+- 引用覆盖率和引用有效性分开看：覆盖率低表示回答没有给出有效知识库来源；有效性低表示回答给出的来源中混入了本次检索未返回的文件。通用知识题、拒答题和失败 Run 的引用指标不适用。
 - 每道题在 `expected.groundingMode` 明确回答依据：`KNOWLEDGE_BASED` 为企业事实，必须检索；`GENERAL_KNOWLEDGE` 为通用知识或正常创作，可直接回答；`REFUSE` 仅用于提示词注入、数据泄露等安全越界请求。
 - 端到端入口：`fileagent-evaluation/scripts/run-agent-evaluation.sh` 调用已部署实例的 `/internal/evaluation/agent/run`，真实执行 AgentScope、当前知识库、当前启用的聊天模型和 `deepseek-v4-pro` Judge。它不启动新应用，也不要求重复配置模型 API Key。
 - `mvn test` 中的 `AgentEvaluationRunnerTest` 只是评测器单元测试，验证数据解析、指标与门禁计算，不能替代真实报告。

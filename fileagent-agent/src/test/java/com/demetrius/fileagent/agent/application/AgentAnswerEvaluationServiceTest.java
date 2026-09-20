@@ -44,7 +44,7 @@ class AgentAnswerEvaluationServiceTest {
                         "chunk-1", 1L, "员工入职第一年有 5 天年假", "employee-handbook.md",
                         null, "section-1", "parent-1", 2, 0.91)),
                 List.of("employee-handbook.md"), 1, 2, List.of("search_docs"), 150L,
-                AgentRunStatus.SUCCEEDED, null);
+                AgentRunStatus.SUCCEEDED, null, null);
         when(runtimeAdapter.evaluate(any(AgentRunCommand.class))).thenReturn(expected);
 
         AgentAnswerEvaluationPort.Result result = service.evaluate(new AgentAnswerEvaluationPort.Query(
@@ -60,7 +60,7 @@ class AgentAnswerEvaluationServiceTest {
         when(runtimeAdapter.evaluate(any(AgentRunCommand.class)))
                 .thenReturn(new AgentAnswerEvaluationPort.Result(
                         "", true, List.of(), List.of(), 0, 0, List.of(), 0L,
-                        AgentRunStatus.SUCCEEDED, null));
+                        AgentRunStatus.SUCCEEDED, null, null));
 
         service.evaluate(new AgentAnswerEvaluationPort.Query(
                 "问题", List.of(), "rag-eval", "tag-eval", 9L));

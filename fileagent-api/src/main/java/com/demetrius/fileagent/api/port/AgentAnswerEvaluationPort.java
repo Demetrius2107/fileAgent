@@ -2,6 +2,7 @@ package com.demetrius.fileagent.api.port;
 
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.MessageType;
+import com.demetrius.fileagent.api.enums.RetrievalQueryType;
 
 import java.util.List;
 
@@ -51,6 +52,7 @@ public interface AgentAnswerEvaluationPort {
      * @param durationMs       运行耗时
      * @param terminalStatus   终态
      * @param failureCode      失败码（失败/超时/取消时非空）
+     * @param retrieval        自适应检索执行观察（非自适应运行为空）
      */
     record Result(
             String answer,
@@ -62,11 +64,34 @@ public interface AgentAnswerEvaluationPort {
             List<String> toolCalls,
             long durationMs,
             AgentRunStatus terminalStatus,
-            String failureCode) {
+            String failureCode,
+            RetrievalObservation retrieval) {
         public Result {
             retrieved = retrieved == null ? List.of() : List.copyOf(retrieved);
             citedFilenames = citedFilenames == null ? List.of() : List.copyOf(citedFilenames);
             toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+        }
+    }
+
+    /**
+     * 自适应检索执行观察（Phase 2A）：一次运行的检索计划与执行汇总，
+     * 由 Agent Run 的 RetrievalExecution 记录映射，供评测计算自适应指标。
+     */
+    record RetrievalObservation(
+            RetrievalQueryType queryType,
+            String strategyId,
+            int plannedQueryCount,
+            int executedQueryCount,
+            List<Integer> perQueryHitCounts,
+            List<String> candidateChunkIds,
+            List<String> finalChunkIds,
+            boolean rerankRequested,
+            boolean rerankApplied,
+            String fallbackCode) {
+        public RetrievalObservation {
+            perQueryHitCounts = perQueryHitCounts == null ? List.of() : List.copyOf(perQueryHitCounts);
+            candidateChunkIds = candidateChunkIds == null ? List.of() : List.copyOf(candidateChunkIds);
+            finalChunkIds = finalChunkIds == null ? List.of() : List.copyOf(finalChunkIds);
         }
     }
 }

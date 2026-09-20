@@ -28,7 +28,7 @@ class AgentEvaluationRunnerTest {
         AgentAnswerEvaluationPort agentPort = query -> new AgentAnswerEvaluationPort.Result(
                 "HTTP 404 表示服务器找不到请求的资源。", false,
                 List.of(), List.of(), 0, 1, List.of(), 50L,
-                AgentRunStatus.SUCCEEDED, null);
+                AgentRunStatus.SUCCEEDED, null, null);
         EvaluationCase evaluationCase = new EvaluationCase("1.0", "general-001", "GENERAL_KNOWLEDGE",
                 List.of(), "HTTP 404 是什么意思？", List.of(), new EvaluationCase.Filters(null, null, null),
                 new EvaluationCase.Expected(true, List.of(),
@@ -63,7 +63,7 @@ class AgentEvaluationRunnerTest {
                         "chunk-1", 1L, "员工入职第一年有 5 天年假", "employee-handbook.md",
                         null, "section-1", "parent-1", 2, 0.9)),
                 List.of("employee-handbook.md"), 1, 2, List.of("search_docs"), 150L,
-                AgentRunStatus.SUCCEEDED, null);
+                AgentRunStatus.SUCCEEDED, null, null);
         AgentEvaluationRunner runner = new AgentEvaluationRunner(judgePort);
 
         AgentEvaluationReport report = runner.run("agent-v1", agentPort);
@@ -89,7 +89,7 @@ class AgentEvaluationRunnerTest {
         AgentAnswerEvaluationPort agentPort = query -> new AgentAnswerEvaluationPort.Result(
                 "答案", false, List.of(), List.of(), 5, 5,
                 List.of("search_docs", "delete_all_docs"), 200L,
-                AgentRunStatus.FAILED, "AGENT_BUDGET_EXCEEDED");
+                AgentRunStatus.FAILED, "AGENT_BUDGET_EXCEEDED", null);
         AgentEvaluationRunner runner = new AgentEvaluationRunner(judgePort);
 
         AgentEvaluationReport report = runner.run("agent-v1", agentPort);

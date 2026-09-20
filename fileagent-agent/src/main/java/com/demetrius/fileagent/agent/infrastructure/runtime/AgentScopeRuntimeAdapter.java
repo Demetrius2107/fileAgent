@@ -203,7 +203,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                     toolCalls,
                     durationMs(startedAt),
                     run.status(),
-                    run.failureCode());
+                    run.failureCode(),
+                    null);
         } catch (Exception e) {
             log.warn("Agent 评测运行失败 runId={}: {}", command.runId(), e.getMessage());
             if (run.isRunning()) {
@@ -211,7 +212,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             }
             return new AgentAnswerEvaluationPort.Result(
                     "", true, List.of(), List.of(), run.stepCount(), run.modelCallCount(),
-                    List.of(), durationMs(startedAt), run.status(), run.failureCode());
+                    List.of(), durationMs(startedAt), run.status(), run.failureCode(), null);
         }
     }
 

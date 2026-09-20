@@ -158,9 +158,11 @@ flowchart LR
 |---|---|---|---|
 | Phase 0 | 可重复的 RAG 质量基线 | 当前实现 | 1～2 周 |
 | Phase 1 | 最小 Agentic RAG | Phase 0 | 2～3 周 |
-| Phase 2 | Adaptive RAG 与可验证引用 | Phase 1 | 2～3 周 |
+| Phase 2A | Adaptive Retrieval Core | Phase 1 | 1～2 周 |
+| Phase 2B | 上下文预算与细粒度证据读取 | Phase 2A | 1 周 |
+| Phase 2C | 结构化引用与引用验证 | Phase 2B | 1～2 周 |
 | Phase 3 | 持久化运行、HITL 和安全工具 | Phase 1 | 3～4 周 |
-| Phase 4 | 文档型多模态闭环 | Phase 0、2 | 3～5 周 |
+| Phase 4 | 文档型多模态闭环 | Phase 0、2C | 3～5 周 |
 | Phase 5 | 企业知识摄取与生命周期 | Phase 0 | 3～5 周 |
 | Phase 6 | Memory、连接器与业务动作 | Phase 3、5 | 3～5 周 |
 | Phase 7 | 多租户和安全治理 | Phase 3、5、6 | 3～5 周 |
@@ -168,7 +170,7 @@ flowchart LR
 | Phase 9 | 生产部署与运营 | Phase 0～8 | 2～4 周 |
 | Phase 10 | GraphRAG、原生跨模态、多 Agent | 由专项评测决定 | 不预估 |
 
-按严格串行计算，必选阶段约 25～40 个全职开发周。实际可将 Phase 4、5 与部分 Phase 8 并行，但安全、权限和可观测不能拖到上线前一次性补做。
+按严格串行计算，必选阶段约 26～42 个全职开发周。实际可将 Phase 4、5 与部分 Phase 8 并行，但安全、权限和可观测不能拖到上线前一次性补做。
 
 ### 5.1 Phase 0：冻结当前 RAG 基线并建立评测体系
 
@@ -279,9 +281,13 @@ flowchart LR
 
 **目标**：让 Agent 不只是“能搜”，还会选择正确的检索策略，并能证明结论来自哪里。
 
-**预计**：2～3 周。
+**总预计**：3～5 周。按 Phase 2A、2B、2C 依次交付，每个子阶段独立设计、评测和验收，禁止为了赶进度跳过上下文预算或引用验证。
 
-#### 开发任务
+#### Phase 2A：Adaptive Retrieval Core（当前实施）
+
+**目标**：根据问题类型选择受控检索策略，并以有限步骤完成复杂问题检索。
+
+**开发任务**：
 
 - 查询分类：无需检索、单跳检索、多跳检索、比较、聚合、时间敏感。
 - 支持 query decomposition，将复杂问题拆成有限子问题。
@@ -292,18 +298,49 @@ flowchart LR
   - TopK；
   - 是否 rerank；
   - 是否读取完整父块。
-- 增加 `get_chunk` / `get_document_outline`，避免每次把大父块全部塞给模型。
-- 建立上下文预算器，分别限制历史、检索证据、工具结果和用户输入。
-- 引用升级到：`fileId/documentVersion/chunkId/page/sheet/bbox/quoteHash`。
-- 答案生成后执行 citation verification，检查每项关键结论是否存在支持证据。
-- 将检索候选、最终上下文和最终引用分开记录，禁止混为一个概念。
+- 扩展检索契约，使策略参数按单次请求生效，固定 RAG 继续使用现有默认值。
+- 分开记录检索候选与最终上下文，为后续上下文预算和引用验证保留稳定输入。
 
-#### 验收门槛
+**验收门槛**：
 
+- 无需检索和单跳问题不产生多余检索调用。
 - 多跳题和比较题相对 Phase 0 基线有统计上稳定的提升。
 - 无答案问题的错误作答率不因 Agent 重试上升。
-- 每个关键事实可以定位到固定版本的原文件区域。
+- 子问题数、multi-query 数、工具调用次数和检索候选数均有硬上限。
+
+#### Phase 2B：上下文预算与细粒度证据读取（Phase 2A 后实施）
+
+**目标**：只把回答真正需要的证据送入模型，并对每类上下文设置独立硬上限。
+
+**开发任务**：
+
+- 增加 `get_chunk` / `get_document_outline`，避免每次把大父块全部塞给模型。
+- 建立上下文预算器，分别限制历史、检索证据、工具结果和用户输入。
+- 对截断、去重、父块展开和证据选择建立确定性顺序，预算不足时优先保留高相关且来源多样的证据。
+- 记录各类上下文实际消耗和被截断原因，不保存模型思维链或未脱敏工具原文。
+
+**验收门槛**：
+
 - 单请求上下文、步骤数、Token 和费用均有硬上限。
+- 长文档问题不会因为父块整体展开而挤掉更高相关证据。
+- 相同输入和策略产生确定性的上下文选择结果，预算截断可通过受控摘要复盘。
+
+#### Phase 2C：结构化引用与引用验证（Phase 2B 后实施）
+
+**目标**：让每个关键事实可以定位到固定版本的原文件区域，并在回答后验证证据支持关系。
+
+**开发任务**：
+
+- 引用升级到：`fileId/documentVersion/chunkId/page/sheet/bbox/quoteHash`。
+- 答案生成后执行 citation verification，检查每项关键结论是否存在支持证据。
+- 将检索候选、最终上下文和最终引用分开记录，禁止混为一个概念；最终引用只能来自实际进入上下文的证据。
+- 为缺少页码、坐标或版本信息的旧索引设计显式迁移和兼容策略，不伪造定位信息。
+
+**验收门槛**：
+
+- 每个关键事实可以定位到固定版本的原文件区域。
+- 引用验证可以识别缺失引用、伪造引用和证据不支持的关键结论。
+- 文档更新后新回答不引用旧版本，历史报告仍能按原版本追溯。
 
 ---
 
@@ -725,14 +762,16 @@ RAGFlow 已提供 Agent 工作流、Retrieval 工具、MCP、代码执行、Memo
 |---|---|---|
 | 1 | `feat/m3-rag-evaluation` | 评测集、Runner、baseline 报告、CI 门禁 |
 | 2 | `feat/m3-agent-runtime` | AgentRuntimePort、Run/Step、只读工具循环、SSE |
-| 3 | `feat/m3-adaptive-rag` | 查询分类、分解、上下文预算、结构化引用 |
-| 4 | `feat/m3-agent-state-hitl` | 状态持久化、审批、恢复、幂等、策略引擎 |
-| 5 | `feat/m4-multimodal-ingestion` | OCR/VLM、ContentUnit、media asset、视觉引用 |
-| 6 | `feat/m4-knowledge-lifecycle` | PostgreSQL、对象存储、队列、版本和蓝绿索引 |
-| 7 | `feat/m4-business-tools-memory` | 连接器、MCP、Memory、业务动作 |
-| 8 | `feat/m5-tenant-security` | OIDC、RBAC/ABAC、ACL 下推、安全测试 |
-| 9 | `feat/m5-observability-reliability` | OTel、SLO、告警、熔断、配额、灾备 |
-| 10 | `feat/m5-production-rollout` | 环境、CI/CD、灰度、运营后台、上线清单 |
+| 3 | `feat/m3-adaptive-retrieval` | Phase 2A：查询分类、分解、受控 multi-query、按请求选择检索策略 |
+| 4 | `feat/m3-context-budget` | Phase 2B：细粒度证据读取、上下文预算、确定性截断 |
+| 5 | `feat/m3-verifiable-citations` | Phase 2C：结构化引用、索引兼容迁移、引用验证 |
+| 6 | `feat/m3-agent-state-hitl` | 状态持久化、审批、恢复、幂等、策略引擎 |
+| 7 | `feat/m4-multimodal-ingestion` | OCR/VLM、ContentUnit、media asset、视觉引用 |
+| 8 | `feat/m4-knowledge-lifecycle` | PostgreSQL、对象存储、队列、版本和蓝绿索引 |
+| 9 | `feat/m4-business-tools-memory` | 连接器、MCP、Memory、业务动作 |
+| 10 | `feat/m5-tenant-security` | OIDC、RBAC/ABAC、ACL 下推、安全测试 |
+| 11 | `feat/m5-observability-reliability` | OTel、SLO、告警、熔断、配额、灾备 |
+| 12 | `feat/m5-production-rollout` | 环境、CI/CD、灰度、运营后台、上线清单 |
 
 每个分支只做一个可独立验证的能力，不在一个超大分支中同时改 Agent、权限、多模态和存储。
 

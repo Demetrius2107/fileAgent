@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.document.infrastructure;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.KnnSearch;
 import co.elastic.clients.elasticsearch.core.MgetRequest;
 import co.elastic.clients.elasticsearch.core.MgetResponse;
 import co.elastic.clients.elasticsearch.core.SearchRequest;
@@ -9,10 +10,12 @@ import co.elastic.clients.elasticsearch.core.mget.MultiGetResponseItem;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.core.search.TotalHitsRelation;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
+import com.demetrius.fileagent.api.port.KnowledgeSearchPort.SearchResult;
 import com.demetrius.fileagent.common.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.embedding.EmbeddingModel;
@@ -23,10 +26,12 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -149,6 +154,129 @@ class KnowledgeSearchPortImplTest {
                 .thenThrow(failure);
 
         assertThatThrownBy(() -> searchPort.search("查询")).isSameAs(failure);
+    }
+
+    @Test
+    void searchDetailedWithoutOptionsShouldPinPhaseOneEsRequests() throws IOException {
+        when(embeddingModel.embed("年度目标")).thenReturn(new float[]{0.1F, 0.2F});
+        when(elasticsearchClient.search(any(SearchRequest.class), eq(Map.class)))
+                .thenReturn(response(hit("A", 1.0), hit("B", 0.9)),
+                        response(hit("B", 0.95), hit("C", 0.8)));
+        when(knowledgeReranker.rerank(eq("年度目标"), any(List.class)))
+                .thenAnswer(invocation -> {
+                    List<KnowledgeSearchPort.KnowledgeHit> hits = invocation.getArgument(1);
+                    return List.of(hits.get(2), hits.get(1), hits.get(0));
+                });
+        KnowledgeSearchPort.SearchQuery query = new KnowledgeSearchPort.SearchQuery(
+                "年度目标", "管理制度", "绩效", 7L);
+
+        SearchResult result = searchPort.searchDetailed(query);
+
+        ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
+        verify(elasticsearchClient, times(2)).search(captor.capture(), eq(Map.class));
+        assertThat(captor.getAllValues().get(0).toString())
+                .isEqualTo(searchPort.buildBm25Request(query).toString());
+        assertThat(captor.getAllValues().get(1).toString())
+                .isEqualTo(searchPort.buildKnnRequest(query, List.of(0.1F, 0.2F)).toString());
+        verify(knowledgeReranker).rerank(eq("年度目标"), any(List.class));
+        assertThat(result.finalHits())
+                .extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
+                .containsExactly("C", "A");
+        assertThat(result.candidates())
+                .extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
+                .containsExactly("B", "A", "C");
+        assertThat(result.appliedOptions()).isNull();
+        assertThat(result.rerankApplied()).isTrue();
+        assertThat(result.fallbackCode()).isNull();
+    }
+
+    @Test
+    void searchDetailedWithOptionsShouldOverrideEveryRetrievalParameter() throws IOException {
+        KnowledgeSearchPort.SearchOptions options = new KnowledgeSearchPort.SearchOptions(
+                "single-hop", 3, 2, 5, 1.3, 0.7, 1, false, false);
+        KnowledgeSearchPort.SearchQuery query = new KnowledgeSearchPort.SearchQuery(
+                "年度目标", "管理制度", "绩效", 7L, options);
+        when(embeddingModel.embed("年度目标")).thenReturn(new float[]{0.1F, 0.2F});
+        when(elasticsearchClient.search(any(SearchRequest.class), eq(Map.class)))
+                .thenReturn(response(hit("A", 1.0)), response(hit("B", 0.9)));
+
+        SearchResult result = searchPort.searchDetailed(query);
+
+        ArgumentCaptor<SearchRequest> captor = ArgumentCaptor.forClass(SearchRequest.class);
+        verify(elasticsearchClient, times(2)).search(captor.capture(), eq(Map.class));
+        assertThat(captor.getAllValues().get(0).size()).isEqualTo(3);
+        KnnSearch knn = captor.getAllValues().get(1).knn().getFirst();
+        assertThat(knn.k()).isEqualTo(2);
+        assertThat(knn.numCandidates()).isEqualTo(5);
+        verify(knowledgeReranker, never()).rerank(any(String.class), any(List.class));
+        verify(elasticsearchClient, never()).mget(any(MgetRequest.class), eq(Map.class));
+        assertThat(result.candidates())
+                .extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
+                .containsExactly("A", "B");
+        assertThat(result.candidates().getFirst().score()).isCloseTo(1.3 / 61, within(1e-9));
+        assertThat(result.candidates().get(1).score()).isCloseTo(0.7 / 61, within(1e-9));
+        assertThat(result.finalHits())
+                .extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
+                .containsExactly("A");
+        assertThat(result.appliedOptions()).isEqualTo(options);
+        assertThat(result.rerankApplied()).isFalse();
+        assertThat(result.fallbackCode()).isEqualTo("RERANK_DISABLED_BY_POLICY");
+    }
+
+    @Test
+    void searchDetailedShouldFallBackToWeightedRrfWhenRerankerFails() throws IOException {
+        KnowledgeSearchPort.SearchOptions options = new KnowledgeSearchPort.SearchOptions(
+                "multi-hop", 3, 2, 5, 1.0, 1.0, 2, true, false);
+        KnowledgeSearchPort.SearchQuery query = new KnowledgeSearchPort.SearchQuery(
+                "年度目标", "管理制度", "绩效", 7L, options);
+        when(embeddingModel.embed("年度目标")).thenReturn(new float[]{0.1F, 0.2F});
+        when(elasticsearchClient.search(any(SearchRequest.class), eq(Map.class)))
+                .thenReturn(response(hit("A", 1.0)), response(hit("B", 0.9)));
+        when(knowledgeReranker.rerank(eq("年度目标"), any(List.class)))
+                .thenThrow(new IllegalStateException("reranker down"));
+
+        SearchResult result = searchPort.searchDetailed(query);
+
+        assertThat(result.finalHits())
+                .extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
+                .containsExactly("A", "B");
+        assertThat(result.appliedOptions()).isEqualTo(options);
+        assertThat(result.rerankApplied()).isFalse();
+        assertThat(result.fallbackCode()).isEqualTo("RERANK_FAILED");
+    }
+
+    @Test
+    void searchDetailedWithParentDisabledShouldReturnChildHitsOnly() throws IOException {
+        KnowledgeSearchPort.SearchOptions options = new KnowledgeSearchPort.SearchOptions(
+                "multi-hop", 3, 2, 5, 1.0, 1.0, 2, true, false);
+        KnowledgeSearchPort.SearchQuery query = new KnowledgeSearchPort.SearchQuery(
+                "年度目标", "管理制度", "绩效", 7L, options);
+        when(embeddingModel.embed("年度目标")).thenReturn(new float[]{0.1F, 0.2F});
+        when(elasticsearchClient.search(any(SearchRequest.class), eq(Map.class)))
+                .thenReturn(response(hit("A", 1.0)), response(hit("B", 0.9)));
+
+        SearchResult result = searchPort.searchDetailed(query);
+
+        verify(elasticsearchClient, never()).mget(any(MgetRequest.class), eq(Map.class));
+        assertThat(result.finalHits())
+                .extracting(KnowledgeSearchPort.KnowledgeHit::chunkId)
+                .containsExactly("A", "B");
+        assertThat(result.rerankApplied()).isTrue();
+        assertThat(result.fallbackCode()).isNull();
+    }
+
+    @Test
+    void searchDetailedShouldRejectOptionsBeyondServerLimits() throws IOException {
+        assertThatThrownBy(() -> searchPort.searchDetailed(new KnowledgeSearchPort.SearchQuery(
+                "年度目标", "管理制度", "绩效", 7L, new KnowledgeSearchPort.SearchOptions(
+                "single-hop", 0, 10, 100, 1.0, 1.0, 5, true, true))))
+                .isInstanceOf(BizException.class);
+        assertThatThrownBy(() -> searchPort.searchDetailed(new KnowledgeSearchPort.SearchQuery(
+                "年度目标", "管理制度", "绩效", 7L, new KnowledgeSearchPort.SearchOptions(
+                "single-hop", 10, 10, 100, 2.5, 1.0, 5, true, true))))
+                .isInstanceOf(BizException.class);
+
+        verify(elasticsearchClient, never()).search(any(SearchRequest.class), eq(Map.class));
     }
 
     @SafeVarargs

@@ -37,6 +37,13 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
     private static final List<String> BM25_FIELDS = List.of(
             "content^3", "filename^2", "sheetName^1.5", "ragName", "knowledgeTag");
 
+    private static final int MAX_TOP_K = 100;
+    private static final int MAX_KNN_CANDIDATES = 1000;
+    private static final int MAX_FINAL_TOP_K = 50;
+    private static final double MAX_WEIGHT = 2.0;
+    private static final String FALLBACK_RERANK_DISABLED_BY_POLICY = "RERANK_DISABLED_BY_POLICY";
+    private static final String FALLBACK_RERANK_FAILED = "RERANK_FAILED";
+
     private final ElasticsearchClient elasticsearchClient;
     private final EmbeddingModel embeddingModel;
     private final ElasticsearchKnowledgeProperties properties;
@@ -50,52 +57,89 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
 
     @Override
     public List<KnowledgeHit> search(SearchQuery query) {
+        return searchInternal(query).finalHits();
+    }
+
+    @Override
+    public SearchResult searchDetailed(SearchQuery query) {
+        return searchInternal(query);
+    }
+
+    private SearchResult searchInternal(SearchQuery query) {
         validate(query);
+        SearchOptions options = query.options();
+        if (options != null) {
+            validateOptions(options);
+        }
         long startedAt = System.nanoTime();
         try {
-            List<KnowledgeHit> bm25Hits = search(buildBm25Request(query));
+            List<KnowledgeHit> bm25Hits = search(buildBm25Request(query, options));
             float[] queryEmbedding = embeddingModel.embed(query.text());
             if (queryEmbedding.length != properties.getDimensions()) {
                 throw new BizException("查询向量维度与 Elasticsearch 索引配置不一致");
             }
-            List<KnowledgeHit> knnHits = search(buildKnnRequest(query, toFloatList(queryEmbedding)));
-            List<KnowledgeHit> fused = rrfFusion.fuse(
-                    bm25Hits, knnHits, properties.getRrfRankConstant());
-            List<KnowledgeHit> reranked = knowledgeReranker.rerank(query.text(), fused);
-            List<KnowledgeHit> result = expandParents(
-                    reranked.stream().limit(properties.getFinalTopK()).toList());
+            List<KnowledgeHit> knnHits = search(buildKnnRequest(query, toFloatList(queryEmbedding), options));
+            List<KnowledgeHit> fused = fuse(bm25Hits, knnHits, options);
+            List<KnowledgeHit> ordered = fused;
+            boolean rerankApplied = false;
+            String fallbackCode = null;
+            if (options == null || options.rerankEnabled()) {
+                try {
+                    ordered = knowledgeReranker.rerank(query.text(), fused);
+                    rerankApplied = true;
+                } catch (RuntimeException e) {
+                    log.warn("语义重排失败，降级为 RRF 排序: query={}, error={}",
+                            query.text(), e.getMessage());
+                    fallbackCode = FALLBACK_RERANK_FAILED;
+                }
+            } else {
+                fallbackCode = FALLBACK_RERANK_DISABLED_BY_POLICY;
+            }
+            int finalTopK = effectiveFinalTopK(options);
+            List<KnowledgeHit> truncated = ordered.stream().limit(finalTopK).toList();
+            List<KnowledgeHit> result = options != null && !options.parentExpansionEnabled()
+                    ? truncated
+                    : expandParents(truncated, finalTopK);
             logHits(query, bm25Hits.size(), knnHits.size(), result, startedAt);
-            return result;
+            return new SearchResult(fused, result, options, rerankApplied, fallbackCode);
         } catch (IOException e) {
             throw new BizException("Elasticsearch 知识检索失败: " + e.getMessage());
         }
     }
 
     SearchRequest buildBm25Request(SearchQuery query) {
+        return buildBm25Request(query, query.options());
+    }
+
+    SearchRequest buildBm25Request(SearchQuery query, SearchOptions options) {
         Query textQuery = Query.of(builder -> builder.multiMatch(multiMatch -> multiMatch
                 .query(query.text())
                 .fields(BM25_FIELDS)));
         return new SearchRequest.Builder()
                 .index(properties.getIndexAlias())
-                .size(properties.getBm25TopK())
+                .size(effectiveBm25TopK(options))
                 .source(source -> source.filter(filter -> filter.excludes("embedding")))
                 .query(withFilters(textQuery, buildFilters(query)))
                 .build();
     }
 
     SearchRequest buildKnnRequest(SearchQuery query, List<Float> queryVector) {
+        return buildKnnRequest(query, queryVector, query.options());
+    }
+
+    SearchRequest buildKnnRequest(SearchQuery query, List<Float> queryVector, SearchOptions options) {
         KnnSearch.Builder knn = new KnnSearch.Builder()
                 .field("embedding")
                 .queryVector(queryVector)
-                .k(properties.getKnnTopK())
-                .numCandidates(properties.getKnnCandidates());
+                .k(effectiveKnnTopK(options))
+                .numCandidates(effectiveKnnCandidates(options));
         List<Query> filters = buildFilters(query);
         if (!filters.isEmpty()) {
             knn.filter(filters);
         }
         return new SearchRequest.Builder()
                 .index(properties.getIndexAlias())
-                .size(properties.getKnnTopK())
+                .size(effectiveKnnTopK(options))
                 .source(source -> source.filter(filter -> filter.excludes("embedding")))
                 .knn(knn.build())
                 .build();
@@ -105,6 +149,50 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
         if (query == null || !StringUtils.hasText(query.text())) {
             throw new BizException("检索关键词不能为空");
         }
+    }
+
+    private void validateOptions(SearchOptions options) {
+        if (options.strategyId() != null && options.strategyId().length() > 64) {
+            throw new BizException("检索策略 ID 超出服务端允许长度");
+        }
+        if (options.bm25TopK() < 1 || options.bm25TopK() > MAX_TOP_K
+                || options.knnTopK() < 1 || options.knnTopK() > MAX_TOP_K) {
+            throw new BizException("检索 TopK 超出服务端允许范围");
+        }
+        if (options.knnCandidates() < options.knnTopK() || options.knnCandidates() > MAX_KNN_CANDIDATES) {
+            throw new BizException("KNN 候选数超出服务端允许范围");
+        }
+        if (options.bm25Weight() <= 0 || options.bm25Weight() > MAX_WEIGHT
+                || options.knnWeight() <= 0 || options.knnWeight() > MAX_WEIGHT) {
+            throw new BizException("BM25/KNN 权重超出服务端允许范围");
+        }
+        if (options.finalTopK() < 1 || options.finalTopK() > MAX_FINAL_TOP_K) {
+            throw new BizException("合并后最终上限超出服务端允许范围");
+        }
+    }
+
+    private List<KnowledgeHit> fuse(List<KnowledgeHit> bm25Hits, List<KnowledgeHit> knnHits,
+                                    SearchOptions options) {
+        return options == null
+                ? rrfFusion.fuse(bm25Hits, knnHits, properties.getRrfRankConstant())
+                : rrfFusion.fuse(bm25Hits, knnHits, properties.getRrfRankConstant(),
+                        options.bm25Weight(), options.knnWeight());
+    }
+
+    private int effectiveBm25TopK(SearchOptions options) {
+        return options == null ? properties.getBm25TopK() : options.bm25TopK();
+    }
+
+    private int effectiveKnnTopK(SearchOptions options) {
+        return options == null ? properties.getKnnTopK() : options.knnTopK();
+    }
+
+    private int effectiveKnnCandidates(SearchOptions options) {
+        return options == null ? properties.getKnnCandidates() : options.knnCandidates();
+    }
+
+    private int effectiveFinalTopK(SearchOptions options) {
+        return options == null ? properties.getFinalTopK() : options.finalTopK();
     }
 
     @SuppressWarnings("unchecked")
@@ -148,7 +236,7 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
         }
     }
 
-    private List<KnowledgeHit> expandParents(List<KnowledgeHit> hits) throws IOException {
+    private List<KnowledgeHit> expandParents(List<KnowledgeHit> hits, int limit) throws IOException {
         LinkedHashSet<String> parentIds = new LinkedHashSet<>();
         for (KnowledgeHit hit : hits) {
             if (StringUtils.hasText(hit.parentId())) {
@@ -178,7 +266,7 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
             KnowledgeHit context = parent == null ? hit : withScore(parent, hit.score());
             result.putIfAbsent(context.chunkId(), context);
         }
-        return result.values().stream().limit(properties.getFinalTopK()).toList();
+        return result.values().stream().limit(limit).toList();
     }
 
     private List<Float> toFloatList(float[] vector) {

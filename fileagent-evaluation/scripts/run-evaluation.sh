@@ -6,7 +6,8 @@ repo_dir="$(cd "$script_dir/../.." && pwd)"
 base_url="${FILEAGENT_BASE_URL:-http://127.0.0.1:8080}"
 token="${FILEAGENT_EVALUATION_TOKEN:-}"
 dataset_version="${FILEAGENT_EVALUATION_DATASET_VERSION:-v1}"
-output_root="${FILEAGENT_EVALUATION_OUTPUT:-$repo_dir/target/evaluation}"
+# 评测结果不是 Maven 构建产物，独立目录可避免 mvn clean 清理历史报告。
+output_root="${FILEAGENT_EVALUATION_OUTPUT:-$repo_dir/evaluation-results}"
 baseline_file="${FILEAGENT_EVALUATION_BASELINE:-}"
 run_id="${FILEAGENT_EVALUATION_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 

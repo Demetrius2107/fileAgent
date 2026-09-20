@@ -20,6 +20,7 @@ replay_pid*
 
 # ===== 运行数据（绝不上传） =====
 storage/
+evaluation-results/
 *.h2.db
 *.mv.db
 *.trace.db

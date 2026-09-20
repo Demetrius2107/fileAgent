@@ -74,13 +74,13 @@ export FILEAGENT_EVALUATION_TOKEN='<与部署实例一致>'
 
 输出文件：
 
-- `target/evaluation/<版本>/<UTC运行时间>/observations.jsonl`：逐题检索、回答、来源和 Judge 原始响应；单条 Judge 原始响应最多保留 4000 个字符。
-- `target/evaluation/<版本>/<UTC运行时间>/report.json`：供程序和 CI 比较。
-- `target/evaluation/<版本>/<UTC运行时间>/report.md`：供人工阅读，包含指标解释，并按未通过门禁的指标展示最多 3 道代表问题。
+- `evaluation-results/<版本>/<UTC运行时间>/observations.jsonl`：逐题检索、回答、来源和 Judge 原始响应；单条 Judge 原始响应最多保留 4000 个字符。
+- `evaluation-results/<版本>/<UTC运行时间>/report.json`：供程序和 CI 比较。
+- `evaluation-results/<版本>/<UTC运行时间>/report.md`：供人工阅读，包含指标解释，并按未通过门禁的指标展示最多 3 道代表问题。
 
 每次运行会创建新目录；同一秒内重复执行会自动追加 `-2`、`-3`，不会覆盖历史报告。可用 `FILEAGENT_EVALUATION_RUN_ID` 设置便于识别的运行名，例如 `release-2026-09-09`。
 
-Agent 评测默认使用 `agent-v1`，输出到 `target/evaluation/agent-v1/<UTC运行时间>/`。它通过 `/internal/evaluation/agent/run` 真实调用部署实例的 AgentScope Runtime、当前知识库和 Judge；不需要另行配置聊天、向量或 reranker 的 API Key。`GENERAL_KNOWLEDGE` 题允许直接回答通用知识且无需引用，`KNOWLEDGE_BASED` 题才要求以本次检索证据回答，`REFUSE` 题仅用于安全越界请求。当前 `agent-v1` 有 8 题，每次会产生最多 8 次 Agent 调用和 8 次 Judge 调用。
+Agent 评测默认使用 `agent-v1`，输出到 `evaluation-results/agent-v1/<UTC运行时间>/`。它通过 `/internal/evaluation/agent/run` 真实调用部署实例的 AgentScope Runtime、当前知识库和 Judge；不需要另行配置聊天、向量或 reranker 的 API Key。`GENERAL_KNOWLEDGE` 题允许直接回答通用知识且无需引用，`KNOWLEDGE_BASED` 题才要求以本次检索证据回答，`REFUSE` 题仅用于安全越界请求。当前 `agent-v1` 有 8 题，每次会产生最多 8 次 Agent 调用和 8 次 Judge 调用。
 
 Agent 报告中的 `agent.runSuccessRate` 衡量 Run 是否以 `SUCCEEDED` 结束；非成功 Run 不调用 Judge，但仍保留回答、检索文件、引用文件、终态和失败码。`agent.citationCoverageRate` 衡量成功的知识库题是否至少引用一个本次检索命中的文件，`agent.citationValidityRate` 衡量已经写出的引用是否全部来自本次检索结果。通用知识题、拒答题和失败 Run 的引用状态为 `NOT_APPLICABLE`。
 
@@ -103,7 +103,7 @@ export FILEAGENT_EVALUATION_BASELINE='fileagent-evaluation/src/main/resources/ev
 
 Markdown 报告不会展开全部题目。代表问题先按单题分数从低到高选择，同分时优先覆盖不同题型；每题展示期望结果、实际回答、来源和 Top 1 检索片段。完整逐题结果始终保留在 `report.json` 和 `observations.jsonl`。
 
-可通过 `FILEAGENT_EVALUATION_DATASET_VERSION` 选择部署包内的数据集版本，通过 `FILEAGENT_EVALUATION_OUTPUT` 修改本地报告根目录。脚本运行依赖 `curl` 和 `jq`。
+可通过 `FILEAGENT_EVALUATION_DATASET_VERSION` 选择部署包内的数据集版本，通过 `FILEAGENT_EVALUATION_OUTPUT` 修改本地报告根目录。默认结果目录不属于 Maven `target`，执行 `mvn clean` 不会清理历史报告。脚本运行依赖 `curl` 和 `jq`。
 
 ## 指标边界
 

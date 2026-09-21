@@ -17,6 +17,7 @@ import org.mockito.InOrder;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -24,6 +25,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -346,5 +348,116 @@ class SearchDocsToolTest {
         verify(port, times(1)).searchDetailed(any(KnowledgeSearchPort.SearchQuery.class));
         assertThat(run.pendingToolFailureCode()).isEqualTo(AgentRun.KNOWLEDGE_SEARCH_FAILURE_CODE);
         assertThat(text(block)).contains("知识库检索暂时不可用");
+    }
+
+    @Test
+    void structuredCallShouldRecordRetrievalExecutionForLegalRound() {
+        KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
+        when(port.searchDetailed(any(KnowledgeSearchPort.SearchQuery.class)))
+                .thenReturn(searchResult(List.of(hit("m-1", 0.9), hit("m-2", 0.5))))
+                .thenReturn(searchResult(List.of(hit("m-2", 0.8), hit("m-3", 0.4))));
+        AgentRun run = startedRun();
+        SearchDocsTool tool = adaptiveTool();
+
+        tool.callStructured(context(run, port),
+                Map.of("queryType", "MULTI_HOP", "queries", List.of("年假制度", "病假规定")));
+
+        assertThat(run.retrievalRoundCount()).isEqualTo(1);
+        assertThat(run.invalidPlanCount()).isZero();
+        AgentRun.RetrievalExecution execution = run.retrievalExecutions().getFirst();
+        assertThat(execution.queryType()).isEqualTo(RetrievalQueryType.MULTI_HOP);
+        assertThat(execution.strategyId()).isEqualTo("MULTI_HOP");
+        assertThat(execution.plannedQueryCount()).isEqualTo(2);
+        assertThat(execution.executedQueries()).isEqualTo(2);
+        assertThat(execution.perQueryHitCount()).containsExactly(2, 2);
+        assertThat(execution.candidateChunkIds()).containsExactly("m-1", "m-2", "m-3");
+        assertThat(execution.finalChunkIds()).containsExactly("m-1", "m-2", "m-3");
+        assertThat(execution.rerankRequested()).isTrue();
+        assertThat(execution.rerankApplied()).isFalse();
+        assertThat(execution.fallbackCode()).isNull();
+    }
+
+    @Test
+    void structuredCallShouldDistinguishCandidateAndFinalChunkIds() {
+        KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
+        when(port.searchDetailed(any(KnowledgeSearchPort.SearchQuery.class)))
+                .thenReturn(searchResult(List.of(
+                        hit("m-1", 0.9), hit("m-2", 0.8), hit("m-3", 0.7),
+                        hit("m-4", 0.6), hit("m-5", 0.5), hit("m-6", 0.4))))
+                .thenReturn(searchResult(List.of(
+                        hit("m-5", 0.95), hit("m-6", 0.94), hit("n-1", 0.93),
+                        hit("n-2", 0.92), hit("n-3", 0.91), hit("n-4", 0.90))));
+        AgentRun run = startedRun();
+        SearchDocsTool tool = adaptiveTool();
+
+        tool.callStructured(context(run, port),
+                Map.of("queryType", "MULTI_HOP", "queries", List.of("年假制度", "病假规定")));
+
+        AgentRun.RetrievalExecution execution = run.retrievalExecutions().getFirst();
+        assertThat(execution.candidateChunkIds()).hasSize(10);
+        assertThat(execution.finalChunkIds()).hasSize(8)
+                .isSubsetOf(execution.candidateChunkIds());
+    }
+
+    @Test
+    void structuredCallShouldRecordRerankDegradationFallback() {
+        KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
+        KnowledgeSearchPort.SearchResult degraded = new KnowledgeSearchPort.SearchResult(
+                List.of(hit("m-1", 0.9)), List.of(hit("m-1", 0.9)), null, false, "RERANK_FAILED");
+        when(port.searchDetailed(any(KnowledgeSearchPort.SearchQuery.class))).thenReturn(degraded);
+        AgentRun run = startedRun();
+        SearchDocsTool tool = adaptiveTool();
+
+        tool.callStructured(context(run, port),
+                Map.of("queryType", "MULTI_HOP", "queries", List.of("年假制度", "病假规定")));
+
+        AgentRun.RetrievalExecution execution = run.retrievalExecutions().getFirst();
+        assertThat(execution.rerankRequested()).isTrue();
+        assertThat(execution.rerankApplied()).isFalse();
+        assertThat(execution.fallbackCode()).isEqualTo("RERANK_FAILED");
+    }
+
+    @Test
+    void structuredCallShouldRecordInvalidPlanAndTerminateOnSecond() {
+        KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
+        AgentRun run = startedRun();
+        SearchDocsTool tool = adaptiveTool();
+        Map<String, Object> invalidInput = Map.of(
+                "queryType", "SINGLE_HOP", "queries", List.of("年假制度", "病假规定"));
+
+        ToolResultBlock first = tool.callStructured(context(run, port), invalidInput);
+
+        assertThat(text(first)).contains("检索计划无效", "子查询数量不能超过");
+        assertThat(run.invalidPlanCount()).isEqualTo(1);
+        assertThat(run.isRunning()).isTrue();
+        verify(port, never()).searchDetailed(any(KnowledgeSearchPort.SearchQuery.class));
+
+        ToolResultBlock second = tool.callStructured(context(run, port), invalidInput);
+
+        assertThat(run.status()).isEqualTo(com.demetrius.fileagent.api.enums.AgentRunStatus.FAILED);
+        assertThat(run.failureCode()).isEqualTo(AgentRun.AGENT_RETRIEVAL_PLAN_INVALID);
+        assertThat(run.pendingToolFailureCode()).isEqualTo(AgentRun.AGENT_RETRIEVAL_PLAN_INVALID);
+        assertThat(text(second)).contains("检索计划无效");
+    }
+
+    @Test
+    void structuredCallShouldRefuseThirdRetrievalRound() {
+        KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
+        AgentRun run = startedRun();
+        run.recordRetrievalExecution(new AgentRun.RetrievalExecution(
+                RetrievalQueryType.MULTI_HOP, "MULTI_HOP", 2, 2,
+                List.of(1, 1), List.of("a"), List.of("a"), true, false, null));
+        run.recordRetrievalExecution(new AgentRun.RetrievalExecution(
+                RetrievalQueryType.MULTI_HOP, "MULTI_HOP", 2, 2,
+                List.of(1, 1), List.of("b"), List.of("b"), true, false, null));
+        SearchDocsTool tool = adaptiveTool();
+
+        ToolResultBlock block = tool.callStructured(context(run, port),
+                Map.of("queryType", "MULTI_HOP", "queries", List.of("年假制度", "病假规定")));
+
+        assertThat(text(block)).contains("最多 2 轮检索");
+        assertThat(run.retrievalRoundCount()).isEqualTo(2);
+        assertThat(run.isRunning()).isTrue();
+        verify(port, never()).searchDetailed(any(KnowledgeSearchPort.SearchQuery.class));
     }
 }

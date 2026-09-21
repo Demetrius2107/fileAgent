@@ -127,10 +127,11 @@ fileagent-evaluation/README.md                             [M] 数据集与指�
 
 **文件**：`AgentRun.java`（M）
 
-- [ ] 先写失败测试：首次非法计划只记 `invalidPlanCount` 并消耗一个 Step；第二次非法计划 → Run 终止，`failureCode=AGENT_RETRIEVAL_PLAN_INVALID`；正常两轮检索（第二轮仅当首轮部分零命中）通过；第三轮检索被拒。
-- [ ] `AgentRun` 增加有界 `RetrievalExecution` 列表（queryType、strategyId、plannedQueryCount、executedQueries、perQueryHitCount、candidateChunkIds、finalChunkIds、rerankRequested、rerankApplied、fallbackCode）；非法计划计数；`AGENT_RETRIEVAL_PLAN_INVALID` 失败码常量；检索轮数计数（≤2）。
-- [ ] 新常量加入与 `KNOWLEDGE_SEARCH_FAILURE_CODE` 相邻位置，风格一致。
-- [ ] 验证：`mvn -pl fileagent-agent -am test`（与任务 3 同模块，合跑）。
+- [x] 先写失败测试：首次非法计划只记 `invalidPlanCount` 并消耗一个 Step；第二次非法计划 → Run 终止，`failureCode=AGENT_RETRIEVAL_PLAN_INVALID`；正常两轮检索（第二轮仅当首轮部分零命中）通过；第三轮检索被拒。
+- [x] `AgentRun` 增加有界 `RetrievalExecution` 列表（queryType、strategyId、plannedQueryCount、executedQueries、perQueryHitCount、candidateChunkIds、finalChunkIds、rerankRequested、rerankApplied、fallbackCode）；非法计划计数；`AGENT_RETRIEVAL_PLAN_INVALID` 失败码常量；检索轮数计数（≤2）。
+- [x] 新常量加入与 `KNOWLEDGE_SEARCH_FAILURE_CODE` 相邻位置，风格一致。
+- [x] 验证：`mvn -pl fileagent-agent -am test`。（77 个测试全绿）
+- [x] 偏差说明：按规格 §5/§6/§7 补齐计划外接线——`SearchDocsTool` 增加 `callStructured` 入口（第三轮拒绝、非法计划计数、溯源记录、候选/最终集合拆分）与 `AgentScopeRuntimeAdapter.mapRetrievalObservation` 评测映射；Step 计数统一由运行时 `TOOL_CALL_START` 消耗，领域层不再重复计数。
 
 ## 任务 5：fileagent-evaluation 扩展与 adaptive-v1 数据集
 

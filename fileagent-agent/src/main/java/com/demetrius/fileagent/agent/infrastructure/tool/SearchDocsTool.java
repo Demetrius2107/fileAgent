@@ -7,6 +7,7 @@ import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.api.enums.RetrievalQueryType;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort.KnowledgeHit;
+import com.demetrius.fileagent.api.port.KnowledgeSearchPort.SearchOptions;
 import com.demetrius.fileagent.common.exception.BizException;
 import io.agentscope.core.message.ToolResultBlock;
 import io.agentscope.core.tool.ToolBase;
@@ -21,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -68,9 +70,7 @@ public class SearchDocsTool extends ToolBase {
             String query = param.getInput().get("query") == null ? null : String.valueOf(param.getInput().get("query"));
             return Mono.fromCallable(() -> searchByKeyword(context, query));
         }
-        RetrievalQueryType queryType = parseQueryType(param.getInput().get("queryType"));
-        List<String> queries = parseQueries(param.getInput().get("queries"));
-        return Mono.fromCallable(() -> executeStructured(context, queryType, queries));
+        return Mono.fromCallable(() -> callStructured(context, param.getInput()));
     }
 
     /** Phase 1 关键词检索入口，保留既有方法名供调用方使用。 */
@@ -106,6 +106,26 @@ public class SearchDocsTool extends ToolBase {
         return ToolResultBlock.text(render(hits, context.singleToolResultCharacters()));
     }
 
+    /** 结构化入口：第三轮检索直接拒绝；校验失败递增非法计划计数并返回受控校验信息，允许模型修正一次。 */
+    ToolResultBlock callStructured(AgentToolContext context, Map<String, Object> input) {
+        if (context.run().retrievalRoundCount() >= AgentRun.MAX_RETRIEVAL_ROUNDS) {
+            context.run().recordToolResult(0);
+            return ToolResultBlock.text("单次运行最多 " + AgentRun.MAX_RETRIEVAL_ROUNDS
+                    + " 轮检索，请基于已有证据回答；证据不完整时如实说明。");
+        }
+        try {
+            return executeStructured(context, parseQueryType(input.get("queryType")),
+                    parseQueries(input.get("queries")));
+        } catch (BizException exception) {
+            return invalidPlan(context, exception);
+        }
+    }
+
+    private ToolResultBlock invalidPlan(AgentToolContext context, BizException exception) {
+        context.run().recordInvalidPlan(Instant.now());
+        return ToolResultBlock.text("检索计划无效，" + exception.getMessage() + "；请修正后重试一次。");
+    }
+
     /**
      * 结构化检索：模型只声明查询类型与子查询，检索参数由服务端档位决定；
      * 有效工具超时 = toolTimeout × 子查询数（下限 1 条）。
@@ -113,10 +133,13 @@ public class SearchDocsTool extends ToolBase {
     public ToolResultBlock executeStructured(AgentToolContext context, RetrievalQueryType queryType,
                                              List<String> queries) {
         List<String> ordered = validateStructured(queryType, queries);
+        SearchOptions planned = adaptiveRetrievalPolicy.optionsFor(queryType);
         Instant deadline = Instant.now().plus(
                 agentProperties.getToolTimeout().multipliedBy(Math.max(1, ordered.size())));
         List<ScoredEntry> collected = new ArrayList<>();
         List<String> missingQueries = new ArrayList<>();
+        List<Integer> perQueryHitCounts = new ArrayList<>();
+        List<KnowledgeSearchPort.SearchResult> executedResults = new ArrayList<>();
         for (int i = 0; i < ordered.size(); i++) {
             if (i > 0 && Instant.now().isAfter(deadline)) {
                 return controlledFailure(context);
@@ -124,7 +147,9 @@ public class SearchDocsTool extends ToolBase {
             String subQuery = ordered.get(i);
             try {
                 KnowledgeSearchPort.SearchResult result = context.knowledgeSearchPort()
-                        .searchDetailed(buildQuery(context, subQuery, queryType));
+                        .searchDetailed(buildQuery(context, subQuery, planned));
+                executedResults.add(result);
+                perQueryHitCounts.add(result.finalHits().size());
                 appendEntries(collected, missingQueries, subQuery, i, result.finalHits());
                 result.finalHits().forEach(context.run()::addRetrievedHit);
             } catch (RuntimeException exception) {
@@ -133,8 +158,27 @@ public class SearchDocsTool extends ToolBase {
                 return controlledFailure(context);
             }
         }
-        List<ScoredEntry> merged = merge(queryType, collected, adaptiveRetrievalPolicy.finalHitCap(queryType));
+        List<ScoredEntry> candidates = merge(queryType, collected);
+        List<ScoredEntry> merged = candidates.stream()
+                .limit(adaptiveRetrievalPolicy.finalHitCap(queryType))
+                .toList();
         merged.forEach(entry -> context.run().addAllowedChunk(entry.hit().chunkId()));
+        context.run().recordRetrievalExecution(new AgentRun.RetrievalExecution(
+                queryType,
+                planned.strategyId(),
+                ordered.size(),
+                executedResults.size(),
+                perQueryHitCounts,
+                chunkIds(candidates),
+                chunkIds(merged),
+                planned.rerankEnabled(),
+                planned.rerankEnabled() && executedResults.stream()
+                        .allMatch(KnowledgeSearchPort.SearchResult::rerankApplied),
+                executedResults.stream()
+                        .map(KnowledgeSearchPort.SearchResult::fallbackCode)
+                        .filter(Objects::nonNull)
+                        .findFirst()
+                        .orElse(null)));
         context.run().recordToolResult(merged.size());
         return ToolResultBlock.text(renderStructured(merged, missingQueries, context.singleToolResultCharacters()));
     }
@@ -174,13 +218,13 @@ public class SearchDocsTool extends ToolBase {
     }
 
     private KnowledgeSearchPort.SearchQuery buildQuery(AgentToolContext context, String subQuery,
-                                                       RetrievalQueryType queryType) {
+                                                       SearchOptions options) {
         return new KnowledgeSearchPort.SearchQuery(
                 subQuery,
                 context.scope().ragName(),
                 context.scope().knowledgeTag(),
                 null,
-                adaptiveRetrievalPolicy.optionsFor(queryType));
+                options);
     }
 
     private void appendEntries(List<ScoredEntry> collected, List<String> missingQueries,
@@ -197,8 +241,8 @@ public class SearchDocsTool extends ToolBase {
         }
     }
 
-    /** 规格合并：COMPARISON 先保留每路 top-1；按归一化分排序后按 chunkId 去重（保留原始分最高版本并合并来源），截断到档位上限。 */
-    private List<ScoredEntry> merge(RetrievalQueryType queryType, List<ScoredEntry> collected, int finalHitCap) {
+    /** 规格合并：COMPARISON 先保留每路 top-1；按归一化分排序后按 chunkId 去重（保留原始分最高版本并合并来源）。 */
+    private List<ScoredEntry> merge(RetrievalQueryType queryType, List<ScoredEntry> collected) {
         List<ScoredEntry> pool = new ArrayList<>(collected);
         pool.sort(MERGE_ORDER);
         Map<String, ScoredEntry> merged = new LinkedHashMap<>();
@@ -217,7 +261,11 @@ public class SearchDocsTool extends ToolBase {
                 merged.put(entry.hit().chunkId(), existing.withSource(entry.queryIndex() + 1));
             }
         }
-        return merged.values().stream().limit(finalHitCap).toList();
+        return List.copyOf(merged.values());
+    }
+
+    private List<String> chunkIds(List<ScoredEntry> entries) {
+        return entries.stream().map(entry -> entry.hit().chunkId()).toList();
     }
 
     private String renderStructured(List<ScoredEntry> merged, List<String> missingQueries, int maxChars) {

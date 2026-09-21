@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.domain.run;
 
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
+import com.demetrius.fileagent.api.enums.RetrievalQueryType;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort.KnowledgeHit;
 
 import java.time.Instant;
@@ -19,6 +20,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class AgentRun {
 
     public static final String KNOWLEDGE_SEARCH_FAILURE_CODE = "AGENT_KNOWLEDGE_SEARCH_FAILED";
+    public static final String AGENT_RETRIEVAL_PLAN_INVALID = "AGENT_RETRIEVAL_PLAN_INVALID";
+
+    /** 单次 Run 检索轮数上限（决策 2：最多 2 轮 search_docs），工具层在入口处据此拒绝第三轮。 */
+    public static final int MAX_RETRIEVAL_ROUNDS = 2;
+    private static final int MAX_INVALID_PLANS = 2;
 
     private final String runId;
     private final Long sessionId;
@@ -36,6 +42,8 @@ public class AgentRun {
     private String failureCode;
     private volatile String pendingToolFailureCode;
     private volatile int lastToolResultCount;
+    private final List<RetrievalExecution> retrievalExecutions = new CopyOnWriteArrayList<>();
+    private volatile int invalidPlanCount;
 
     private AgentRun(String runId, Long sessionId, String traceId) {
         this.runId = runId;
@@ -94,6 +102,32 @@ public class AgentRun {
         if (isRunning()) {
             this.pendingToolFailureCode = code;
         }
+    }
+
+    /**
+     * 记录一次非法检索计划：Step 由运行时在工具调用开始时统一消耗，这里只计数；
+     * 再次发生即终止 Run，并挂起工具失败码让运行时立即中断 Agent。
+     */
+    public void recordInvalidPlan(Instant now) {
+        if (!isRunning()) {
+            return;
+        }
+        invalidPlanCount++;
+        if (invalidPlanCount >= MAX_INVALID_PLANS) {
+            recordToolFailure(AGENT_RETRIEVAL_PLAN_INVALID);
+            fail(AGENT_RETRIEVAL_PLAN_INVALID, now);
+        }
+    }
+
+    /** 记录一轮结构化检索的执行溯源；超过 2 轮视为非法协议调用。 */
+    public void recordRetrievalExecution(RetrievalExecution execution) {
+        if (execution == null) {
+            return;
+        }
+        if (retrievalExecutions.size() >= MAX_RETRIEVAL_ROUNDS) {
+            throw new IllegalStateException("检索轮数超出上限: " + MAX_RETRIEVAL_ROUNDS);
+        }
+        retrievalExecutions.add(execution);
     }
 
     public void addAllowedChunk(String chunkId) {
@@ -200,5 +234,36 @@ public class AgentRun {
 
     public int lastToolResultCount() {
         return lastToolResultCount;
+    }
+
+    public List<RetrievalExecution> retrievalExecutions() {
+        return List.copyOf(retrievalExecutions);
+    }
+
+    public int retrievalRoundCount() {
+        return retrievalExecutions.size();
+    }
+
+    public int invalidPlanCount() {
+        return invalidPlanCount;
+    }
+
+    /** 单轮结构化检索的执行溯源（供离线评测与轮数控制使用）。 */
+    public record RetrievalExecution(
+            RetrievalQueryType queryType,
+            String strategyId,
+            int plannedQueryCount,
+            int executedQueries,
+            List<Integer> perQueryHitCount,
+            List<String> candidateChunkIds,
+            List<String> finalChunkIds,
+            boolean rerankRequested,
+            boolean rerankApplied,
+            String fallbackCode) {
+        public RetrievalExecution {
+            perQueryHitCount = perQueryHitCount == null ? List.of() : List.copyOf(perQueryHitCount);
+            candidateChunkIds = candidateChunkIds == null ? List.of() : List.copyOf(candidateChunkIds);
+            finalChunkIds = finalChunkIds == null ? List.of() : List.copyOf(finalChunkIds);
+        }
     }
 }

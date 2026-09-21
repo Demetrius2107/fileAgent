@@ -214,7 +214,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                     durationMs(startedAt),
                     run.status(),
                     run.failureCode(),
-                    null);
+                    mapRetrievalObservation(run));
         } catch (Exception e) {
             log.warn("Agent 评测运行失败 runId={}: {}", command.runId(), e.getMessage());
             if (run.isRunning()) {
@@ -222,8 +222,22 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             }
             return new AgentAnswerEvaluationPort.Result(
                     "", true, List.of(), List.of(), run.stepCount(), run.modelCallCount(),
-                    List.of(), durationMs(startedAt), run.status(), run.failureCode(), null);
+                    List.of(), durationMs(startedAt), run.status(), run.failureCode(),
+                    mapRetrievalObservation(run));
         }
+    }
+
+    /** 运行态检索溯源映射为评测观察；未调用 search_docs 时为空。 */
+    private AgentAnswerEvaluationPort.RetrievalObservation mapRetrievalObservation(AgentRun run) {
+        List<AgentRun.RetrievalExecution> executions = run.retrievalExecutions();
+        if (executions.isEmpty()) {
+            return null;
+        }
+        AgentRun.RetrievalExecution last = executions.get(executions.size() - 1);
+        return new AgentAnswerEvaluationPort.RetrievalObservation(
+                last.queryType(), last.strategyId(), last.plannedQueryCount(), last.executedQueries(),
+                last.perQueryHitCount(), last.candidateChunkIds(), last.finalChunkIds(),
+                last.rerankRequested(), last.rerankApplied(), last.fallbackCode());
     }
 
     private record AgentAssembly(ReActAgent agent, RuntimeContext context, Msg userMessage,

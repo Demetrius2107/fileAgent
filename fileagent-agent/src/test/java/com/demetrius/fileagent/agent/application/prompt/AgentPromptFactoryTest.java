@@ -24,4 +24,30 @@ class AgentPromptFactoryTest {
         assertThat(prompt).contains("简要说明正在做什么");
         assertThat(prompt).contains("不要输出冗长的内部推理链");
     }
+
+    @Test
+    void adaptivePromptShouldAddStructuredRetrievalRules() {
+        String adaptive = new AgentPromptFactory().systemInstruction(true);
+
+        assertThat(adaptive).contains("queryType");
+        assertThat(adaptive).contains("SINGLE_HOP");
+        assertThat(adaptive).contains("MULTI_HOP");
+        assertThat(adaptive).contains("COMPARISON");
+        assertThat(adaptive).contains("AGGREGATION");
+        assertThat(adaptive).contains("TIME_SENSITIVE");
+        assertThat(adaptive).contains("NONE 不允许作为 search_docs 参数");
+        assertThat(adaptive).contains("queries");
+        assertThat(adaptive).contains("1～3 条");
+        assertThat(adaptive).contains("1～200 个字符");
+        assertThat(adaptive).contains("零命中");
+        assertThat(adaptive).contains("最多 2 轮 search_docs");
+    }
+
+    @Test
+    void legacyPromptShouldNotContainStructuredRetrievalRules() {
+        String legacy = new AgentPromptFactory().systemInstruction(false);
+
+        assertThat(legacy).doesNotContain("queryType");
+        assertThat(legacy).doesNotContain("结构化检索模式");
+    }
 }

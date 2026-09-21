@@ -152,9 +152,9 @@ fileagent-evaluation/README.md                             [M] 数据集与指�
 
 **文件**：`application.yml`（M）、`docs/TESTING.md`（M）、`fileagent-evaluation/README.md`（M）
 
-- [ ] `application.yml` 增加 `fileagent.agent.adaptive-retrieval-enabled: ${FILEAGENT_AGENT_ADAPTIVE_RETRIEVAL_ENABLED:false}`（默认关；agent 总开关保持关闭，固定 `/chat` 不动）。
-- [ ] `docs/TESTING.md` 补 adaptive-v1 口径（12 类场景、四项强制门、三项待定阈值）；`fileagent-evaluation/README.md` 补数据集与指标。规格 §11：对外公开契约不变，`docs/API.md` 不需改（若实现中发现公开端点有变，再同步）。
-- [ ] 全量构建：`mvn clean test`（Windows 本机命令，无路径前缀）。
+- [x] `application.yml` 增加 `fileagent.agent.adaptive-retrieval-enabled: ${FILEAGENT_AGENT_ADAPTIVE_RETRIEVAL_ENABLED:false}`（默认关；agent 总开关保持关闭，固定 `/chat` 不动）。
+- [x] `docs/TESTING.md` 补 adaptive-v1 口径（12 类场景、四项强制门、三项待定阈值）；`fileagent-evaluation/README.md` 补数据集与指标。规格 §11：对外公开契约不变，`docs/API.md` 不需改（若实现中发现公开端点有变，再同步）。
+- [x] 全量构建：`mvn clean test`（Windows 本机命令，无路径前缀）。
 - [ ] 真实评测：`sh fileagent-evaluation/scripts/run-agent-evaluation.sh`（agent-v1 回归，对比任务 0 基线）+ `FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v1 sh fileagent-evaluation/scripts/run-agent-evaluation.sh`。
 - [ ] 人工核验：四项强制门全过；agent-v1 相对任务 0 基线无 >0.1 回归；"第二轮只改写零命中部分"按第二轮 `RetrievalExecution` 溯源记录抽查确认；据此人工确定 `queryTypeAccuracy`/`subQuestionCoverage`/收益阈值并回填 `gate.json`。
 - [ ] 回滚演练：仅翻转 `adaptive-retrieval-enabled` 子开关复跑一次，确认回到 Phase 1 行为（无数据/索引变更）。

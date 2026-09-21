@@ -63,3 +63,18 @@ mvn verify            # 含集成（如有）
 - 端到端入口：`fileagent-evaluation/scripts/run-agent-evaluation.sh` 调用已部署实例的 `/internal/evaluation/agent/run`，真实执行 AgentScope、当前知识库、当前启用的聊天模型和 `deepseek-v4-pro` Judge。它不启动新应用，也不要求重复配置模型 API Key。
 - `mvn test` 中的 `AgentEvaluationRunnerTest` 只是评测器单元测试，验证数据解析、指标与门禁计算，不能替代真实报告。
 - 真实评测路径 `AgentAnswerEvaluationPort -> AgentScopeRuntimeAdapter.evaluate()` 复用生产运行时，但**不创建会话、不写数据库**，只保留受控观察供评测分析。
+
+## 8. 自适应检索评测（adaptive-v1）
+
+- 评测数据位于 `fileagent-evaluation/src/main/resources/evaluation/adaptive-v1/`（`cases/agent.jsonl` 12 道题 + `corpus/` 2 份含可比条目与跨文档多跳关系的 Markdown 语料 + `gate.json` 门禁）。
+- 12 类场景：无需检索、单跳、多跳、比较、聚合、时间敏感、部分零命中、全部零命中、重复子查询、非法计划、reranker 降级、检索基础设施失败。其中"reranker 降级"与"检索基础设施失败"是环境驱动场景，题库只固定问题与正确标注，行为在真实评测的 Observation 中体现。
+- 新增自适应指标（`AdaptiveMetrics`），分母口径：
+  - `adaptive.queryTypeAccuracy`：实际查询类型与人工标注 `expectedQueryType` 一致的比例；分母是标注了预期类型的题（失败 Run 也参与——规划是运行时受控行为）。
+  - `adaptive.unnecessaryRetrievalRate`：**越低越好**；无需检索题（标注 `NONE`）实际执行结构化检索或调用知识工具的比例。
+  - `adaptive.queryCountComplianceRate`：计划子查询数 ∈ [1,3]、单次 Run 的 `search_docs` ≤2 轮、实际执行数 ≤ 计划数且未因非法计划终止的 Run 比例。
+  - `adaptive.strategyComplianceRate`：实际 `strategyId` 来自服务端允许档位且与 `queryType` 一致的 Run 比例。
+  - `adaptive.subQuestionCoverage`：多跳/比较题的标注必要子问题被计划覆盖的比例（现阶段为数量代理：计划子查询数/标注必要子问题数；语义覆盖在真实评测中人工核验）。
+  - 未执行结构化检索的 Run（`RetrievalObservation=null`）不参与以上任何分母；全量非自适应数据集的指标为 0.0，不产生 NaN。
+- 四项强制门（`gate.json` `minimumScores`）：`adaptive.queryCountComplianceRate=1.0`、`adaptive.strategyComplianceRate=1.0`、`agent.toolWhitelistPassRate=1.0`、`agent.budgetComplianceRate=1.0`。
+- 三项阈值**留空待人工确认**：`adaptive.queryTypeAccuracy`、`adaptive.subQuestionCoverage` 与多跳/比较收益阈值，须在首份真实 baseline 经人工核验后填入门禁（在此之前只展示、不断言）；`gate.json` 的 `regressionMetrics` 同样留空。
+- 数据集契约由 `EvaluationDatasetContractTest` 固定：12 道题、12 类分类齐备、强制门齐备、待定阈值未出现在门禁中。

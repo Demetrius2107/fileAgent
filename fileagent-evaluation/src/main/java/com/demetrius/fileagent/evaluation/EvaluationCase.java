@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.evaluation;
 
 import com.demetrius.fileagent.api.enums.AnswerGroundingMode;
+import com.demetrius.fileagent.api.enums.RetrievalQueryType;
 
 import java.util.List;
 
@@ -64,17 +65,28 @@ public record EvaluationCase(
     }
 
     /**
-     * 标准答案约束。
-     *
-     * @author raosaijie
+     * 标准答案约束。自适应检索期望（{@code expectedQueryType}/{@code expectedSubQuestions}）
+     * 仅用于 adaptive-v1 数据集的人工标注：前者核对查询类型准确率与不必要检索率，
+     * 后者核对多跳/比较题的子问题覆盖。
      */
     public record Expected(
             Boolean shouldAnswer,
             List<ExpectedSource> relevantSources,
             List<String> requiredFacts,
             List<String> forbiddenFacts,
-            AnswerGroundingMode groundingMode
+            AnswerGroundingMode groundingMode,
+            String expectedQueryType,
+            List<String> expectedSubQuestions
     ) {
+
+        public Expected(Boolean shouldAnswer,
+                        List<ExpectedSource> relevantSources,
+                        List<String> requiredFacts,
+                        List<String> forbiddenFacts,
+                        AnswerGroundingMode groundingMode) {
+            this(shouldAnswer, relevantSources, requiredFacts, forbiddenFacts, groundingMode,
+                    null, null);
+        }
 
         public Expected(Boolean shouldAnswer,
                         List<ExpectedSource> relevantSources,
@@ -91,8 +103,25 @@ public record EvaluationCase(
             groundingMode = groundingMode == null
                     ? (shouldAnswer ? AnswerGroundingMode.KNOWLEDGE_BASED : AnswerGroundingMode.REFUSE)
                     : groundingMode;
+            if (expectedQueryType != null && expectedQueryType.isBlank()) {
+                throw new IllegalArgumentException("expected.expectedQueryType 不能为空白");
+            }
+            expectedQueryType = parseQueryType(expectedQueryType);
+            expectedSubQuestions = expectedSubQuestions == null
+                    ? List.of() : List.copyOf(expectedSubQuestions);
             if (groundingMode.shouldAnswer() != shouldAnswer) {
                 throw new IllegalArgumentException("expected.groundingMode 与 shouldAnswer 不一致");
+            }
+        }
+
+        private static String parseQueryType(String value) {
+            if (value == null) {
+                return null;
+            }
+            try {
+                return RetrievalQueryType.valueOf(value.trim()).name();
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("expected.expectedQueryType 非法: " + value);
             }
         }
     }

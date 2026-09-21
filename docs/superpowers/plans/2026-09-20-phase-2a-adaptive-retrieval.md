@@ -137,15 +137,16 @@ fileagent-evaluation/README.md                             [M] 数据集与指�
 
 **文件**：`AgentEvaluationObservation.java`（M）、`AgentEvaluationRunner.java`（M）、`AgentEvaluationReport.java`（M）、`AgentQualityGateEvaluator.java`（M）、`AgentEvaluationReportWriter.java`（M）、`adaptive-v1/` 资源（N）
 
-- [ ] 先写失败测试（以固定桩 `AgentAnswerEvaluationPort` 驱动）：
+- [x] 先写失败测试（以固定桩 `AgentAnswerEvaluationPort` 驱动）：
   - 新指标计算：`queryTypeAccuracy`、`unnecessaryRetrievalRate`、`queryCountComplianceRate`、`strategyComplianceRate`、`subQuestionCoverage`。
   - `queryCountComplianceRate` 覆盖决策 3 的自动化口径：≤2 轮、重复子查询拒绝、计划数上限。
   - 非自适应 Run（`RetrievalObservation=null`）不参与自适应指标分母，报告不产生 NaN。
-- [ ] `Observation` 追加可空自适应字段（null 安全）；Runner 从 `Result.retrieval()` 映射。
-- [ ] `adaptive-v1/cases/agent.jsonl`：12 类场景（规格 §8）——无需检索、单跳、多跳、比较、聚合、时间敏感、部分零命中、全部零命中、重复子查询、非法计划、reranker 降级、检索基础设施失败。
-- [ ] `adaptive-v1/corpus/`：≥2 份含可比条目（同一维度多对象对比）与跨文档多跳关系的 Markdown 语料；题目断言与之对齐。
-- [ ] `adaptive-v1/gate.json`：`queryCountComplianceRate=1.0`、`strategyComplianceRate=1.0`、`toolWhitelistPassRate=1.0`、`budgetComplianceRate=1.0`；`queryTypeAccuracy`、`subQuestionCoverage`、收益类阈值**留空**，待首份真实 baseline 人工确认后填入（在此之前只展示、不断言）。
-- [ ] 验证：`mvn -pl fileagent-evaluation -am test`。
+- [x] `Observation` 追加可空自适应字段（null 安全）；Runner 从 `Result.retrieval()` 映射。
+- [x] `adaptive-v1/cases/agent.jsonl`：12 类场景（规格 §8）——无需检索、单跳、多跳、比较、聚合、时间敏感、部分零命中、全部零命中、重复子查询、非法计划、reranker 降级、检索基础设施失败。
+- [x] `adaptive-v1/corpus/`：≥2 份含可比条目（同一维度多对象对比）与跨文档多跳关系的 Markdown 语料；题目断言与之对齐。
+- [x] `adaptive-v1/gate.json`：`queryCountComplianceRate=1.0`、`strategyComplianceRate=1.0`、`toolWhitelistPassRate=1.0`、`budgetComplianceRate=1.0`；`queryTypeAccuracy`、`subQuestionCoverage`、收益类阈值**留空**，待首份真实 baseline 人工确认后填入（在此之前只展示、不断言）。
+- [x] 验证：`mvn -pl fileagent-evaluation -am test`。（43 个测试全绿）
+- [x] 偏差说明：① `EvaluationCase.java` 超出本任务文件清单——规格 §8 的人工标注要求 `Expected` 增加 `expectedQueryType`/`expectedSubQuestions` 字段（含枚举校验与 4/5 参兼容构造），测试与数据集都要用；② 计划外补充 `EvaluationDatasetContractTest` 一条 adaptive-v1 契约测试（12 道题可解析、五项强制门齐备、待定阈值未断言）；③ 指标口径细化：失败 Run 也参与规划类分母（规划是运行时行为合规指标），`subQuestionCoverage` 现阶段是数量代理（计划子查询数/标注必要子问题数），语义覆盖待真实评测人工核验。
 
 ## 任务 6：文档同步、完整构建与真实 adaptive-v1 评测
 

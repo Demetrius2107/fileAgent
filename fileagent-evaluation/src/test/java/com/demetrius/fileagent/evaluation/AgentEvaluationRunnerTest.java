@@ -2,6 +2,7 @@ package com.demetrius.fileagent.evaluation;
 
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.AnswerGroundingMode;
+import com.demetrius.fileagent.api.enums.RetrievalQueryType;
 import com.demetrius.fileagent.api.port.AgentAnswerEvaluationPort;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
 import com.demetrius.fileagent.api.port.RagAnswerJudgePort;
@@ -12,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 class AgentEvaluationRunnerTest {
 
@@ -135,6 +137,137 @@ class AgentEvaluationRunnerTest {
 
         assertThat(gate.passed()).isFalse();
         assertThat(gate.violations()).anyMatch(v -> v.contains("budgetComplianceRate"));
+    }
+
+    @Test
+    void adaptiveMetricsShouldMeasurePlanningComplianceAndAccuracy() {
+        List<AgentEvaluationObservation> observations = List.of(
+                adaptiveObservation("single-001",
+                        retrievalObservation(RetrievalQueryType.SINGLE_HOP, 1, 1)),
+                adaptiveObservation("multi-001",
+                        retrievalObservation(RetrievalQueryType.MULTI_HOP, 2, 2)),
+                adaptiveObservation("compare-001",
+                        retrievalObservation(RetrievalQueryType.COMPARISON, 2, 2)),
+                adaptiveObservation("type-mismatch-001",
+                        retrievalObservation(RetrievalQueryType.SINGLE_HOP, 1, 1)),
+                new AgentEvaluationObservation(
+                        "plan-invalid-001", "ADAPTIVE", "问题", null, true, List.of(), List.of(),
+                        3, 3, List.of("search_docs", "search_docs", "search_docs"), 100L,
+                        AgentRunStatus.FAILED, "AGENT_RETRIEVAL_PLAN_INVALID", null, false,
+                        List.of(), List.of(), null,
+                        retrievalObservation(RetrievalQueryType.MULTI_HOP, 2, 2)));
+        List<EvaluationCase> cases = List.of(
+                adaptiveCase("single-001", "SINGLE_HOP", List.of()),
+                adaptiveCase("multi-001", "MULTI_HOP", List.of("子问题 A", "子问题 B")),
+                adaptiveCase("compare-001", "COMPARISON", List.of("对比 A", "对比 B")),
+                adaptiveCase("type-mismatch-001", "AGGREGATION", List.of()),
+                adaptiveCase("plan-invalid-001", "MULTI_HOP", List.of("子问题 A", "子问题 B")));
+
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null)
+                .evaluate("adaptive-v1", cases, observations);
+
+        AgentEvaluationReport.AdaptiveMetrics adaptive = report.adaptiveMetrics();
+        assertThat(adaptive.queryTypeAccuracy()).isEqualTo(0.8d);
+        assertThat(adaptive.unnecessaryRetrievalRate()).isEqualTo(0.0d);
+        assertThat(adaptive.queryCountComplianceRate()).isEqualTo(0.8d);
+        assertThat(adaptive.strategyComplianceRate()).isEqualTo(1.0d);
+        assertThat(adaptive.subQuestionCoverage()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void unnecessaryRetrievalShouldCountOnlyAnnotatedNoneCases() {
+        List<AgentEvaluationObservation> observations = List.of(
+                new AgentEvaluationObservation(
+                        "none-001", "ADAPTIVE", "问题", "回答", false, List.of(), List.of(),
+                        0, 1, List.of(), 10L, AgentRunStatus.SUCCEEDED, null, null, false,
+                        List.of(), List.of(), null, null),
+                new AgentEvaluationObservation(
+                        "none-002", "ADAPTIVE", "问题", "回答", false, List.of("a.md"), List.of(),
+                        1, 2, List.of("search_docs"), 20L, AgentRunStatus.SUCCEEDED, null, null,
+                        false, List.of(), List.of(), null,
+                        retrievalObservation(RetrievalQueryType.SINGLE_HOP, 1, 1)),
+                new AgentEvaluationObservation(
+                        "none-003", "ADAPTIVE", "问题", "回答", false, List.of(), List.of(),
+                        1, 1, List.of("list_knowledge_files"), 10L, AgentRunStatus.SUCCEEDED,
+                        null, null, false, List.of(), List.of(), null, null),
+                adaptiveObservation("single-001",
+                        retrievalObservation(RetrievalQueryType.SINGLE_HOP, 1, 1)));
+        List<EvaluationCase> cases = List.of(
+                adaptiveCase("none-001", "NONE", List.of()),
+                adaptiveCase("none-002", "NONE", List.of()),
+                adaptiveCase("none-003", "NONE", List.of()),
+                adaptiveCase("single-001", "SINGLE_HOP", List.of()));
+
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null)
+                .evaluate("adaptive-v1", cases, observations);
+
+        assertThat(report.adaptiveMetrics().unnecessaryRetrievalRate())
+                .isCloseTo(2.0d / 3.0d, within(1e-6));
+        assertThat(report.adaptiveMetrics().queryTypeAccuracy()).isEqualTo(0.75d);
+    }
+
+    @Test
+    void nonAdaptiveDatasetShouldKeepZeroMetricsWithoutNaN() {
+        List<EvaluationCase> cases = List.of(
+                knowledgeCase("knowledge-001", "员工年假是多少？", "5 天"),
+                knowledgeCase("knowledge-002", "员工年假如何申请？", "申请"));
+        List<AgentEvaluationObservation> observations = List.of(
+                observation("knowledge-001", List.of("employee-handbook.md"), List.of()),
+                observation("knowledge-002", List.of("employee-handbook.md"),
+                        List.of("employee-handbook.md")));
+
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null)
+                .evaluate("agent-v1", cases, observations);
+
+        AgentEvaluationReport.AdaptiveMetrics adaptive = report.adaptiveMetrics();
+        assertThat(adaptive.queryTypeAccuracy()).isEqualTo(0.0d);
+        assertThat(adaptive.unnecessaryRetrievalRate()).isEqualTo(0.0d);
+        assertThat(adaptive.queryCountComplianceRate()).isEqualTo(0.0d);
+        assertThat(adaptive.strategyComplianceRate()).isEqualTo(0.0d);
+        assertThat(adaptive.subQuestionCoverage()).isEqualTo(0.0d);
+        assertThat(report.cases()).allSatisfy(c -> assertThat(c.adaptive()).isNull());
+    }
+
+    @Test
+    void gateShouldFlattenAdaptiveMetrics() {
+        AgentEvaluationReport report = new AgentEvaluationReport("1.0", "adaptive-v1", "now", 2, 2, 0,
+                new AgentEvaluationReport.AnswerMetrics(1.0, 1.0, 1.0, 1.0),
+                new AgentEvaluationReport.AgentMetrics(1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 100.0),
+                new AgentEvaluationReport.AdaptiveMetrics(0.5, 0.0, 1.0, 1.0, 1.0),
+                List.of(), null);
+        QualityGateConfig config = new QualityGateConfig("1.0",
+                java.util.Map.of("adaptive.queryCountComplianceRate", 1.0,
+                        "adaptive.queryTypeAccuracy", 1.0), 0.1, List.of());
+
+        AgentEvaluationReport.GateResult gate =
+                new AgentQualityGateEvaluator().evaluate(report, config, null);
+
+        assertThat(gate.passed()).isFalse();
+        assertThat(gate.violations()).anyMatch(v -> v.contains("queryTypeAccuracy"));
+        assertThat(gate.violations()).noneMatch(v -> v.contains("queryCountComplianceRate"));
+    }
+
+    private EvaluationCase adaptiveCase(String id, String expectedQueryType,
+                                        List<String> expectedSubQuestions) {
+        return new EvaluationCase("1.0", id, "ADAPTIVE", List.of(), "问题",
+                List.of(), new EvaluationCase.Filters(null, null, null),
+                new EvaluationCase.Expected(true, List.of(), List.of(), List.of(),
+                        null, expectedQueryType, expectedSubQuestions));
+    }
+
+    private AgentAnswerEvaluationPort.RetrievalObservation retrievalObservation(
+            RetrievalQueryType queryType, int planned, int executed) {
+        return new AgentAnswerEvaluationPort.RetrievalObservation(
+                queryType, queryType.name(), planned, executed,
+                List.of(), List.of(), List.of(), false, false, null);
+    }
+
+    private AgentEvaluationObservation adaptiveObservation(
+            String caseId, AgentAnswerEvaluationPort.RetrievalObservation retrieval) {
+        return new AgentEvaluationObservation(
+                caseId, "ADAPTIVE", "问题", "回答", false, List.of("a.md"), List.of("a.md"),
+                1, 2, List.of("search_docs"), 10L, AgentRunStatus.SUCCEEDED, null, null,
+                false, List.of(), List.of(), null, retrieval);
     }
 
     private EvaluationCase knowledgeCase(String id, String question, String fact) {

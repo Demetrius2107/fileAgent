@@ -19,16 +19,16 @@ case "$dataset_version" in
 esac
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
-repo_dir="$(cd "$script_dir/../.." && pwd)"
+module_dir="$(cd "$script_dir/.." && pwd)"
 base_url="${FILEAGENT_BASE_URL:-http://127.0.0.1:8080}"
 
-if [[ ! -d "$repo_dir/$corpus_dir" ]]; then
-  printf '语料目录不存在: %s\n' "$corpus_dir" >&2
+if [[ ! -d "$module_dir/$corpus_dir" ]]; then
+  printf '语料目录不存在: %s\n' "$module_dir/$corpus_dir" >&2
   exit 1
 fi
 
 file_args=()
-for file in "$repo_dir/$corpus_dir"/*; do
+for file in "$module_dir/$corpus_dir"/*; do
   file_args+=("-F" "files=@$file")
 done
 

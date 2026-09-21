@@ -115,6 +115,125 @@
         return template.content.firstChild;
     }
 
+    /* ---------- Markdown 渲染 ---------- */
+
+    /* LLM 回答是 Markdown 文本，气泡直接 textContent 会把 **、## 原样展示。
+       极简渲染：先整体转义 HTML 再生成结构标签，天然防注入；仅覆盖常见语法。 */
+    function escapeHtml(text) {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function renderMarkdownInline(text) {
+        let s = escapeHtml(text);
+        s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+        s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+        s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+            '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+        return s;
+    }
+
+    function isTableStart(lines, index) {
+        if (index + 1 >= lines.length) { return false; }
+        return /^\s*\|?.*\|/.test(lines[index])
+            && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[index + 1]);
+    }
+
+    function splitTableRow(row) {
+        return row.trim().replace(/^\|/, '').replace(/\|$/, '')
+            .split('|').map((cell) => cell.trim());
+    }
+
+    function renderMarkdown(markdown) {
+        const lines = String(markdown).split(/\r?\n/);
+        const html = [];
+        const isBlockStart = (text) => /^(#{1,4})\s/.test(text)
+            || /^```/.test(text)
+            || /^\s*[-*•]\s+/.test(text)
+            || /^\s*\d+[.)]\s+/.test(text)
+            || /^\s*>/.test(text);
+        let i = 0;
+        while (i < lines.length) {
+            const line = lines[i];
+            if (/^```/.test(line.trim())) {
+                const lang = line.trim().slice(3).trim();
+                const codeLines = [];
+                i++;
+                while (i < lines.length && !/^```/.test(lines[i].trim())) {
+                    codeLines.push(lines[i]);
+                    i++;
+                }
+                i++;
+                const langClass = lang ? ` class="language-${escapeHtml(lang)}"` : '';
+                html.push(`<pre><code${langClass}>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+                continue;
+            }
+            const heading = line.match(/^(#{1,4})\s+(.+)$/);
+            if (heading) {
+                const level = heading[1].length;
+                html.push(`<h${level}>${renderMarkdownInline(heading[2])}</h${level}>`);
+                i++;
+                continue;
+            }
+            if (isTableStart(lines, i)) {
+                const header = splitTableRow(lines[i]);
+                i += 2;
+                let rows = '';
+                while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
+                    rows += `<tr>${splitTableRow(lines[i])
+                        .map((cell) => `<td>${renderMarkdownInline(cell)}</td>`).join('')}</tr>`;
+                    i++;
+                }
+                html.push(`<table><thead><tr>${header
+                    .map((cell) => `<th>${renderMarkdownInline(cell)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>`);
+                continue;
+            }
+            if (/^\s*[-*•]\s+/.test(line)) {
+                let items = '';
+                while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i])) {
+                    items += `<li>${renderMarkdownInline(lines[i].replace(/^\s*[-*•]\s+/, ''))}</li>`;
+                    i++;
+                }
+                html.push(`<ul>${items}</ul>`);
+                continue;
+            }
+            if (/^\s*\d+[.)]\s+/.test(line)) {
+                let items = '';
+                while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+                    items += `<li>${renderMarkdownInline(lines[i].replace(/^\s*\d+[.)]\s+/, ''))}</li>`;
+                    i++;
+                }
+                html.push(`<ol>${items}</ol>`);
+                continue;
+            }
+            if (/^\s*>/.test(line)) {
+                const quoteLines = [];
+                while (i < lines.length && /^\s*>/.test(lines[i])) {
+                    quoteLines.push(lines[i].replace(/^\s*>\s?/, ''));
+                    i++;
+                }
+                html.push(`<blockquote>${quoteLines.map(renderMarkdownInline).join('<br>')}</blockquote>`);
+                continue;
+            }
+            if (!line.trim()) {
+                i++;
+                continue;
+            }
+            const paraLines = [];
+            while (i < lines.length && lines[i].trim()
+                && !isBlockStart(lines[i]) && !isTableStart(lines, i)) {
+                paraLines.push(lines[i]);
+                i++;
+            }
+            html.push(`<p>${paraLines.map(renderMarkdownInline).join('<br>')}</p>`);
+        }
+        return html.join('');
+    }
+
     /* ---------- 会话 ---------- */
 
     async function loadSessions() {
@@ -173,13 +292,24 @@
         messageList.appendChild(hint);
     }
 
+    /* 用户输入是纯文本保持原样；助手回答是 Markdown，经渲染器排版 */
+    function renderBubble(role, content) {
+        const bubble = el('div', 'message-bubble');
+        if (role === 'USER') {
+            bubble.textContent = content;
+        } else {
+            bubble.innerHTML = renderMarkdown(content);
+        }
+        return bubble;
+    }
+
     function appendMessage(role, content, createdAt) {
         const wrap = el('div', `message ${role === 'USER' ? 'user' : 'assistant'}`);
         const avatar = el('div', 'message-avatar');
         avatar.innerHTML = role === 'USER' ? SVG.userAvatar : SVG.botAvatar;
         wrap.appendChild(avatar);
         const body = el('div', 'message-body');
-        body.appendChild(el('div', 'message-bubble', content));
+        body.appendChild(renderBubble(role, content));
         if (createdAt) { body.appendChild(el('div', 'message-time', formatTime(createdAt))); }
         wrap.appendChild(body);
         messageList.appendChild(wrap);
@@ -240,7 +370,7 @@
             const onEvent = (event) => {
                 if (event.type === 'message' || event.type === 'message.delta') {
                     content += event.content || '';
-                    bubble.textContent = content;
+                    bubble.innerHTML = renderMarkdown(content);
                     messageList.scrollTop = messageList.scrollHeight;
                 } else if (event.type === 'sources') {
                     renderSources(assistant, event);

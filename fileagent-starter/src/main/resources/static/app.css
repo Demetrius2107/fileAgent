@@ -379,6 +379,68 @@ body {
     box-shadow: var(--shadow-sm);
 }
 
+/* 助手回答的 Markdown 排版：气泡本身是 pre-wrap，块级间距统一用 margin 控制 */
+.message.assistant .message-bubble > :first-child { margin-top: 0; }
+.message.assistant .message-bubble > :last-child { margin-bottom: 0; }
+.message.assistant .message-bubble p { margin: 6px 0; }
+.message.assistant .message-bubble h1,
+.message.assistant .message-bubble h2,
+.message.assistant .message-bubble h3,
+.message.assistant .message-bubble h4 { margin: 12px 0 6px; line-height: 1.4; }
+.message.assistant .message-bubble h1 { font-size: 17px; }
+.message.assistant .message-bubble h2 { font-size: 16px; }
+.message.assistant .message-bubble h3 { font-size: 15px; }
+.message.assistant .message-bubble h4 { font-size: 14px; }
+.message.assistant .message-bubble ul,
+.message.assistant .message-bubble ol { margin: 6px 0; padding-left: 22px; }
+.message.assistant .message-bubble li { margin: 3px 0; }
+.message.assistant .message-bubble code {
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    font-size: 13px;
+    font-family: "SF Mono", Consolas, "Courier New", monospace;
+}
+.message.assistant .message-bubble pre {
+    margin: 8px 0;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: #1e2430;
+    color: #e2e8f0;
+    overflow-x: auto;
+    white-space: pre;
+}
+.message.assistant .message-bubble pre code {
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: inherit;
+    font-size: 12.5px;
+}
+.message.assistant .message-bubble blockquote {
+    margin: 6px 0;
+    padding: 2px 12px;
+    border-left: 3px solid var(--accent);
+    color: var(--text-secondary);
+}
+.message.assistant .message-bubble table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 13px;
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+}
+.message.assistant .message-bubble th,
+.message.assistant .message-bubble td {
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    text-align: left;
+}
+.message.assistant .message-bubble th { background: var(--bg); }
+.message.assistant .message-bubble a { color: var(--accent); }
+
 .message-sources {
     margin-top: 6px;
     font-size: 12px;

@@ -109,8 +109,9 @@ class ElasticsearchKnowledgeIndexRepositoryTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> batches = ArgumentCaptor.forClass(List.class);
         verify(embeddingModel, times(5)).embed(batches.capture());
+        /* 批次并发执行、完成顺序不定；断言每批不超供应商批量上限 */
         assertThat(batches.getAllValues()).extracting(List::size)
-                .containsExactly(10, 10, 10, 10, 5);
+                .containsExactlyInAnyOrder(10, 10, 10, 10, 5);
 
         ArgumentCaptor<BulkRequest> bulkRequest = ArgumentCaptor.forClass(BulkRequest.class);
         verify(elasticsearchClient).bulk(bulkRequest.capture());

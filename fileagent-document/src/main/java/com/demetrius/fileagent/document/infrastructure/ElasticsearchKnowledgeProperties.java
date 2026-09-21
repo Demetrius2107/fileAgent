@@ -20,6 +20,8 @@ public class ElasticsearchKnowledgeProperties {
     private String physicalIndex = "fileagent-knowledge-v1";
     private int dimensions = 1024;
     private int embeddingBatchSize = 10;
+    /** Embedding 批次并发数；每批是一次外部 HTTP 调用，IO 密集 */
+    private int embeddingConcurrency = 4;
     private int bm25TopK = 50;
     private int knnTopK = 50;
     private int knnCandidates = 100;

@@ -24,6 +24,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 /**
  * Elasticsearch 知识索引仓储实现。
@@ -78,21 +83,58 @@ public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepo
         }
 
         List<float[]> embeddings = new ArrayList<>(Collections.nCopies(chunks.size(), null));
-        for (int fromIndex = 0; fromIndex < retrievableIndexes.size(); fromIndex += batchSize) {
-            int toIndex = Math.min(fromIndex + batchSize, retrievableIndexes.size());
-            List<Integer> batchIndexes = retrievableIndexes.subList(fromIndex, toIndex);
-            List<String> contents = batchIndexes.stream()
-                    .map(index -> chunks.get(index).content())
-                    .toList();
-            List<float[]> batchEmbeddings = embeddingModel.embed(contents);
-            if (batchEmbeddings.size() != batchIndexes.size()) {
-                throw new BizException("Embedding 返回数量与知识片段数量不一致");
+        if (retrievableIndexes.isEmpty()) {
+            return embeddings;
+        }
+        /* Embedding 是外部 HTTP 调用、IO 密集：虚拟线程并发跑批次，信号量限流保护远端 */
+        int concurrency = Math.max(1, properties.getEmbeddingConcurrency());
+        Semaphore permits = new Semaphore(concurrency);
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
+            List<Future<?>> futures = new ArrayList<>();
+            for (int fromIndex = 0; fromIndex < retrievableIndexes.size(); fromIndex += batchSize) {
+                int toIndex = Math.min(fromIndex + batchSize, retrievableIndexes.size());
+                List<Integer> batchIndexes = List.copyOf(retrievableIndexes.subList(fromIndex, toIndex));
+                futures.add(executor.submit(() -> {
+                    permits.acquire();
+                    try {
+                        embedBatch(chunks, batchIndexes, embeddings);
+                    } finally {
+                        permits.release();
+                    }
+                    return null;
+                }));
             }
-            for (int i = 0; i < batchIndexes.size(); i++) {
-                embeddings.set(batchIndexes.get(i), batchEmbeddings.get(i));
+            for (Future<?> future : futures) {
+                future.get();
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BizException("Embedding 并发执行被中断");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            if (cause instanceof BizException bizException) {
+                throw bizException;
+            }
+            throw new BizException("Embedding 批量调用失败: " + cause.getMessage());
+        } finally {
+            /* 成功时无残留任务；失败时中断在途调用，快速失败避免浪费剩余配额 */
+            executor.shutdownNow();
         }
         return embeddings;
+    }
+
+    private void embedBatch(List<KnowledgeChunk> chunks, List<Integer> batchIndexes, List<float[]> embeddings) {
+        List<String> contents = batchIndexes.stream()
+                .map(index -> chunks.get(index).content())
+                .toList();
+        List<float[]> batchEmbeddings = embeddingModel.embed(contents);
+        if (batchEmbeddings.size() != batchIndexes.size()) {
+            throw new BizException("Embedding 返回数量与知识片段数量不一致");
+        }
+        for (int i = 0; i < batchIndexes.size(); i++) {
+            embeddings.set(batchIndexes.get(i), batchEmbeddings.get(i));
+        }
     }
 
     BulkRequest buildBulkRequest(List<KnowledgeChunk> chunks, List<float[]> embeddings) {

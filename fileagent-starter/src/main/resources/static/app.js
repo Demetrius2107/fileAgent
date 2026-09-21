@@ -12,6 +12,8 @@
         fileDoc: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M10 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5z"/><path d="M10 1v4h4"/><line x1="6" y1="9" x2="10" y2="9"/><line x1="6" y1="12" x2="9" y2="12"/></svg>',
         sourceIcon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M13 12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h4l4 4z"/><path d="M9 2v4h4"/></svg>',
         trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
+        pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>',
+        eye: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
     };
 
     const sessionList = $('session-list');
@@ -45,6 +47,16 @@
     const temperatureInput = $('temperature-input');
     const modelConfigError = $('model-config-error');
     const modelConfigSaveButton = $('model-config-save');
+    const renameSessionDialog = $('rename-session-dialog');
+    const renameSessionInput = $('rename-session-input');
+    const renameSessionError = $('rename-session-error');
+    const renameSessionForm = $('rename-session-form');
+    const docViewDialog = $('doc-view-dialog');
+    const docViewTitle = $('doc-view-title');
+    const docViewOriginal = $('doc-view-original');
+    const docViewChunks = $('doc-view-chunks');
+    const docViewChunkCount = $('doc-view-chunk-count');
+    const docViewDownload = $('doc-view-download');
 
     let currentSessionId = null;
     let abortController = null;
@@ -53,6 +65,8 @@
     let editingConfigId = null;
     /* Agent 模式当前运行的 runId；用于停止/卸载时尽力取消后端运行 */
     let currentRunId = null;
+    /* 当前正在重命名的会话 id；null 表示重命名弹窗未在编辑会话 */
+    let renamingSessionId = null;
 
     /* ---------- 通用 ---------- */
 
@@ -244,12 +258,99 @@
             return;
         }
         for (const session of sessions) {
-            const item = el('li', null, session.title);
-            if (session.id === currentSessionId) { item.classList.add('active'); }
-            item.addEventListener('click', () => selectSession(session.id, session.title));
-            sessionList.appendChild(item);
+            sessionList.appendChild(renderSessionItem(session));
         }
     }
+
+    function renderSessionItem(session) {
+        const item = el('li');
+        const label = el('span', 'session-item-label', session.title);
+        label.title = session.title;
+        item.appendChild(label);
+        item.appendChild(buildSessionActions(session));
+        if (session.id === currentSessionId) { item.classList.add('active'); }
+        item.addEventListener('click', () => selectSession(session.id, session.title));
+        return item;
+    }
+
+    function buildSessionActions(session) {
+        const actions = el('span', 'session-item-actions');
+        const renameButton = el('button', 'session-action-button');
+        renameButton.type = 'button';
+        renameButton.title = '重命名会话';
+        renameButton.setAttribute('aria-label', `重命名 ${session.title}`);
+        renameButton.innerHTML = SVG.pencil;
+        renameButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            openRenameDialog(session);
+        });
+        actions.appendChild(renameButton);
+        const deleteButton = el('button', 'session-action-button danger');
+        deleteButton.type = 'button';
+        deleteButton.title = '删除会话';
+        deleteButton.setAttribute('aria-label', `删除 ${session.title}`);
+        deleteButton.innerHTML = SVG.trash;
+        deleteButton.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            if (!confirm(`删除会话「${session.title}」？会话内的消息将一并删除，且不可恢复。`)) { return; }
+            deleteButton.disabled = true;
+            try {
+                await api(`/api/sessions/${session.id}`, { method: 'DELETE' });
+                if (session.id === currentSessionId) {
+                    currentSessionId = null;
+                    chatTitle.textContent = '未选择会话';
+                    sendButton.disabled = true;
+                    messageList.replaceChildren();
+                    renderEmptyChat();
+                }
+                showToast(`已删除会话「${session.title}」`);
+                await loadSessions();
+            } catch (e) {
+                deleteButton.disabled = false;
+                showToast(`删除失败：${e.message}`, false);
+            }
+        });
+        actions.appendChild(deleteButton);
+        return actions;
+    }
+
+    function openRenameDialog(session) {
+        renamingSessionId = session.id;
+        renameSessionInput.value = session.title;
+        renameSessionError.hidden = true;
+        renameSessionError.textContent = '';
+        renameSessionDialog.showModal();
+        renameSessionInput.focus();
+        renameSessionInput.select();
+    }
+
+    $('rename-session-cancel').addEventListener('click', () => { renameSessionDialog.close(); });
+
+    renameSessionForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const title = renameSessionInput.value.trim();
+        if (!title) {
+            renameSessionError.textContent = '会话标题不能为空';
+            renameSessionError.hidden = false;
+            return;
+        }
+        if (!renamingSessionId) { return; }
+        const sessionId = renamingSessionId;
+        try {
+            await api(`/api/sessions/${sessionId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title })
+            });
+            renameSessionDialog.close();
+            if (sessionId === currentSessionId) { chatTitle.textContent = title; }
+            await loadSessions();
+            showToast('会话已重命名');
+        } catch (e) {
+            renameSessionError.textContent = e.message;
+            renameSessionError.hidden = false;
+        }
+    });
 
     async function createSession() {
         const session = await api('/api/sessions', {
@@ -262,7 +363,11 @@
     }
 
     async function selectSession(sessionId, title) {
-        if (streaming) { abortController && abortController.abort(); }
+        if (streaming) {
+            abortController && abortController.abort();
+            /* 与停止按钮同等语义：切换会话时同步取消后端仍在运行的 Agent，避免残留算力 */
+            cancelActiveRun();
+        }
         currentSessionId = sessionId;
         chatTitle.textContent = title;
         sendButton.disabled = false;
@@ -361,6 +466,8 @@
         appendMessage('USER', prompt, localIsoNow());
         const assistant = appendMessage('ASSISTANT', '');
         const bubble = assistant.querySelector('.message-bubble');
+        /* 首个 delta 到达前展示思考动画；到达后 innerHTML 被渲染内容整体覆盖 */
+        bubble.innerHTML = '<div class="thinking" aria-label="正在思考"><span></span><span></span><span></span></div>';
 
         abortController = new AbortController();
         setStreaming(true);
@@ -403,6 +510,8 @@
             setStreaming(false);
             abortController = null;
             currentRunId = null;
+            /* 无任何内容返回时清掉思考动画，避免空泡里残留三个点 */
+            if (!content) { bubble.innerHTML = ''; }
             if (!assistant.querySelector('.message-time')) {
                 assistant.querySelector('.message-body').appendChild(el('div', 'message-time', formatTime(localIsoNow())));
             }
@@ -547,6 +656,7 @@
         nameEl.appendChild(document.createTextNode(file.filename));
         nameEl.title = file.filename;
         head.appendChild(nameEl);
+        head.appendChild(buildKnowledgeViewButton(file));
         head.appendChild(buildKnowledgeDeleteButton(file));
         item.appendChild(head);
 
@@ -579,6 +689,102 @@
             }
         });
         return button;
+    }
+
+    /* ---------- 文档预览（原文 + 分块） ---------- */
+
+    /* 浏览器能直接当文本展示的扩展名；PDF 走 iframe，其余格式只给下载入口 */
+    const INLINE_PREVIEW_EXTS = ['txt', 'md', 'markdown', 'csv'];
+
+    function buildKnowledgeViewButton(file) {
+        const button = el('button', 'knowledge-view-button');
+        button.type = 'button';
+        button.title = '查看原文与分块';
+        button.setAttribute('aria-label', `查看 ${file.filename}`);
+        button.innerHTML = SVG.eye;
+        button.addEventListener('click', () => { openDocView(file); });
+        return button;
+    }
+
+    function openDocView(file) {
+        docViewTitle.textContent = file.filename;
+        docViewOriginal.replaceChildren();
+        docViewChunks.replaceChildren();
+        docViewChunkCount.textContent = '';
+        const contentUrl = `/api/rag-files/${file.id}/content`;
+        docViewDownload.href = contentUrl;
+        docViewDownload.setAttribute('download', file.filename);
+        docViewDialog.showModal();
+        loadOriginalPreview(file, contentUrl);
+        loadDocChunks(file);
+    }
+
+    $('doc-view-close').addEventListener('click', () => { docViewDialog.close(); });
+
+    async function loadOriginalPreview(file, contentUrl) {
+        const ext = fileExt(file.filename);
+        try {
+            if (ext === 'pdf') {
+                const iframe = el('iframe', 'doc-view-iframe');
+                iframe.src = contentUrl;
+                iframe.title = `${file.filename} 预览`;
+                docViewOriginal.appendChild(iframe);
+            } else if (INLINE_PREVIEW_EXTS.includes(ext)) {
+                const response = await fetch(contentUrl);
+                if (!response.ok) { throw new Error(`HTTP ${response.status}`); }
+                const text = await response.text();
+                const pre = el('pre', 'doc-view-text', text.length > 20000
+                    ? `${text.slice(0, 20000)}\n\n……（内容过长，仅展示前 20000 字符）`
+                    : text);
+                docViewOriginal.appendChild(pre);
+            } else {
+                docViewOriginal.appendChild(el('div', 'doc-view-note',
+                    '该格式浏览器无法内联预览，请点击右上角"下载/打开原件"。'));
+            }
+        } catch (e) {
+            docViewOriginal.replaceChildren();
+            docViewOriginal.appendChild(el('div', 'doc-view-error', `原文加载失败：${e.message}`));
+        }
+    }
+
+    async function loadDocChunks(file) {
+        try {
+            const chunks = await api(`/api/rag-files/${file.id}/chunks`);
+            renderChunks(chunks);
+        } catch (e) {
+            docViewChunkCount.textContent = '';
+            docViewChunks.appendChild(el('div', 'doc-view-error', `分块加载失败：${e.message}`));
+        }
+    }
+
+    function renderChunks(chunks) {
+        if (!chunks || chunks.length === 0) {
+            docViewChunkCount.textContent = '共 0 块';
+            docViewChunks.appendChild(el('div', 'doc-view-note', '该文件暂无索引分块（可能尚未解析完成或解析失败）。'));
+            return;
+        }
+        docViewChunkCount.textContent = `共 ${chunks.length} 块`;
+        for (const chunk of chunks) {
+            docViewChunks.appendChild(renderChunkItem(chunk));
+        }
+    }
+
+    function renderChunkItem(chunk) {
+        const details = el('details', 'chunk-item');
+        const summary = el('summary', 'chunk-summary');
+        const isParent = chunk.chunkType === 'PARENT';
+        summary.appendChild(el('span', `chunk-type-${isParent ? 'parent' : 'child'}`, isParent ? '父块' : '子块'));
+        summary.appendChild(el('span', 'chunk-index', `#${chunk.chunkIndex}`));
+        const preview = String(chunk.content || '').replace(/\s+/g, ' ').trim();
+        summary.appendChild(el('span', 'chunk-preview', preview ? preview.slice(0, 80) : '（空内容）'));
+        details.appendChild(summary);
+        details.appendChild(el('pre', 'chunk-content', chunk.content || ''));
+        return details;
+    }
+
+    function fileExt(filename) {
+        const index = String(filename).lastIndexOf('.');
+        return index >= 0 ? String(filename).slice(index + 1).toLowerCase() : '';
     }
 
     function formatTime(iso) {

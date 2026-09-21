@@ -97,7 +97,7 @@ Agent 报告中的 `agent.runSuccessRate` 衡量 Run 是否以 `SUCCEEDED` 结�
 FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v1 ./fileagent-evaluation/scripts/run-agent-evaluation.sh
 ```
 
-数据集包含 12 道题，覆盖无需检索、单跳、多跳、比较、聚合、时间敏感、部分零命中、全部零命中、重复子查询、非法计划、reranker 降级和检索基础设施失败。语料为 `department-standards-2026.md`（三部门多维度可比条目，支撑比较与聚合）与 `travel-policy-2026.md`（版本变化内容，并以《部门标准》互引支撑跨文档多跳）；上传语料时使用 `ragName=fileagent-eval-adaptive-v1`。
+数据集包含 12 道题，覆盖无需检索、单跳、多跳、比较、聚合、时间敏感、部分零命中、全部零命中、重复子查询、非法计划、reranker 降级和检索基础设施失败。语料为 `department-standards-2026.md`（三部门多维度可比条目，支撑比较与聚合）与 `travel-policy-2026.md`（版本变化内容，并以《部门标准》互引支撑跨文档多跳）；首次运行前用 `./fileagent-evaluation/scripts/upload-corpus.sh adaptive-v1` 上传语料（脚本按数据集版本自动使用 `ragName=fileagent-eval-adaptive-v1`）。
 
 每道题在 `expected.expectedQueryType` 标注正确规划器应声明的查询类型，在 `expected.expectedSubQuestions` 标注多跳/比较题的必要子问题。自适应指标及分母：
 

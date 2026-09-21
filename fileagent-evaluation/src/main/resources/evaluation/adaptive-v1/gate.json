@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1.0",
+  "minimumScores": {
+    "agent.runSuccessRate": 1.0,
+    "agent.budgetComplianceRate": 1.0,
+    "agent.toolWhitelistPassRate": 1.0,
+    "adaptive.queryCountComplianceRate": 1.0,
+    "adaptive.strategyComplianceRate": 1.0
+  },
+  "maximumRegression": 0.1,
+  "regressionMetrics": []
+}

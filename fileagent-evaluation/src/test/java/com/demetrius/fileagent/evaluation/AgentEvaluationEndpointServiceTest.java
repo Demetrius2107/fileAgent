@@ -23,7 +23,7 @@ class AgentEvaluationEndpointServiceTest {
         AgentAnswerEvaluationPort agentPort = query -> {
             agentCallCount.incrementAndGet();
             return new AgentAnswerEvaluationPort.Result("评测回答", false,
-                    List.of(), List.of(), 0, 1, List.of(), 1L, AgentRunStatus.SUCCEEDED, null);
+                    List.of(), List.of(), 0, 1, List.of(), 1L, AgentRunStatus.SUCCEEDED, null, null);
         };
         RagAnswerJudgePort judgePort = request -> {
             if (request.groundingMode() == AnswerGroundingMode.GENERAL_KNOWLEDGE) {

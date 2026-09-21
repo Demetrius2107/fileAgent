@@ -55,6 +55,14 @@ public final class AgentQualityGateEvaluator {
         scores.put("agent.citationCoverageRate", agent.citationCoverageRate());
         scores.put("agent.citationValidityRate", agent.citationValidityRate());
         scores.put("agent.refusalDecisionAccuracy", agent.refusalDecisionAccuracy());
+        AgentEvaluationReport.AdaptiveMetrics adaptive = report.adaptiveMetrics();
+        if (adaptive != null) {
+            scores.put("adaptive.queryTypeAccuracy", adaptive.queryTypeAccuracy());
+            scores.put("adaptive.unnecessaryRetrievalRate", adaptive.unnecessaryRetrievalRate());
+            scores.put("adaptive.queryCountComplianceRate", adaptive.queryCountComplianceRate());
+            scores.put("adaptive.strategyComplianceRate", adaptive.strategyComplianceRate());
+            scores.put("adaptive.subQuestionCoverage", adaptive.subQuestionCoverage());
+        }
         return scores;
     }
 

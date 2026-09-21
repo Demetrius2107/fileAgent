@@ -3,6 +3,7 @@ package com.demetrius.fileagent.agent.infrastructure.runtime;
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
 import com.demetrius.fileagent.agent.application.tool.AgentToolContext;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
+import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.run.InMemoryAgentRunRegistry;
 import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
@@ -40,6 +41,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -72,6 +74,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
     private static final Pattern CITATION = Pattern.compile("\\[来源：([^\\]]+)\\]");
 
     private final AgentProperties properties;
+    private final AdaptiveRetrievalProperties adaptiveRetrievalProperties;
     private final InMemoryAgentRunRegistry registry;
     private final AgentScopeModelFactory modelFactory;
     private final AgentPromptFactory promptFactory;
@@ -114,7 +117,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                             agent.streamEvents(userMessage, ctx)
                                     .concatMap(ev -> mapEvent(ev, run, agent, ctx, step, modelCalls,
                                             toolStartNanos, answer, assembly.toolContext(), null)))
-                    .timeout(properties.getRunTimeout())
+                    .timeout(effectiveRunTimeout())
                     .onErrorResume(e -> onError(e, run))
                     .doOnCancel(() -> {
                         if (run.isRunning()) {
@@ -136,6 +139,13 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         }
     }
 
+    /** 生效的 Run 超时：结构化检索模式用独立预算（启动时已校验大于 toolTimeout 的 3 倍）。 */
+    private Duration effectiveRunTimeout() {
+        return properties.isAdaptiveRetrievalEnabled()
+                ? adaptiveRetrievalProperties.getRunTimeout()
+                : properties.getRunTimeout();
+    }
+
     private AgentAssembly assemble(AgentRunCommand command, AgentRun run) {
         Toolkit toolkit = new Toolkit();
         toolkit.registerAgentTool(searchDocsTool);
@@ -146,7 +156,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         ReActAgent agent = ReActAgent.builder()
                 .name("fileagent-knowledge-agent")
                 .description("文件知识助手")
-                .sysPrompt(promptFactory.systemInstruction())
+                .sysPrompt(promptFactory.systemInstruction(properties.isAdaptiveRetrievalEnabled()))
                 .model(model)
                 .toolkit(toolkit)
                 .maxIters(properties.getMaxSteps())
@@ -188,7 +198,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                                     .concatMap(ev -> mapEvent(ev, run, assembly.agent(), assembly.context(),
                                             step, modelCalls, toolStartNanos, answer,
                                             assembly.toolContext(), toolCalls)))
-                    .timeout(properties.getRunTimeout())
+                    .timeout(effectiveRunTimeout())
                     .onErrorResume(e -> onError(e, run))
                     .blockLast();
 
@@ -203,7 +213,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                     toolCalls,
                     durationMs(startedAt),
                     run.status(),
-                    run.failureCode());
+                    run.failureCode(),
+                    mapRetrievalObservation(run));
         } catch (Exception e) {
             log.warn("Agent 评测运行失败 runId={}: {}", command.runId(), e.getMessage());
             if (run.isRunning()) {
@@ -211,8 +222,22 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             }
             return new AgentAnswerEvaluationPort.Result(
                     "", true, List.of(), List.of(), run.stepCount(), run.modelCallCount(),
-                    List.of(), durationMs(startedAt), run.status(), run.failureCode());
+                    List.of(), durationMs(startedAt), run.status(), run.failureCode(),
+                    mapRetrievalObservation(run));
         }
+    }
+
+    /** 运行态检索溯源映射为评测观察；未调用 search_docs 时为空。 */
+    private AgentAnswerEvaluationPort.RetrievalObservation mapRetrievalObservation(AgentRun run) {
+        List<AgentRun.RetrievalExecution> executions = run.retrievalExecutions();
+        if (executions.isEmpty()) {
+            return null;
+        }
+        AgentRun.RetrievalExecution last = executions.get(executions.size() - 1);
+        return new AgentAnswerEvaluationPort.RetrievalObservation(
+                last.queryType(), last.strategyId(), last.plannedQueryCount(), last.executedQueries(),
+                last.perQueryHitCount(), last.candidateChunkIds(), last.finalChunkIds(),
+                last.rerankRequested(), last.rerankApplied(), last.fallbackCode());
     }
 
     private record AgentAssembly(ReActAgent agent, RuntimeContext context, Msg userMessage,

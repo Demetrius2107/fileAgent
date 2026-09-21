@@ -1,9 +1,11 @@
 package com.demetrius.fileagent.agent.domain.run;
 
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
+import com.demetrius.fileagent.api.enums.RetrievalQueryType;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -84,5 +86,74 @@ class AgentRunTest {
 
         assertThat(run.assistantMessageId()).isEqualTo(99L);
         assertThat(run.isCancelRequested()).isTrue();
+    }
+
+    @Test
+    void firstInvalidPlanShouldOnlyCountWithoutConsumingExtraStep() {
+        AgentRun run = AgentRun.pending("run-1", 8L, "trace-1");
+        run.start(NOW);
+
+        run.recordInvalidPlan(NOW);
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.RUNNING);
+        assertThat(run.invalidPlanCount()).isEqualTo(1);
+        assertThat(run.stepCount()).isZero();
+    }
+
+    @Test
+    void secondInvalidPlanShouldTerminateRunWithPlanInvalidCode() {
+        AgentRun run = AgentRun.pending("run-1", 8L, "trace-1");
+        run.start(NOW);
+
+        run.recordInvalidPlan(NOW);
+        run.recordInvalidPlan(NOW.plusSeconds(1));
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(run.failureCode()).isEqualTo(AgentRun.AGENT_RETRIEVAL_PLAN_INVALID);
+        assertThat(run.pendingToolFailureCode()).isEqualTo(AgentRun.AGENT_RETRIEVAL_PLAN_INVALID);
+    }
+
+    @Test
+    void normalTwoRetrievalRoundsShouldPass() {
+        AgentRun run = AgentRun.pending("run-1", 8L, "trace-1");
+        run.start(NOW);
+
+        run.recordRetrievalExecution(new AgentRun.RetrievalExecution(
+                RetrievalQueryType.MULTI_HOP, "MULTI_HOP", 2, 2,
+                List.of(3, 5), List.of("m-1", "m-2", "m-3"), List.of("m-1", "m-3"),
+                true, true, null));
+        run.recordRetrievalExecution(new AgentRun.RetrievalExecution(
+                RetrievalQueryType.SINGLE_HOP, "SINGLE_HOP", 1, 1,
+                List.of(4), List.of("m-4"), List.of("m-4"),
+                true, false, "RERANK_FAILED"));
+
+        assertThat(run.status()).isEqualTo(AgentRunStatus.RUNNING);
+        assertThat(run.retrievalRoundCount()).isEqualTo(2);
+        assertThat(run.retrievalExecutions()).hasSize(2);
+        assertThat(run.retrievalExecutions().getFirst().strategyId()).isEqualTo("MULTI_HOP");
+        assertThat(run.retrievalExecutions().getFirst().perQueryHitCount()).containsExactly(3, 5);
+        assertThat(run.retrievalExecutions().getFirst().finalChunkIds()).containsExactly("m-1", "m-3");
+        assertThat(run.retrievalExecutions().getLast().rerankApplied()).isFalse();
+        assertThat(run.retrievalExecutions().getLast().fallbackCode()).isEqualTo("RERANK_FAILED");
+    }
+
+    @Test
+    void thirdRetrievalRoundShouldBeRejected() {
+        AgentRun run = AgentRun.pending("run-1", 8L, "trace-1");
+        run.start(NOW);
+        run.recordRetrievalExecution(new AgentRun.RetrievalExecution(
+                RetrievalQueryType.SINGLE_HOP, "SINGLE_HOP", 1, 1,
+                List.of(1), List.of("m-1"), List.of("m-1"), false, false, null));
+        run.recordRetrievalExecution(new AgentRun.RetrievalExecution(
+                RetrievalQueryType.SINGLE_HOP, "SINGLE_HOP", 1, 1,
+                List.of(1), List.of("m-2"), List.of("m-2"), false, false, null));
+
+        assertThatThrownBy(() -> run.recordRetrievalExecution(new AgentRun.RetrievalExecution(
+                RetrievalQueryType.SINGLE_HOP, "SINGLE_HOP", 1, 1,
+                List.of(1), List.of("m-3"), List.of("m-3"), false, false, null)))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(run.retrievalRoundCount()).isEqualTo(2);
+        assertThat(run.status()).isEqualTo(AgentRunStatus.RUNNING);
     }
 }

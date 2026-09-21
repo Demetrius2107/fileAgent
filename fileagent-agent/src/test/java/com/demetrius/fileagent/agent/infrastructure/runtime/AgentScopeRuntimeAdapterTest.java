@@ -2,6 +2,7 @@ package com.demetrius.fileagent.agent.infrastructure.runtime;
 
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
+import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.run.InMemoryAgentRunRegistry;
 import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
@@ -37,6 +38,7 @@ class AgentScopeRuntimeAdapterTest {
         AgentProperties properties = new AgentProperties();
         adapter = new AgentScopeRuntimeAdapter(
                 properties,
+                new AdaptiveRetrievalProperties(),
                 new InMemoryAgentRunRegistry(properties, CLOCK),
                 mock(AgentScopeModelFactory.class),
                 mock(AgentPromptFactory.class),

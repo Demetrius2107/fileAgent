@@ -11,7 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Reciprocal Rank Fusion 排名融合。
+ * Reciprocal Rank Fusion 排名融合，支持等权与加权两条路径。
  *
  * @author raosaijie
  */
@@ -21,13 +21,24 @@ public class RrfFusion {
     public List<KnowledgeHit> fuse(List<KnowledgeHit> bm25Hits,
                                    List<KnowledgeHit> knnHits,
                                    int rankConstant) {
+        return fuse(bm25Hits, knnHits, rankConstant, 1.0, 1.0);
+    }
+
+    public List<KnowledgeHit> fuse(List<KnowledgeHit> bm25Hits,
+                                   List<KnowledgeHit> knnHits,
+                                   int rankConstant,
+                                   double bm25Weight,
+                                   double knnWeight) {
         if (rankConstant <= 0) {
             throw new IllegalArgumentException("rankConstant 必须大于 0");
         }
+        if (bm25Weight <= 0 || knnWeight <= 0) {
+            throw new IllegalArgumentException("BM25/KNN 权重必须大于 0");
+        }
         Map<String, KnowledgeHit> candidates = new LinkedHashMap<>();
         Map<String, Double> scores = new HashMap<>();
-        accumulate(bm25Hits, rankConstant, candidates, scores);
-        accumulate(knnHits, rankConstant, candidates, scores);
+        accumulate(bm25Hits, rankConstant, bm25Weight, candidates, scores);
+        accumulate(knnHits, rankConstant, knnWeight, candidates, scores);
 
         List<KnowledgeHit> fused = new ArrayList<>(candidates.size());
         for (Map.Entry<String, KnowledgeHit> entry : candidates.entrySet()) {
@@ -42,7 +53,7 @@ public class RrfFusion {
         return List.copyOf(fused);
     }
 
-    private void accumulate(List<KnowledgeHit> hits, int rankConstant,
+    private void accumulate(List<KnowledgeHit> hits, int rankConstant, double weight,
                             Map<String, KnowledgeHit> candidates,
                             Map<String, Double> scores) {
         if (hits == null) {
@@ -56,7 +67,7 @@ public class RrfFusion {
                 continue;
             }
             candidates.putIfAbsent(hit.chunkId(), hit);
-            scores.merge(hit.chunkId(), 1.0 / (rankConstant + i + 1), Double::sum);
+            scores.merge(hit.chunkId(), weight / (rankConstant + i + 1), Double::sum);
         }
     }
 }

@@ -7,6 +7,8 @@ import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.MgetRequest;
 import co.elastic.clients.elasticsearch.core.MgetResponse;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.core.mget.MultiGetResponseItem;
 import com.demetrius.fileagent.common.exception.BizException;
@@ -20,10 +22,16 @@ import org.springframework.stereotype.Repository;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 
 /**
  * Elasticsearch 知识索引仓储实现。
@@ -36,6 +44,8 @@ import java.util.Objects;
 public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepository {
 
     private static final String PARENT_CHUNK_TYPE = "PARENT";
+    /** 单文件分块查看的读取上限：单文件 chunk 数远小于此，防御性兜底 */
+    private static final int MAX_FILE_CHUNKS = 10000;
 
     private final ElasticsearchClient elasticsearchClient;
     private final EmbeddingModel embeddingModel;
@@ -78,21 +88,58 @@ public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepo
         }
 
         List<float[]> embeddings = new ArrayList<>(Collections.nCopies(chunks.size(), null));
-        for (int fromIndex = 0; fromIndex < retrievableIndexes.size(); fromIndex += batchSize) {
-            int toIndex = Math.min(fromIndex + batchSize, retrievableIndexes.size());
-            List<Integer> batchIndexes = retrievableIndexes.subList(fromIndex, toIndex);
-            List<String> contents = batchIndexes.stream()
-                    .map(index -> chunks.get(index).content())
-                    .toList();
-            List<float[]> batchEmbeddings = embeddingModel.embed(contents);
-            if (batchEmbeddings.size() != batchIndexes.size()) {
-                throw new BizException("Embedding 返回数量与知识片段数量不一致");
+        if (retrievableIndexes.isEmpty()) {
+            return embeddings;
+        }
+        /* Embedding 是外部 HTTP 调用、IO 密集：虚拟线程并发跑批次，信号量限流保护远端 */
+        int concurrency = Math.max(1, properties.getEmbeddingConcurrency());
+        Semaphore permits = new Semaphore(concurrency);
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
+            List<Future<?>> futures = new ArrayList<>();
+            for (int fromIndex = 0; fromIndex < retrievableIndexes.size(); fromIndex += batchSize) {
+                int toIndex = Math.min(fromIndex + batchSize, retrievableIndexes.size());
+                List<Integer> batchIndexes = List.copyOf(retrievableIndexes.subList(fromIndex, toIndex));
+                futures.add(executor.submit(() -> {
+                    permits.acquire();
+                    try {
+                        embedBatch(chunks, batchIndexes, embeddings);
+                    } finally {
+                        permits.release();
+                    }
+                    return null;
+                }));
             }
-            for (int i = 0; i < batchIndexes.size(); i++) {
-                embeddings.set(batchIndexes.get(i), batchEmbeddings.get(i));
+            for (Future<?> future : futures) {
+                future.get();
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BizException("Embedding 并发执行被中断");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            if (cause instanceof BizException bizException) {
+                throw bizException;
+            }
+            throw new BizException("Embedding 批量调用失败: " + cause.getMessage());
+        } finally {
+            /* 成功时无残留任务；失败时中断在途调用，快速失败避免浪费剩余配额 */
+            executor.shutdownNow();
         }
         return embeddings;
+    }
+
+    private void embedBatch(List<KnowledgeChunk> chunks, List<Integer> batchIndexes, List<float[]> embeddings) {
+        List<String> contents = batchIndexes.stream()
+                .map(index -> chunks.get(index).content())
+                .toList();
+        List<float[]> batchEmbeddings = embeddingModel.embed(contents);
+        if (batchEmbeddings.size() != batchIndexes.size()) {
+            throw new BizException("Embedding 返回数量与知识片段数量不一致");
+        }
+        for (int i = 0; i < batchIndexes.size(); i++) {
+            embeddings.set(batchIndexes.get(i), batchEmbeddings.get(i));
+        }
     }
 
     BulkRequest buildBulkRequest(List<KnowledgeChunk> chunks, List<float[]> embeddings) {
@@ -150,6 +197,34 @@ public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepo
             return chunkIds.stream()
                     .map(byId::get)
                     .filter(Objects::nonNull)
+                    .toList();
+        } catch (IOException e) {
+            throw new BizException("Elasticsearch 读取知识片段失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public List<KnowledgeChunk> findByFileId(Long fileId) {
+        if (fileId == null) {
+            return List.of();
+        }
+        try {
+            SearchRequest request = new SearchRequest.Builder()
+                    .index(properties.getIndexAlias())
+                    .query(query -> query.term(term -> term
+                            .field("fileId")
+                            .value(String.valueOf(fileId))))
+                    .size(MAX_FILE_CHUNKS)
+                    .source(source -> source.filter(filter -> filter.excludes("embedding")))
+                    .build();
+            @SuppressWarnings("unchecked")
+            SearchResponse<Map> response = elasticsearchClient.search(request, Map.class);
+            /* 不依赖 ES text 字段排序（需 fielddata）：Java 端按 chunkIndex 回排，同序号下 CHILD 先于 PARENT */
+            return response.hits().hits().stream()
+                    .filter(hit -> hit.source() != null)
+                    .map(hit -> toChunk(hit.id(), hit.source()))
+                    .sorted(Comparator.comparingInt(KnowledgeChunk::chunkIndex)
+                            .thenComparing(chunk -> PARENT_CHUNK_TYPE.equals(chunk.metadata().get("chunkType")) ? 1 : 0))
                     .toList();
         } catch (IOException e) {
             throw new BizException("Elasticsearch 读取知识片段失败: " + e.getMessage());

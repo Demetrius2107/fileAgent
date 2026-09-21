@@ -1,5 +1,7 @@
 package com.demetrius.fileagent.document.application;
 
+import com.demetrius.fileagent.api.dto.KnowledgeChunkView;
+import com.demetrius.fileagent.api.dto.OriginalRagFile;
 import com.demetrius.fileagent.api.dto.RagFileSummary;
 import com.demetrius.fileagent.api.enums.ParseStatus;
 import com.demetrius.fileagent.common.exception.BizException;
@@ -17,6 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -87,6 +92,37 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         }
         ragFileRepository.delete(entity);
         log.info("知识库文件删除完成: id={}, file={}", id, entity.getFilename());
+    }
+
+    @Override
+    public OriginalRagFile loadOriginal(Long id) {
+        RagFileEntity entity = ragFileRepository.findById(id)
+                .orElseThrow(() -> new BizException("知识库文件不存在: " + id));
+        if (!StringUtils.hasText(entity.getStoragePath())) {
+            throw new BizException("该文件没有可用的原件记录: " + entity.getFilename());
+        }
+        // 路径安全由 StorageService.resolve 兜底（防目录穿越）
+        Path path = storageService.resolve(entity.getStoragePath());
+        try {
+            byte[] content = Files.readAllBytes(path);
+            return new OriginalRagFile(entity.getFilename(), resolveMimeType(entity.getFilename()), content);
+        } catch (IOException e) {
+            throw new BizException("读取文件原件失败: " + entity.getFilename());
+        }
+    }
+
+    @Override
+    public List<KnowledgeChunkView> listChunks(Long id) {
+        ragFileRepository.findById(id)
+                .orElseThrow(() -> new BizException("知识库文件不存在: " + id));
+        return knowledgeIndexRepository.findByFileId(id).stream()
+                .map(chunk -> new KnowledgeChunkView(
+                        chunk.chunkId(),
+                        chunk.chunkIndex(),
+                        String.valueOf(chunk.metadata().getOrDefault("chunkType", "CHILD")),
+                        chunk.content(),
+                        chunk.metadata()))
+                .toList();
     }
 
     private void storeOne(String name, String tag, MultipartFile file) {
@@ -223,7 +259,11 @@ public class RagFileAppServiceImpl implements RagFileAppService {
     }
 
     private String resolveMimeType(MultipartFile file) {
-        String extension = fileExtension(file).toLowerCase(Locale.ROOT);
+        return resolveMimeType(resolveFilename(file));
+    }
+
+    private String resolveMimeType(String filename) {
+        String extension = fileExtension(filename).toLowerCase(Locale.ROOT);
         return switch (extension) {
             case ".txt" -> "text/plain";
             case ".md", ".markdown" -> "text/markdown";
@@ -232,7 +272,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             case ".xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
             case ".csv" -> "text/csv";
             default -> throw new BizException(
-                    "不支持的文件格式: " + resolveFilename(file) + "（当前支持 TXT/MD/PDF/DOCX/XLSX/CSV）");
+                    "不支持的文件格式: " + filename + "（当前支持 TXT/MD/PDF/DOCX/XLSX/CSV）");
         };
     }
 
@@ -241,8 +281,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         return StringUtils.hasText(filename) ? filename : "unnamed";
     }
 
-    private String fileExtension(MultipartFile file) {
-        String filename = file.getOriginalFilename();
+    private String fileExtension(String filename) {
         if (filename == null || !filename.contains(".")) {
             return "";
         }

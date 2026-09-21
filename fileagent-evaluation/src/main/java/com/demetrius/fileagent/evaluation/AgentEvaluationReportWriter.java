@@ -44,6 +44,17 @@ public final class AgentEvaluationReportWriter {
         sb.append("| 平均耗时(ms) | ").append(format(agent.avgDurationMs())).append(" |\n");
         appendMetricScope(sb, report);
 
+        if (report.adaptiveMetrics() != null) {
+            AgentEvaluationReport.AdaptiveMetrics adaptive = report.adaptiveMetrics();
+            sb.append("\n## 自适应检索\n\n");
+            sb.append("| 指标 | 值 |\n|---|---|\n");
+            sb.append(row("查询类型准确率", adaptive.queryTypeAccuracy()));
+            sb.append(row("不必要检索率", adaptive.unnecessaryRetrievalRate()));
+            sb.append(row("子查询数量合规率", adaptive.queryCountComplianceRate()));
+            sb.append(row("策略合规率", adaptive.strategyComplianceRate()));
+            sb.append(row("子问题覆盖率", adaptive.subQuestionCoverage()));
+        }
+
         if (report.gate() != null) {
             sb.append("\n## 质量门禁\n\n");
             sb.append(report.gate().passed() ? "通过 ✅\n" : "未通过 ❌\n");
@@ -72,6 +83,14 @@ public final class AgentEvaluationReportWriter {
             sb.append("，无已标注引用样本");
         }
         sb.append("。`GENERAL_KNOWLEDGE`、`REFUSE` 和失败 Run 的引用状态为不适用。\n");
+        if (report.adaptiveMetrics() != null) {
+            long adaptiveDenominator = report.cases().stream()
+                    .filter(c -> c.adaptive() != null)
+                    .count();
+            sb.append("\n> 自适应检索指标的分母是实际执行了结构化检索的 Run（")
+                    .append(adaptiveDenominator).append(" 道）；查询类型准确率与不必要检索率只统计"
+                    + "带人工标注的题，不必要检索率越低越好，子问题覆盖率按计划子查询数/标注必要子问题数计。\n");
+        }
     }
 
     private static void appendRepresentativeCases(StringBuilder sb, AgentEvaluationReport report) {
@@ -133,6 +152,16 @@ public final class AgentEvaluationReportWriter {
             case "agent.citationCoverageRate" -> result.agent().citationCoverageRate();
             case "agent.citationValidityRate" -> result.agent().citationValidityRate();
             case "agent.refusalDecisionAccuracy" -> result.agent().refusalDecisionAccuracy();
+            case "adaptive.queryTypeAccuracy" -> result.adaptive() == null
+                    ? 1.0 : result.adaptive().queryTypeAccuracy();
+            case "adaptive.unnecessaryRetrievalRate" -> result.adaptive() == null
+                    ? 1.0 : result.adaptive().unnecessaryRetrievalRate();
+            case "adaptive.queryCountComplianceRate" -> result.adaptive() == null
+                    ? 1.0 : result.adaptive().queryCountComplianceRate();
+            case "adaptive.strategyComplianceRate" -> result.adaptive() == null
+                    ? 1.0 : result.adaptive().strategyComplianceRate();
+            case "adaptive.subQuestionCoverage" -> result.adaptive() == null
+                    ? 1.0 : result.adaptive().subQuestionCoverage();
             default -> 1.0;
         };
     }

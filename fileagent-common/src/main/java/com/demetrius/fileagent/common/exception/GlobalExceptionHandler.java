@@ -6,6 +6,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 @Slf4j
 @RestControllerAdvice
@@ -24,6 +25,15 @@ public class GlobalExceptionHandler {
             status = HttpStatus.BAD_REQUEST;
         }
         return ResponseEntity.status(status).body(ApiResult.fail(e.getCode(), e.getMessage()));
+    }
+
+    /**
+     * SSE 客户端主动断开（停止生成/切换会话/刷新页面）后，异步写入必然失败：
+     * 记 INFO 即可，不再走兜底 500——响应已不可写，向其写 ApiResult 只会产生二次异常噪音。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleClientDisconnect(AsyncRequestNotUsableException e) {
+        log.info("SSE 客户端已断开，停止写入: {}", e.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

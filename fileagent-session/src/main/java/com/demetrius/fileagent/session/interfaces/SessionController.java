@@ -2,6 +2,7 @@ package com.demetrius.fileagent.session.interfaces;
 
 import com.demetrius.fileagent.api.dto.CreateSessionReq;
 import com.demetrius.fileagent.api.dto.MessageDto;
+import com.demetrius.fileagent.api.dto.RenameSessionReq;
 import com.demetrius.fileagent.api.dto.SessionDto;
 import com.demetrius.fileagent.common.result.ApiResult;
 import com.demetrius.fileagent.session.application.SessionAppService;
@@ -39,5 +40,16 @@ public class SessionController {
     @GetMapping("/{id}/messages")
     public ApiResult<List<MessageDto>> messages(@PathVariable Long id) {
         return ApiResult.ok(sessionAppService.listMessages(id));
+    }
+
+    @PutMapping("/{id}")
+    public ApiResult<SessionDto> rename(@PathVariable Long id, @RequestBody RenameSessionReq req) {
+        return ApiResult.ok(sessionAppService.renameSession(id, req));
+    }
+
+    @DeleteMapping("/{id}")
+    public ApiResult<Void> delete(@PathVariable Long id) {
+        sessionAppService.deleteSession(id);
+        return ApiResult.ok();
     }
 }

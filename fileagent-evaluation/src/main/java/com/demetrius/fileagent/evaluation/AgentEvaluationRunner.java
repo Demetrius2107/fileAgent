@@ -3,6 +3,7 @@ package com.demetrius.fileagent.evaluation;
 import com.demetrius.fileagent.api.enums.MessageType;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.AnswerGroundingMode;
+import com.demetrius.fileagent.api.enums.RetrievalQueryType;
 import com.demetrius.fileagent.api.port.AgentAnswerEvaluationPort;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
 import com.demetrius.fileagent.api.port.RagAnswerJudgePort;
@@ -32,6 +33,13 @@ public final class AgentEvaluationRunner {
 
     private static final Set<String> BUDGET_VIOLATION_CODES =
             Set.of("AGENT_BUDGET_EXCEEDED", "AGENT_RUN_TIMEOUT");
+
+    /** 服务端策略硬上限：单次 Run 最多 2 轮 search_docs，单轮计划子查询最多 3 条。 */
+    private static final int MAX_RETRIEVAL_ROUNDS = 2;
+    private static final int MAX_SUB_QUERIES = 3;
+
+    private static final Set<String> ALLOWED_STRATEGIES =
+            Set.of("SINGLE_HOP", "MULTI_HOP", "COMPARISON", "AGGREGATION", "TIME_SENSITIVE");
 
     private final RagAnswerJudgePort judgePort;
     private final EvaluationFiles evaluationFiles;
@@ -110,7 +118,8 @@ public final class AgentEvaluationRunner {
                 assessment == null ? null : assessment.decision(),
                 assessment != null && assessment.hasUnsupportedClaims(),
                 assessment == null ? List.of() : assessment.requiredFacts(),
-                assessment == null ? List.of() : assessment.forbiddenFacts(), error);
+                assessment == null ? List.of() : assessment.forbiddenFacts(), error,
+                result.retrieval());
     }
 
     public AgentEvaluationReport evaluate(String datasetVersion,
@@ -123,6 +132,7 @@ public final class AgentEvaluationRunner {
                 total, succeeded, failed,
                 aggregateAnswerMetrics(cases, observations),
                 aggregateAgentMetrics(cases, observations),
+                aggregateAdaptiveMetrics(cases, observations),
                 buildCaseResults(cases, observations),
                 null);
     }
@@ -221,9 +231,115 @@ public final class AgentEvaluationRunner {
                     o.caseId(), o.category(), o.question(),
                     o.answer(), o.retrievedFilenames(), o.citedFilenames(),
                     o.terminalStatus(), o.failureCode(), citationStatus(c, o),
-                    answerMetricsOf(c, o), agentMetricsOf(c, o), o.error()));
+                    answerMetricsOf(c, o), agentMetricsOf(c, o), adaptiveMetricsOf(c, o), o.error()));
         }
         return results;
+    }
+
+    /**
+     * 自适应检索指标（Phase 2A）。规划类指标属于运行时受控行为，失败 Run 也参与分母；
+     * 无检索执行记录的 Run 只在带人工标注时参与类型/不必要检索口径，不参与计划/策略/子问题口径。
+     */
+    private AgentEvaluationReport.AdaptiveMetrics aggregateAdaptiveMetrics(
+            List<EvaluationCase> cases, List<AgentEvaluationObservation> observations) {
+        double typeSum = 0, typeCount = 0;
+        double unnecessarySum = 0, unnecessaryCount = 0;
+        double countSum = 0, countCount = 0;
+        double strategySum = 0, strategyCount = 0;
+        double subQuestionSum = 0, subQuestionCount = 0;
+        for (int i = 0; i < observations.size(); i++) {
+            AgentEvaluationObservation o = observations.get(i);
+            EvaluationCase c = cases.get(i);
+            String expectedType = c.expected().expectedQueryType();
+            if (expectedType != null) {
+                typeSum += matchesExpectedType(expectedType, o) ? 1.0 : 0.0;
+                typeCount++;
+            }
+            if ("NONE".equals(expectedType)) {
+                unnecessarySum += calledKnowledgeTool(o) ? 1.0 : 0.0;
+                unnecessaryCount++;
+            }
+            if (o.retrieval() == null) {
+                continue;
+            }
+            countSum += queryCountCompliant(o) ? 1.0 : 0.0;
+            countCount++;
+            strategySum += strategyCompliant(o.retrieval()) ? 1.0 : 0.0;
+            strategyCount++;
+            List<String> expectedSubQuestions = c.expected().expectedSubQuestions();
+            if (!expectedSubQuestions.isEmpty()) {
+                subQuestionSum += Math.min(1.0,
+                        o.retrieval().plannedQueryCount() / (double) expectedSubQuestions.size());
+                subQuestionCount++;
+            }
+        }
+        return new AgentEvaluationReport.AdaptiveMetrics(
+                ratio(typeSum, typeCount),
+                ratio(unnecessarySum, unnecessaryCount),
+                ratio(countSum, countCount),
+                ratio(strategySum, strategyCount),
+                ratio(subQuestionSum, subQuestionCount));
+    }
+
+    /** 单题自适应指标：仅在 Run 实际执行了结构化检索时生成，否则不参与。 */
+    private AgentEvaluationReport.AdaptiveMetrics adaptiveMetricsOf(EvaluationCase c,
+                                                                    AgentEvaluationObservation o) {
+        if (o.retrieval() == null) {
+            return null;
+        }
+        String expectedType = c.expected().expectedQueryType();
+        List<String> expectedSubQuestions = c.expected().expectedSubQuestions();
+        return new AgentEvaluationReport.AdaptiveMetrics(
+                expectedType != null && matchesExpectedType(expectedType, o) ? 1.0 : 0.0,
+                "NONE".equals(expectedType) && calledKnowledgeTool(o) ? 1.0 : 0.0,
+                queryCountCompliant(o) ? 1.0 : 0.0,
+                strategyCompliant(o.retrieval()) ? 1.0 : 0.0,
+                expectedSubQuestions.isEmpty() ? 0.0 : Math.min(1.0,
+                        o.retrieval().plannedQueryCount() / (double) expectedSubQuestions.size()));
+    }
+
+    /** 实际检索类型（未检索为 NONE）与人工标注预期是否一致。 */
+    private static boolean matchesExpectedType(String expectedType, AgentEvaluationObservation o) {
+        try {
+            RetrievalQueryType expected = RetrievalQueryType.valueOf(expectedType);
+            RetrievalQueryType actual = o.retrieval() == null
+                    ? RetrievalQueryType.NONE : o.retrieval().queryType();
+            return expected == actual;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** 预期无需检索的题是否调用了知识工具（检索或浏览知识库）。 */
+    private static boolean calledKnowledgeTool(AgentEvaluationObservation o) {
+        return o.retrieval() != null || o.toolCalls().stream().anyMatch(TOOL_WHITELIST::contains);
+    }
+
+    /**
+     * 子查询数量与检索轮次是否满足策略限制：单次运行最多 {@value #MAX_RETRIEVAL_ROUNDS} 轮
+     * search_docs，计划子查询数在 1 到 {@value #MAX_SUB_QUERIES} 之间且实际执行数不超过计划数。
+     */
+    private static boolean queryCountCompliant(AgentEvaluationObservation o) {
+        if ("AGENT_RETRIEVAL_PLAN_INVALID".equals(o.failureCode())
+                || searchDocsCalls(o) > MAX_RETRIEVAL_ROUNDS) {
+            return false;
+        }
+        AgentAnswerEvaluationPort.RetrievalObservation r = o.retrieval();
+        return r.plannedQueryCount() >= 1 && r.plannedQueryCount() <= MAX_SUB_QUERIES
+                && r.executedQueryCount() <= r.plannedQueryCount();
+    }
+
+    /** 实际参数是否来自允许的服务端策略：策略 id 必须等于声明的查询类型名。 */
+    private static boolean strategyCompliant(
+            AgentAnswerEvaluationPort.RetrievalObservation retrieval) {
+        return retrieval.strategyId() != null
+                && ALLOWED_STRATEGIES.contains(retrieval.strategyId())
+                && retrieval.queryType() != null
+                && retrieval.strategyId().equals(retrieval.queryType().name());
+    }
+
+    private static int searchDocsCalls(AgentEvaluationObservation o) {
+        return (int) o.toolCalls().stream().filter("search_docs"::equals).count();
     }
 
     private AgentEvaluationReport.AnswerMetrics answerMetricsOf(EvaluationCase c,

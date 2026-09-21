@@ -70,6 +70,28 @@ Response `data`:
 ]
 ```
 
+### 1.4 重命名会话
+`PUT /api/sessions/{id}`
+
+Request:
+```json
+{ "title": "Q4 销售复盘" }
+```
+
+- 标题去空白后落库；空白标题返回 `code=400`（「会话标题不能为空」），不回退默认标题
+- 会话不存在返回 `code=404`
+
+Response `data`: `SessionDto`
+
+### 1.5 删除会话
+`DELETE /api/sessions/{id}`
+
+- 会话内的消息随会话**级联删除**（JPA cascade），不可恢复
+- 会话内上传的会话文档记录（跨域值引用）本次不清理，属已知边界
+- 会话不存在返回 `code=404`
+
+Response `data`: `null`
+
 ---
 
 ## 2. 文件管理
@@ -175,6 +197,26 @@ Response `data`: `RagFileSummary[]`
 Response:
 ```json
 { "code": 0, "message": "ok", "data": true }
+```
+
+### 3.4 原件预览/下载
+`GET /api/rag-files/{id}/content`
+
+- 返回**二进制内容**，不走 `ApiResult` 包装；`Content-Disposition: inline` 按正确 MIME 直出，浏览器渲染不了的格式（DOCX/XLSX 等）自行转下载
+- 文件名用 RFC 5987 `filename*=UTF-8''` 编码，支持中文
+- 文件不存在 / 原件记录缺失 / 原件被删时返回 JSON 错误体（`code=400` 级业务错误）
+
+### 3.5 分块查看
+`GET /api/rag-files/{id}/chunks`
+
+- 返回该文件在 ES 知识索引中的全部分块，含 CHILD 与 PARENT，按 `chunkIndex` 升序回排（同序号下 CHILD 先于 PARENT）；不返回 embedding 向量字段
+- 文件不存在返回 `code=400`
+
+Response `data`:
+```json
+[
+  { "chunkId": "1:0", "chunkIndex": 0, "chunkType": "CHILD", "content": "……", "metadata": { "knowledge": "制度", "filename": "员工手册.pdf" } }
+]
 ```
 
 记录不存在或文件正在索引中时返回 `code=400` + 原因。

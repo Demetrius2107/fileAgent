@@ -62,6 +62,8 @@ fileagent:
   # Agent 模式（Phase 1）：默认关闭，本地测试可设 FILEAGENT_AGENT_ENABLED=true 开启
   agent:
     enabled: ${FILEAGENT_AGENT_ENABLED:false}
+    # 自适应检索子开关（Phase 2A）：默认关闭；不改变 Agent 总开关与固定 /chat 行为
+    adaptive-retrieval-enabled: ${FILEAGENT_AGENT_ADAPTIVE_RETRIEVAL_ENABLED:false}
   chunk-size: 800
   chunk-overlap: 120
   elasticsearch:

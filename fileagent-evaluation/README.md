@@ -9,6 +9,11 @@ src/main/resources/evaluation/v1/
 ├── corpus/                 固定评测语料
 ├── cases/                  JSONL 题库，可继续增加文件和题目
 └── gate.json               绝对阈值与 baseline 回退阈值
+
+src/main/resources/evaluation/adaptive-v1/
+├── corpus/                 2 份含可比条目与跨文档多跳关系的 Markdown 语料
+├── cases/agent.jsonl       12 类自适应检索场景
+└── gate.json               四项强制门 =1.0；自适应收益阈值待 baseline 人工确认
 ```
 
 v1 首批包含 7 份语料和 30 道题，覆盖事实、语义、CSV 表格、跨文件比较、版本冲突、无答案、提示注入和错误前提。
@@ -83,6 +88,26 @@ export FILEAGENT_EVALUATION_TOKEN='<与部署实例一致>'
 Agent 评测默认使用 `agent-v1`，输出到 `evaluation-results/agent-v1/<UTC运行时间>/`。它通过 `/internal/evaluation/agent/run` 真实调用部署实例的 AgentScope Runtime、当前知识库和 Judge；不需要另行配置聊天、向量或 reranker 的 API Key。`GENERAL_KNOWLEDGE` 题允许直接回答通用知识且无需引用，`KNOWLEDGE_BASED` 题才要求以本次检索证据回答，`REFUSE` 题仅用于安全越界请求。当前 `agent-v1` 有 8 题，每次会产生最多 8 次 Agent 调用和 8 次 Judge 调用。
 
 Agent 报告中的 `agent.runSuccessRate` 衡量 Run 是否以 `SUCCEEDED` 结束；非成功 Run 不调用 Judge，但仍保留回答、检索文件、引用文件、终态和失败码。`agent.citationCoverageRate` 衡量成功的知识库题是否至少引用一个本次检索命中的文件，`agent.citationValidityRate` 衡量已经写出的引用是否全部来自本次检索结果。通用知识题、拒答题和失败 Run 的引用状态为 `NOT_APPLICABLE`。
+
+## 自适应检索评测（adaptive-v1）
+
+`adaptive-v1` 评测 Phase 2A 自适应检索：Agent 通过 `search_docs` 的结构化入参声明查询类型，服务端按类型映射固定策略档位。开启部署实例的 `FILEAGENT_AGENT_ADAPTIVE_RETRIEVAL_ENABLED=true` 后运行：
+
+```bash
+FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v1 ./fileagent-evaluation/scripts/run-agent-evaluation.sh
+```
+
+数据集包含 12 道题，覆盖无需检索、单跳、多跳、比较、聚合、时间敏感、部分零命中、全部零命中、重复子查询、非法计划、reranker 降级和检索基础设施失败。语料为 `department-standards-2026.md`（三部门多维度可比条目，支撑比较与聚合）与 `travel-policy-2026.md`（版本变化内容，并以《部门标准》互引支撑跨文档多跳）；首次运行前用 `./fileagent-evaluation/scripts/upload-corpus.sh adaptive-v1` 上传语料（脚本按数据集版本自动使用 `ragName=fileagent-eval-adaptive-v1`）。
+
+每道题在 `expected.expectedQueryType` 标注正确规划器应声明的查询类型，在 `expected.expectedSubQuestions` 标注多跳/比较题的必要子问题。自适应指标及分母：
+
+- `adaptive.queryTypeAccuracy`：实际查询类型与标注一致的比例；分母是标注了预期类型的题，失败 Run 也参与（规划是运行时受控行为）。
+- `adaptive.unnecessaryRetrievalRate`：**越低越好**；无需检索题实际执行结构化检索或调用知识工具的比例。
+- `adaptive.queryCountComplianceRate`：计划子查询数 ∈ [1,3]、单次 Run 的 `search_docs` ≤2 轮、执行数 ≤ 计划数且未因非法计划终止的 Run 比例。
+- `adaptive.strategyComplianceRate`：实际策略档位来自服务端允许值且与查询类型一致的 Run 比例。
+- `adaptive.subQuestionCoverage`：标注必要子问题被计划覆盖的比例（现阶段为数量代理，语义覆盖需人工核验）。
+
+未执行结构化检索的 Run 不参与自适应指标；Markdown 报告会展示自适应指标与分母口径。`gate.json` 当前只强制 `adaptive.queryCountComplianceRate=1.0`、`adaptive.strategyComplianceRate=1.0`、`agent.toolWhitelistPassRate=1.0`、`agent.budgetComplianceRate=1.0`；`queryTypeAccuracy`、`subQuestionCoverage` 与多跳/比较收益阈值须在首份真实 baseline 经人工确认后填入，在此之前只展示、不断言。
 
 普通 RAG 的 `v1` 每次运行会真实生成 30 个回答，并逐题调用 `deepseek-v4-pro` 评判，因此会产生 30 次回答调用和 30 次 Judge 调用。Judge 复用部署已有的 `FILEAGENT_CHAT_API_KEY` 与 DeepSeek 端点，不需要新增 API Key。评测接口是同步批量执行，反向代理的请求超时时间应覆盖整批运行耗时。
 

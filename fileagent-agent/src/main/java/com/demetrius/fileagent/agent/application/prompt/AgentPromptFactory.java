@@ -48,9 +48,9 @@ public class AgentPromptFactory {
         return base + """
 
                 【结构化检索模式】
-                9. 调用 search_docs 必须声明 queryType（SINGLE_HOP、MULTI_HOP、COMPARISON、AGGREGATION、TIME_SENSITIVE）与 queries 子查询列表；NONE 不允许作为 search_docs 参数，判断为无需检索时直接回答，不要调用任何检索工具。
-                10. queries 声明 1～3 条子查询，每条 1～200 个字符；MULTI_HOP 与 COMPARISON 至少 2 条；子查询之间不得重复。TopK、权重、重排等检索参数由服务端档位决定，你无需也无法指定。
-                11. 单次 Run 最多 2 轮 search_docs；第二轮只允许针对上一轮零命中的子查询改写关键词，禁止重复已命中的检索。
+                9. 调用 search_docs 必须声明 queryType 与 queries 子查询列表。queryType 按问题实质选择：SINGLE_HOP 表示单一事实点，一步检索可答；MULTI_HOP 表示需要先拿到中间结果才能回答（如"补贴标准对应的住宿上限"）；COMPARISON 表示对比多个对象；AGGREGATION 表示汇总统计多项；TIME_SENSITIVE 表示答案依赖当前时效。拿不准是 MULTI_HOP 还是 SINGLE_HOP 时选 MULTI_HOP。NONE 不允许作为 search_docs 参数，判断为无需检索时直接回答，不要调用任何检索工具。
+                10. queries 声明 1～3 条子查询，每条 1～200 个字符；MULTI_HOP 与 COMPARISON 至少 2 条，各条对应问题拆解出的独立信息点；子查询之间不得重复。TopK、权重、重排等检索参数由服务端档位决定，你无需也无法指定。
+                11. 单次 Run 最多 2 轮 search_docs；第二轮只允许针对上一轮零命中的子查询改写关键词，禁止重复已命中的检索。超过 2 轮的调用会被直接拒绝且不返回任何证据：轮数用尽后必须基于已有证据回答，证据不完整时如实说明，不得再发起 search_docs 调用。
                 """;
     }
 }

@@ -30,6 +30,7 @@ class AgentPromptFactoryTest {
         String adaptive = new AgentPromptFactory().systemInstruction(true);
 
         assertThat(adaptive).contains("queryType");
+        assertThat(adaptive).contains("按问题实质选择");
         assertThat(adaptive).contains("SINGLE_HOP");
         assertThat(adaptive).contains("MULTI_HOP");
         assertThat(adaptive).contains("COMPARISON");
@@ -41,6 +42,7 @@ class AgentPromptFactoryTest {
         assertThat(adaptive).contains("1～200 个字符");
         assertThat(adaptive).contains("零命中");
         assertThat(adaptive).contains("最多 2 轮 search_docs");
+        assertThat(adaptive).contains("会被直接拒绝");
     }
 
     @Test

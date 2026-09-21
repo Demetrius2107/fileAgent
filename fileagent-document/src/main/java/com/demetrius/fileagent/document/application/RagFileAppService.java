@@ -1,5 +1,7 @@
 package com.demetrius.fileagent.document.application;
 
+import com.demetrius.fileagent.api.dto.KnowledgeChunkView;
+import com.demetrius.fileagent.api.dto.OriginalRagFile;
 import com.demetrius.fileagent.api.dto.RagFileSummary;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -31,4 +33,20 @@ public interface RagFileAppService {
      * @param id 知识库文件 id
      */
     void deleteRagFile(Long id);
+
+    /**
+     * 读取知识库文件原件（预览/下载）。
+     *
+     * @param id 知识库文件 id
+     * @return 文件名 + MIME 类型 + 字节内容
+     */
+    OriginalRagFile loadOriginal(Long id);
+
+    /**
+     * 查看某文件写入索引的全部分块（含 CHILD 与 PARENT，按 chunkIndex 升序回排）。
+     *
+     * @param id 知识库文件 id
+     * @return 分块视图列表
+     */
+    List<KnowledgeChunkView> listChunks(Long id);
 }

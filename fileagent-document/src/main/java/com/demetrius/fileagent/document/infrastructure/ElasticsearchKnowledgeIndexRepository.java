@@ -7,6 +7,8 @@ import co.elastic.clients.elasticsearch.core.BulkResponse;
 import co.elastic.clients.elasticsearch.core.DeleteByQueryRequest;
 import co.elastic.clients.elasticsearch.core.MgetRequest;
 import co.elastic.clients.elasticsearch.core.MgetResponse;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.bulk.BulkResponseItem;
 import co.elastic.clients.elasticsearch.core.mget.MultiGetResponseItem;
 import com.demetrius.fileagent.common.exception.BizException;
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Repository;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +44,8 @@ import java.util.concurrent.Semaphore;
 public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepository {
 
     private static final String PARENT_CHUNK_TYPE = "PARENT";
+    /** 单文件分块查看的读取上限：单文件 chunk 数远小于此，防御性兜底 */
+    private static final int MAX_FILE_CHUNKS = 10000;
 
     private final ElasticsearchClient elasticsearchClient;
     private final EmbeddingModel embeddingModel;
@@ -192,6 +197,34 @@ public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepo
             return chunkIds.stream()
                     .map(byId::get)
                     .filter(Objects::nonNull)
+                    .toList();
+        } catch (IOException e) {
+            throw new BizException("Elasticsearch 读取知识片段失败: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public List<KnowledgeChunk> findByFileId(Long fileId) {
+        if (fileId == null) {
+            return List.of();
+        }
+        try {
+            SearchRequest request = new SearchRequest.Builder()
+                    .index(properties.getIndexAlias())
+                    .query(query -> query.term(term -> term
+                            .field("fileId")
+                            .value(String.valueOf(fileId))))
+                    .size(MAX_FILE_CHUNKS)
+                    .source(source -> source.filter(filter -> filter.excludes("embedding")))
+                    .build();
+            @SuppressWarnings("unchecked")
+            SearchResponse<Map> response = elasticsearchClient.search(request, Map.class);
+            /* 不依赖 ES text 字段排序（需 fielddata）：Java 端按 chunkIndex 回排，同序号下 CHILD 先于 PARENT */
+            return response.hits().hits().stream()
+                    .filter(hit -> hit.source() != null)
+                    .map(hit -> toChunk(hit.id(), hit.source()))
+                    .sorted(Comparator.comparingInt(KnowledgeChunk::chunkIndex)
+                            .thenComparing(chunk -> PARENT_CHUNK_TYPE.equals(chunk.metadata().get("chunkType")) ? 1 : 0))
                     .toList();
         } catch (IOException e) {
             throw new BizException("Elasticsearch 读取知识片段失败: " + e.getMessage());

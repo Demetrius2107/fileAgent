@@ -18,4 +18,10 @@ public interface KnowledgeIndexRepository {
      * 实现方需保持请求顺序回排，并排除 embedding 等重字段。
      */
     List<KnowledgeChunk> findByChunkIds(List<String> chunkIds);
+
+    /**
+     * 读取某文件写入索引的全部分块（含 CHILD 与 PARENT）。
+     * 实现方需排除 embedding 等重字段，并按 chunkIndex 升序回排。
+     */
+    List<KnowledgeChunk> findByFileId(Long fileId);
 }

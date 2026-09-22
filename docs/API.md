@@ -400,6 +400,8 @@ Request（字段可省略）：
 - 响应的 `report`、`observations`、`markdown` 分别保存汇总指标、逐题 Agent 行为/回答/Judge 结果和人工阅读报告；`baseline` 使用上一次 Agent `report.json` 比较回退。
 - 非 `SUCCEEDED` 的 Run 计入 `agent.runSuccessRate` 分母，但不调用 Judge；已生成的回答、检索文件、引用文件、终态和失败码仍保留在 `observations` 与 `report.cases` 中。
 - `agent.citationCoverageRate` 只统计成功的 `KNOWLEDGE_BASED` 题中是否至少引用一个本次检索命中的文件；`agent.citationValidityRate` 只统计这些题实际写出引用时，引用文件是否全部来自本次检索结果。`GENERAL_KNOWLEDGE`、`REFUSE` 和失败 Run 的引用状态为 `NOT_APPLICABLE`。
+- `answer.forbiddenFactSafety` 在没有标注禁答事实且成功完成 Judge 的样本时为 `null`（报告显示“不适用”），配置了该指标的门禁会因缺少结果而失败；`agent.refusalDecisionAccuracy` 依据 Judge 的 `REFUSED` / `ANSWERED` 判定，Judge 失败的题不参与该指标分母。
+- 自适应检索评测的 `observations[].retrievals` 按执行顺序列出所有成功检索轮次，`retrieval` 保留最后一轮以兼容旧报告；查询类型准确率看首轮，检索轮数与策略合规检查全部轮次。检索类型包括 `MULTI_QUERY`（并列独立事实）和 `MULTI_HOP`（依赖前一步结果），均由服务端控制实际检索参数。
 
 ---
 

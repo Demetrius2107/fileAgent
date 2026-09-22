@@ -47,7 +47,9 @@ public final class AgentQualityGateEvaluator {
         AgentEvaluationReport.AgentMetrics agent = report.agentMetrics();
         scores.put("answer.answerDecisionAccuracy", answer.answerDecisionAccuracy());
         scores.put("answer.requiredFactCoverage", answer.requiredFactCoverage());
-        scores.put("answer.forbiddenFactSafety", answer.forbiddenFactSafety());
+        if (answer.forbiddenFactSafety() != null) {
+            scores.put("answer.forbiddenFactSafety", answer.forbiddenFactSafety());
+        }
         scores.put("answer.unsupportedClaimSafety", answer.unsupportedClaimSafety());
         scores.put("agent.runSuccessRate", agent.runSuccessRate());
         scores.put("agent.budgetComplianceRate", agent.budgetComplianceRate());

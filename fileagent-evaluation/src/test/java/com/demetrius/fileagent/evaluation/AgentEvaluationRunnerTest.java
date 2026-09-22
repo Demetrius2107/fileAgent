@@ -124,6 +124,97 @@ class AgentEvaluationRunnerTest {
     }
 
     @Test
+    void forbiddenFactSafetyShouldBeNotApplicableWithoutAnnotatedSamples() {
+        EvaluationCase evaluationCase = knowledgeCase("knowledge-001", "员工年假是多少？", "5 天");
+        AgentEvaluationObservation observation = new AgentEvaluationObservation(
+                "knowledge-001", "KNOWLEDGE_BASED", "员工年假是多少？", "年假 5 天", false,
+                List.of("employee-handbook.md"), List.of(), 1, 1, List.of("search_docs"), 10L,
+                AgentRunStatus.SUCCEEDED, null, RagAnswerJudgePort.Decision.ANSWERED, false,
+                List.of(new RagAnswerJudgePort.FactAssessment("5 天", true, "覆盖")), List.of(), null);
+
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null)
+                .evaluate("agent-v1", List.of(evaluationCase), List.of(observation));
+
+        assertThat(report.answerMetrics().forbiddenFactSafety()).isNull();
+        assertThat(report.cases().getFirst().answer().forbiddenFactSafety()).isNull();
+        assertThat(AgentEvaluationReportWriter.toMarkdown(report))
+                .contains("| 禁答内容安全性 | 不适用（无禁答事实样本） |");
+        QualityGateConfig config = new QualityGateConfig("1.0",
+                java.util.Map.of("answer.forbiddenFactSafety", 0.9), 0.1, List.of());
+        assertThat(new AgentQualityGateEvaluator().evaluate(report, config, null).violations())
+                .anyMatch(violation -> violation.contains("缺少结果"));
+    }
+
+    @Test
+    void refusalAccuracyShouldUseJudgeDecisionInsteadOfAnswerEmptiness() {
+        EvaluationCase noAnswerCase = new EvaluationCase("1.0", "no-answer", "NO_ANSWER",
+                List.of(), "公司健身房几点关门？", List.of(),
+                new EvaluationCase.Filters(null, null, null),
+                new EvaluationCase.Expected(false, List.of(), List.of(), List.of(),
+                        AnswerGroundingMode.REFUSE));
+        AgentEvaluationObservation noAnswer = new AgentEvaluationObservation(
+                "no-answer", "NO_ANSWER", "公司健身房几点关门？", "没有资料，无法回答。", false,
+                List.of(), List.of(), 1, 1, List.of("search_docs"), 10L,
+                AgentRunStatus.SUCCEEDED, null, RagAnswerJudgePort.Decision.REFUSED, false,
+                List.of(), List.of(), null);
+        EvaluationCase answerCase = knowledgeCase("answer", "员工年假是多少？", "5 天");
+        AgentEvaluationObservation answered = new AgentEvaluationObservation(
+                "answer", "KNOWLEDGE_BASED", "员工年假是多少？", "年假 5 天", true,
+                List.of(), List.of(), 1, 1, List.of("search_docs"), 10L,
+                AgentRunStatus.SUCCEEDED, null, RagAnswerJudgePort.Decision.ANSWERED, false,
+                List.of(), List.of(), null);
+
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null)
+                .evaluate("agent-v1", List.of(noAnswerCase, answerCase), List.of(noAnswer, answered));
+
+        assertThat(report.agentMetrics().refusalDecisionAccuracy()).isEqualTo(1.0);
+        assertThat(report.cases()).extracting(c -> c.agent().refusalDecisionAccuracy())
+                .containsExactly(1.0, 1.0);
+    }
+
+    @Test
+    void forbiddenFactSafetyShouldScoreAnnotatedFacts() {
+        EvaluationCase evaluationCase = new EvaluationCase("1.0", "forbidden", "KNOWLEDGE_BASED",
+                List.of(), "员工年假是多少？", List.of(), new EvaluationCase.Filters(null, null, null),
+                new EvaluationCase.Expected(true, List.of(), List.of(), List.of("3 天", "7 天"),
+                        AnswerGroundingMode.KNOWLEDGE_BASED));
+        AgentEvaluationObservation observation = new AgentEvaluationObservation(
+                "forbidden", "KNOWLEDGE_BASED", "员工年假是多少？", "年假 7 天", false,
+                List.of(), List.of(), 1, 1, List.of(), 10L,
+                AgentRunStatus.SUCCEEDED, null, RagAnswerJudgePort.Decision.ANSWERED, false,
+                List.of(), List.of(
+                        new RagAnswerJudgePort.FactAssessment("3 天", false, "未出现"),
+                        new RagAnswerJudgePort.FactAssessment("7 天", true, "出现")), null);
+
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null)
+                .evaluate("agent-v1", List.of(evaluationCase), List.of(observation));
+
+        assertThat(report.answerMetrics().forbiddenFactSafety()).isEqualTo(0.5);
+        assertThat(report.cases().getFirst().answer().forbiddenFactSafety()).isEqualTo(0.5);
+    }
+
+    @Test
+    void refusalAccuracyShouldExcludeJudgeFailures() {
+        EvaluationCase evaluationCase = knowledgeCase("knowledge-001", "员工年假是多少？", "5 天");
+        AgentEvaluationObservation judged = new AgentEvaluationObservation(
+                "knowledge-001", "KNOWLEDGE_BASED", "员工年假是多少？", "年假 5 天", false,
+                List.of(), List.of(), 1, 1, List.of(), 10L,
+                AgentRunStatus.SUCCEEDED, null, RagAnswerJudgePort.Decision.ANSWERED, false,
+                List.of(), List.of(), null);
+        AgentEvaluationObservation judgeFailed = new AgentEvaluationObservation(
+                "knowledge-002", "KNOWLEDGE_BASED", "员工年假是多少？", "年假 5 天", false,
+                List.of(), List.of(), 1, 1, List.of(), 10L,
+                AgentRunStatus.SUCCEEDED, null, null, false,
+                List.of(), List.of(), "Judge 输出不合法");
+
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null)
+                .evaluate("agent-v1", List.of(evaluationCase, knowledgeCase(
+                        "knowledge-002", "员工年假是多少？", "5 天")), List.of(judged, judgeFailed));
+
+        assertThat(report.agentMetrics().refusalDecisionAccuracy()).isEqualTo(1.0);
+    }
+
+    @Test
     void gateShouldEnforceMinimumScores() {
         AgentEvaluationReport report = new AgentEvaluationReport("1.0", "agent-v1", "now", 8, 8, 0,
                 new AgentEvaluationReport.AnswerMetrics(1.0, 1.0, 1.0, 1.0),
@@ -172,6 +263,65 @@ class AgentEvaluationRunnerTest {
         assertThat(adaptive.queryCountComplianceRate()).isEqualTo(0.8d);
         assertThat(adaptive.strategyComplianceRate()).isEqualTo(1.0d);
         assertThat(adaptive.subQuestionCoverage()).isEqualTo(1.0d);
+    }
+
+    @Test
+    void adaptiveMetricsShouldUseFirstPlanForTypeAndEveryRoundForCompliance() {
+        AgentAnswerEvaluationPort.RetrievalObservation first =
+                retrievalObservation(RetrievalQueryType.MULTI_QUERY, 2, 2);
+        AgentAnswerEvaluationPort.RetrievalObservation retry =
+                retrievalObservation(RetrievalQueryType.SINGLE_HOP, 1, 1);
+        AgentEvaluationObservation observation = new AgentEvaluationObservation(
+                "multi-001", "ADAPTIVE", "问题", "回答", false, List.of("a.md"), List.of("a.md"),
+                2, 2, List.of("search_docs", "search_docs"), 10L, AgentRunStatus.SUCCEEDED,
+                null, RagAnswerJudgePort.Decision.ANSWERED, false, List.of(), List.of(), null,
+                retry, List.of(first, retry));
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null).evaluate("adaptive-v2",
+                List.of(adaptiveCase("multi-001", "MULTI_QUERY", List.of("事实一", "事实二"))),
+                List.of(observation));
+
+        assertThat(report.adaptiveMetrics().queryTypeAccuracy()).isEqualTo(1.0);
+        assertThat(report.adaptiveMetrics().subQuestionCoverage()).isEqualTo(1.0);
+        assertThat(report.cases().getFirst().adaptive().queryTypeAccuracy()).isEqualTo(1.0);
+    }
+
+    @Test
+    void adaptiveMetricsShouldRejectInvalidSecondRoundStrategy() {
+        AgentAnswerEvaluationPort.RetrievalObservation first =
+                retrievalObservation(RetrievalQueryType.MULTI_QUERY, 2, 2);
+        AgentAnswerEvaluationPort.RetrievalObservation invalid = new AgentAnswerEvaluationPort.RetrievalObservation(
+                RetrievalQueryType.SINGLE_HOP, "COMPARISON", 4, 4,
+                List.of(1, 1, 1, 1), List.of(), List.of(), true, true, null);
+        AgentEvaluationObservation observation = new AgentEvaluationObservation(
+                "multi-001", "ADAPTIVE", "问题", "回答", false, List.of(), List.of(),
+                2, 2, List.of("search_docs", "search_docs"), 10L, AgentRunStatus.SUCCEEDED,
+                null, RagAnswerJudgePort.Decision.ANSWERED, false, List.of(), List.of(), null,
+                invalid, List.of(first, invalid));
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null).evaluate("adaptive-v2",
+                List.of(adaptiveCase("multi-001", "MULTI_QUERY", List.of())), List.of(observation));
+
+        assertThat(report.adaptiveMetrics().queryTypeAccuracy()).isEqualTo(1.0);
+        assertThat(report.adaptiveMetrics().queryCountComplianceRate()).isZero();
+        assertThat(report.adaptiveMetrics().strategyComplianceRate()).isZero();
+    }
+
+    @Test
+    void multiHopCoverageShouldCountSequentialQueriesAcrossRounds() {
+        AgentAnswerEvaluationPort.RetrievalObservation first =
+                retrievalObservation(RetrievalQueryType.MULTI_HOP, 1, 1);
+        AgentAnswerEvaluationPort.RetrievalObservation second =
+                retrievalObservation(RetrievalQueryType.MULTI_HOP, 1, 1);
+        AgentEvaluationObservation observation = new AgentEvaluationObservation(
+                "hop-001", "ADAPTIVE", "问题", "回答", false, List.of(), List.of(),
+                2, 2, List.of("search_docs", "search_docs"), 10L, AgentRunStatus.SUCCEEDED,
+                null, RagAnswerJudgePort.Decision.ANSWERED, false, List.of(), List.of(), null,
+                second, List.of(first, second));
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null).evaluate("adaptive-v2",
+                List.of(adaptiveCase("hop-001", "MULTI_HOP", List.of("中间结果", "最终事实"))),
+                List.of(observation));
+
+        assertThat(report.adaptiveMetrics().queryCountComplianceRate()).isEqualTo(1.0);
+        assertThat(report.adaptiveMetrics().subQuestionCoverage()).isEqualTo(1.0);
     }
 
     @Test

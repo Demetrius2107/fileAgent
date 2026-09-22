@@ -58,6 +58,7 @@ mvn verify            # 含集成（如有）
   - **答案质量（复用 Judge）**：`answer.answerDecisionAccuracy` / `answer.requiredFactCoverage` / `answer.forbiddenFactSafety` / `answer.unsupportedClaimSafety`。
   - **Agent 行为（运行时受控性）**：`agent.runSuccessRate`（Run 以 `SUCCEEDED` 结束）/ `agent.budgetComplianceRate`（预算遵守）/ `agent.toolWhitelistPassRate`（工具白名单）/ `agent.citationCoverageRate`（知识库题至少引用一个检索文件）/ `agent.citationValidityRate`（实际引用全部来自检索结果）/ `agent.refusalDecisionAccuracy`（拒答正确）。
 - 非 `SUCCEEDED` 的 Run 不调用 Judge，但保留回答、检索结果、引用、终态和失败码，便于定位运行时问题。
+- 未标注禁答事实的题不参与 `answer.forbiddenFactSafety`；没有可评样本时报告为“不适用”（JSON 为 `null`），如门禁要求该指标则报缺少结果。`agent.refusalDecisionAccuracy` 使用 Judge 的语义拒答判断，仅统计成功完成 Judge 的题，拒答文字非空不视为回答。
 - 引用覆盖率和引用有效性分开看：覆盖率低表示回答没有给出有效知识库来源；有效性低表示回答给出的来源中混入了本次检索未返回的文件。通用知识题、拒答题和失败 Run 的引用指标不适用。
 - 每道题在 `expected.groundingMode` 明确回答依据：`KNOWLEDGE_BASED` 为企业事实，必须检索；`GENERAL_KNOWLEDGE` 为通用知识或正常创作，可直接回答；`REFUSE` 仅用于提示词注入、数据泄露等安全越界请求。
 - 端到端入口：`fileagent-evaluation/scripts/run-agent-evaluation.sh` 调用已部署实例的 `/internal/evaluation/agent/run`，真实执行 AgentScope、当前知识库、当前启用的聊天模型和 `deepseek-v4-pro` Judge。它不启动新应用，也不要求重复配置模型 API Key。
@@ -78,3 +79,10 @@ mvn verify            # 含集成（如有）
 - 四项强制门（`gate.json` `minimumScores`）：`adaptive.queryCountComplianceRate=1.0`、`adaptive.strategyComplianceRate=1.0`、`agent.toolWhitelistPassRate=1.0`、`agent.budgetComplianceRate=1.0`。
 - 三项阈值**留空待人工确认**：`adaptive.queryTypeAccuracy`、`adaptive.subQuestionCoverage` 与多跳/比较收益阈值，须在首份真实 baseline 经人工核验后填入门禁（在此之前只展示、不断言）；`gate.json` 的 `regressionMetrics` 同样留空。
 - 数据集契约由 `EvaluationDatasetContractTest` 固定：12 道题、12 类分类齐备、强制门齐备、待定阈值未出现在门禁中。
+
+### 8.1 校准题库（adaptive-v2）
+
+- v1 原题库与历史报告不改；v2 为独立的 13 题题库和知识库 `fileagent-eval-adaptive-v2`。先执行 `./fileagent-evaluation/scripts/upload-corpus.sh adaptive-v2`，部署新代码后运行 `FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v2 ./fileagent-evaluation/scripts/run-agent-evaluation.sh`。不同版本的分数不能直接用于 baseline 回退比较。
+- `MULTI_QUERY` 表示互不依赖的并列事实，至少两条子查询；`MULTI_HOP` 表示先取得中间结果再查下一步，允许首轮一条、最多两轮。历史年份对比归 `COMPARISON`，当前语料缺乏可靠版本时间元数据，v2 不以历史比较题声称已测到 `TIME_SENSITIVE`。
+- Observation 的 `retrievals` 保留每轮成功执行的计划，旧字段 `retrieval` 仍是最后一轮。`queryTypeAccuracy` 按首轮分类，`queryCountComplianceRate` 与 `strategyComplianceRate` 检查全部轮次。`subQuestionCoverage` 仍为数量代理：多跳累计各轮计划数，其他类型看首轮计划数；它不证明子查询语义覆盖或第二轮改写正确。
+- 引用允许输出多个独立的 `[来源：文件名]`；兼容读取同一标记内用中文或英文分号分隔的文件名，未知文件名仍计入无效引用。这只修复当前文件名格式，不替代 Phase 2C 的版本、chunk 级引用验证。

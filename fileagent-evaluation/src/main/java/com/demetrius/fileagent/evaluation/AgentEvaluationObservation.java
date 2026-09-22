@@ -30,7 +30,8 @@ public record AgentEvaluationObservation(
         List<RagAnswerJudgePort.FactAssessment> judgeRequiredFacts,
         List<RagAnswerJudgePort.FactAssessment> judgeForbiddenFacts,
         String error,
-        AgentAnswerEvaluationPort.RetrievalObservation retrieval
+        AgentAnswerEvaluationPort.RetrievalObservation retrieval,
+        List<AgentAnswerEvaluationPort.RetrievalObservation> retrievals
 ) {
 
     public AgentEvaluationObservation {
@@ -39,6 +40,25 @@ public record AgentEvaluationObservation(
         toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
         judgeRequiredFacts = judgeRequiredFacts == null ? List.of() : List.copyOf(judgeRequiredFacts);
         judgeForbiddenFacts = judgeForbiddenFacts == null ? List.of() : List.copyOf(judgeForbiddenFacts);
+        retrievals = retrievals == null || retrievals.isEmpty()
+                ? (retrieval == null ? List.of() : List.of(retrieval)) : List.copyOf(retrievals);
+        retrieval = retrievals.isEmpty() ? null : retrievals.getLast();
+    }
+
+    /** 兼容单轮检索观察。 */
+    public AgentEvaluationObservation(String caseId, String category, String question,
+                                      String answer, boolean refused, List<String> retrievedFilenames,
+                                      List<String> citedFilenames, int stepCount, int modelCallCount,
+                                      List<String> toolCalls, long durationMs, AgentRunStatus terminalStatus,
+                                      String failureCode, RagAnswerJudgePort.Decision judgeDecision,
+                                      boolean judgeHasUnsupportedClaims,
+                                      List<RagAnswerJudgePort.FactAssessment> judgeRequiredFacts,
+                                      List<RagAnswerJudgePort.FactAssessment> judgeForbiddenFacts,
+                                      String error, AgentAnswerEvaluationPort.RetrievalObservation retrieval) {
+        this(caseId, category, question, answer, refused, retrievedFilenames, citedFilenames,
+                stepCount, modelCallCount, toolCalls, durationMs, terminalStatus, failureCode,
+                judgeDecision, judgeHasUnsupportedClaims, judgeRequiredFacts, judgeForbiddenFacts,
+                error, retrieval, null);
     }
 
     /** 兼容构造：无检索溯源（非自适应运行）。 */
@@ -63,7 +83,7 @@ public record AgentEvaluationObservation(
         this(caseId, category, question, answer, refused, retrievedFilenames, citedFilenames,
                 stepCount, modelCallCount, toolCalls, durationMs, terminalStatus, failureCode,
                 judgeDecision, judgeHasUnsupportedClaims, judgeRequiredFacts, judgeForbiddenFacts,
-                error, null);
+                error, null, null);
     }
 
     public boolean agentSucceeded() {

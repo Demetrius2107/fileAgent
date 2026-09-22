@@ -25,6 +25,7 @@ class AgentAnswerEvaluationPortTest {
                 AgentRunStatus.SUCCEEDED, null, null);
 
         assertThat(result.retrieval()).isNull();
+        assertThat(result.retrievals()).isEmpty();
     }
 
     @Test
@@ -39,6 +40,24 @@ class AgentAnswerEvaluationPortTest {
                 AgentRunStatus.SUCCEEDED, null, observation);
 
         assertThat(result.retrieval()).isSameAs(observation);
+        assertThat(result.retrievals()).containsExactly(observation);
+    }
+
+    @Test
+    void resultShouldPreserveAllRetrievalRounds() {
+        AgentAnswerEvaluationPort.RetrievalObservation first = new AgentAnswerEvaluationPort.RetrievalObservation(
+                RetrievalQueryType.MULTI_QUERY, "MULTI_QUERY", 2, 2,
+                List.of(1, 0), List.of("a"), List.of("a"), true, true, null);
+        AgentAnswerEvaluationPort.RetrievalObservation retry = new AgentAnswerEvaluationPort.RetrievalObservation(
+                RetrievalQueryType.SINGLE_HOP, "SINGLE_HOP", 1, 1,
+                List.of(1), List.of("b"), List.of("b"), true, true, null);
+
+        AgentAnswerEvaluationPort.Result result = new AgentAnswerEvaluationPort.Result(
+                "回答", false, List.of(), List.of(), 2, 2, List.of("search_docs", "search_docs"), 10L,
+                AgentRunStatus.SUCCEEDED, null, retry, List.of(first, retry));
+
+        assertThat(result.retrieval()).isSameAs(retry);
+        assertThat(result.retrievals()).containsExactly(first, retry);
     }
 
     @Test

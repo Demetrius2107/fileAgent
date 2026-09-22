@@ -39,7 +39,7 @@ public final class AgentEvaluationRunner {
     private static final int MAX_SUB_QUERIES = 3;
 
     private static final Set<String> ALLOWED_STRATEGIES =
-            Set.of("SINGLE_HOP", "MULTI_HOP", "COMPARISON", "AGGREGATION", "TIME_SENSITIVE");
+            Set.of("SINGLE_HOP", "MULTI_QUERY", "MULTI_HOP", "COMPARISON", "AGGREGATION", "TIME_SENSITIVE");
 
     private final RagAnswerJudgePort judgePort;
     private final EvaluationFiles evaluationFiles;
@@ -119,7 +119,7 @@ public final class AgentEvaluationRunner {
                 assessment != null && assessment.hasUnsupportedClaims(),
                 assessment == null ? List.of() : assessment.requiredFacts(),
                 assessment == null ? List.of() : assessment.forbiddenFacts(), error,
-                result.retrieval());
+                result.retrieval(), result.retrievals());
     }
 
     public AgentEvaluationReport evaluate(String datasetVersion,
@@ -169,7 +169,7 @@ public final class AgentEvaluationRunner {
         return new AgentEvaluationReport.AnswerMetrics(
                 ratio(decisionSum, decisionCount),
                 ratio(factSum, factCount),
-                ratio(forbiddenSum, forbiddenCount),
+                forbiddenCount == 0 ? null : ratio(forbiddenSum, forbiddenCount),
                 ratio(unsupportedSum, unsupportedCount));
     }
 
@@ -203,8 +203,11 @@ public final class AgentEvaluationRunner {
                     citationValidityCount++;
                 }
             }
-            refusalSum += o.refused() == !c.expected().shouldAnswer() ? 1.0 : 0.0;
-            refusalCount++;
+            if (o.judgeSucceeded()) {
+                refusalSum += (o.judgeDecision() == RagAnswerJudgePort.Decision.REFUSED)
+                        == !c.expected().shouldAnswer() ? 1.0 : 0.0;
+                refusalCount++;
+            }
             stepSum += o.stepCount();
             stepCount++;
             durationSum += o.durationMs();
@@ -259,17 +262,17 @@ public final class AgentEvaluationRunner {
                 unnecessarySum += calledKnowledgeTool(o) ? 1.0 : 0.0;
                 unnecessaryCount++;
             }
-            if (o.retrieval() == null) {
+            if (o.retrievals().isEmpty()) {
                 continue;
             }
             countSum += queryCountCompliant(o) ? 1.0 : 0.0;
             countCount++;
-            strategySum += strategyCompliant(o.retrieval()) ? 1.0 : 0.0;
+            strategySum += o.retrievals().stream().allMatch(AgentEvaluationRunner::strategyCompliant)
+                    ? 1.0 : 0.0;
             strategyCount++;
             List<String> expectedSubQuestions = c.expected().expectedSubQuestions();
             if (!expectedSubQuestions.isEmpty()) {
-                subQuestionSum += Math.min(1.0,
-                        o.retrieval().plannedQueryCount() / (double) expectedSubQuestions.size());
+                subQuestionSum += subQuestionCoverage(c, o);
                 subQuestionCount++;
             }
         }
@@ -284,7 +287,7 @@ public final class AgentEvaluationRunner {
     /** 单题自适应指标：仅在 Run 实际执行了结构化检索时生成，否则不参与。 */
     private AgentEvaluationReport.AdaptiveMetrics adaptiveMetricsOf(EvaluationCase c,
                                                                     AgentEvaluationObservation o) {
-        if (o.retrieval() == null) {
+        if (o.retrievals().isEmpty()) {
             return null;
         }
         String expectedType = c.expected().expectedQueryType();
@@ -293,17 +296,23 @@ public final class AgentEvaluationRunner {
                 expectedType != null && matchesExpectedType(expectedType, o) ? 1.0 : 0.0,
                 "NONE".equals(expectedType) && calledKnowledgeTool(o) ? 1.0 : 0.0,
                 queryCountCompliant(o) ? 1.0 : 0.0,
-                strategyCompliant(o.retrieval()) ? 1.0 : 0.0,
-                expectedSubQuestions.isEmpty() ? 0.0 : Math.min(1.0,
-                        o.retrieval().plannedQueryCount() / (double) expectedSubQuestions.size()));
+                o.retrievals().stream().allMatch(AgentEvaluationRunner::strategyCompliant) ? 1.0 : 0.0,
+                expectedSubQuestions.isEmpty() ? 0.0 : subQuestionCoverage(c, o));
+    }
+
+    private static double subQuestionCoverage(EvaluationCase c, AgentEvaluationObservation o) {
+        int planned = "MULTI_HOP".equals(c.expected().expectedQueryType())
+                ? o.retrievals().stream().mapToInt(AgentAnswerEvaluationPort.RetrievalObservation::plannedQueryCount).sum()
+                : o.retrievals().getFirst().plannedQueryCount();
+        return Math.min(1.0, planned / (double) c.expected().expectedSubQuestions().size());
     }
 
     /** 实际检索类型（未检索为 NONE）与人工标注预期是否一致。 */
     private static boolean matchesExpectedType(String expectedType, AgentEvaluationObservation o) {
         try {
             RetrievalQueryType expected = RetrievalQueryType.valueOf(expectedType);
-            RetrievalQueryType actual = o.retrieval() == null
-                    ? RetrievalQueryType.NONE : o.retrieval().queryType();
+            RetrievalQueryType actual = o.retrievals().isEmpty()
+                    ? RetrievalQueryType.NONE : o.retrievals().getFirst().queryType();
             return expected == actual;
         } catch (IllegalArgumentException e) {
             return false;
@@ -312,7 +321,7 @@ public final class AgentEvaluationRunner {
 
     /** 预期无需检索的题是否调用了知识工具（检索或浏览知识库）。 */
     private static boolean calledKnowledgeTool(AgentEvaluationObservation o) {
-        return o.retrieval() != null || o.toolCalls().stream().anyMatch(TOOL_WHITELIST::contains);
+        return !o.retrievals().isEmpty() || o.toolCalls().stream().anyMatch(TOOL_WHITELIST::contains);
     }
 
     /**
@@ -321,12 +330,13 @@ public final class AgentEvaluationRunner {
      */
     private static boolean queryCountCompliant(AgentEvaluationObservation o) {
         if ("AGENT_RETRIEVAL_PLAN_INVALID".equals(o.failureCode())
-                || searchDocsCalls(o) > MAX_RETRIEVAL_ROUNDS) {
+                || searchDocsCalls(o) > MAX_RETRIEVAL_ROUNDS
+                || o.retrievals().size() > MAX_RETRIEVAL_ROUNDS) {
             return false;
         }
-        AgentAnswerEvaluationPort.RetrievalObservation r = o.retrieval();
-        return r.plannedQueryCount() >= 1 && r.plannedQueryCount() <= MAX_SUB_QUERIES
-                && r.executedQueryCount() <= r.plannedQueryCount();
+        return !o.retrievals().isEmpty() && o.retrievals().stream().allMatch(r ->
+                r.plannedQueryCount() >= 1 && r.plannedQueryCount() <= MAX_SUB_QUERIES
+                        && r.executedQueryCount() <= r.plannedQueryCount());
     }
 
     /** 实际参数是否来自允许的服务端策略：策略 id 必须等于声明的查询类型名。 */
@@ -345,14 +355,15 @@ public final class AgentEvaluationRunner {
     private AgentEvaluationReport.AnswerMetrics answerMetricsOf(EvaluationCase c,
                                                                 AgentEvaluationObservation o) {
         if (o.error() != null || !o.judgeSucceeded()) {
-            return new AgentEvaluationReport.AnswerMetrics(0, 0, 0, 0);
+            return new AgentEvaluationReport.AnswerMetrics(0, 0, null, 0);
         }
         boolean expectedRefusal = !c.expected().shouldAnswer();
         boolean refused = o.judgeDecision() == RagAnswerJudgePort.Decision.REFUSED;
         return new AgentEvaluationReport.AnswerMetrics(
                 expectedRefusal == refused ? 1.0 : 0.0,
                 o.judgeRequiredFacts().isEmpty() ? 0.0 : matchedRatio(o.judgeRequiredFacts()),
-                o.judgeForbiddenFacts().isEmpty() ? 0.0 : 1.0 - matchedRatio(o.judgeForbiddenFacts()),
+                c.expected().forbiddenFacts().isEmpty() || o.judgeForbiddenFacts().isEmpty()
+                        ? null : 1.0 - matchedRatio(o.judgeForbiddenFacts()),
                 o.judgeHasUnsupportedClaims() ? 0.0 : 1.0);
     }
 
@@ -369,7 +380,8 @@ public final class AgentEvaluationRunner {
                         && hasRetrievedCitation(o) ? 1.0 : 0.0,
                 c.expected().groundingMode() == AnswerGroundingMode.KNOWLEDGE_BASED
                         && (o.citedFilenames().isEmpty() || citationsOnlyFromRetrieved(o)) ? 1.0 : 0.0,
-                o.refused() == !c.expected().shouldAnswer() ? 1.0 : 0.0,
+                o.judgeSucceeded() && (o.judgeDecision() == RagAnswerJudgePort.Decision.REFUSED)
+                        == !c.expected().shouldAnswer() ? 1.0 : 0.0,
                 o.stepCount(),
                 o.durationMs());
     }

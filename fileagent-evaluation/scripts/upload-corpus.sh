@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 用法：upload-corpus.sh [数据集版本]，默认 v1；adaptive-v1 上传自适应评测语料。
+# 用法：upload-corpus.sh [数据集版本]，默认 v1；adaptive-v1/v2 使用独立知识库。
 dataset_version="${1:-v1}"
 case "$dataset_version" in
   v1)
@@ -11,6 +11,10 @@ case "$dataset_version" in
   adaptive-v1)
     corpus_dir="src/main/resources/evaluation/adaptive-v1/corpus"
     rag_name="fileagent-eval-adaptive-v1"
+    ;;
+  adaptive-v2)
+    corpus_dir="src/main/resources/evaluation/adaptive-v2/corpus"
+    rag_name="fileagent-eval-adaptive-v2"
     ;;
   *)
     printf '未知数据集版本: %s\n' "$dataset_version" >&2

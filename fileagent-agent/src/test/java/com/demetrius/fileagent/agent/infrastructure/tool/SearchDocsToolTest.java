@@ -157,6 +157,7 @@ class SearchDocsToolTest {
         assertThat(String.valueOf(legacyTool.getParameters())).doesNotContain("queryType");
         assertThat(String.valueOf(structuredTool.getParameters()))
                 .contains("queryType")
+                .contains("MULTI_QUERY")
                 .contains("queries");
     }
 
@@ -202,7 +203,7 @@ class SearchDocsToolTest {
         AgentRun run = startedRun();
 
         assertThatThrownBy(() -> tool.executeStructured(
-                context(run, mock(KnowledgeSearchPort.class)), RetrievalQueryType.MULTI_HOP,
+                context(run, mock(KnowledgeSearchPort.class)), RetrievalQueryType.MULTI_QUERY,
                 List.of("年假制度")))
                 .isInstanceOf(BizException.class);
     }
@@ -238,6 +239,26 @@ class SearchDocsToolTest {
     }
 
     @Test
+    void structuredExecuteShouldAllowSequentialMultiHopButRequireTwoParallelQueries() {
+        KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
+        when(port.searchDetailed(any(KnowledgeSearchPort.SearchQuery.class)))
+                .thenReturn(searchResult(List.of(hit("m-1", 0.9))));
+        AgentRun run = startedRun();
+        SearchDocsTool tool = adaptiveTool();
+
+        tool.executeStructured(context(run, port), RetrievalQueryType.MULTI_HOP,
+                List.of("找到所依据的制度"));
+
+        assertThat(run.retrievalExecutions()).singleElement().satisfies(execution -> {
+            assertThat(execution.queryType()).isEqualTo(RetrievalQueryType.MULTI_HOP);
+            assertThat(execution.plannedQueryCount()).isEqualTo(1);
+        });
+        assertThatThrownBy(() -> tool.executeStructured(context(run, port),
+                RetrievalQueryType.MULTI_QUERY, List.of("年假")))
+                .isInstanceOf(BizException.class);
+    }
+
+    @Test
     void structuredExecuteShouldDedupeByChunkIdAndKeepSourceQueries() {
         KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
         when(port.searchDetailed(any(KnowledgeSearchPort.SearchQuery.class)))
@@ -247,7 +268,7 @@ class SearchDocsToolTest {
         SearchDocsTool tool = adaptiveTool();
 
         ToolResultBlock block = tool.executeStructured(context(run, port),
-                RetrievalQueryType.MULTI_HOP, List.of("年假制度", "病假规定"));
+                RetrievalQueryType.MULTI_QUERY, List.of("年假制度", "病假规定"));
 
         String rendered = text(block);
         assertThat(rendered).contains("chunkId=m-2");

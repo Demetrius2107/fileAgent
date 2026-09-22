@@ -89,6 +89,8 @@ Agent 评测默认使用 `agent-v1`，输出到 `evaluation-results/agent-v1/<UT
 
 Agent 报告中的 `agent.runSuccessRate` 衡量 Run 是否以 `SUCCEEDED` 结束；非成功 Run 不调用 Judge，但仍保留回答、检索文件、引用文件、终态和失败码。`agent.citationCoverageRate` 衡量成功的知识库题是否至少引用一个本次检索命中的文件，`agent.citationValidityRate` 衡量已经写出的引用是否全部来自本次检索结果。通用知识题、拒答题和失败 Run 的引用状态为 `NOT_APPLICABLE`。
 
+`answer.forbiddenFactSafety` 只统计标注了禁答事实并成功完成 Judge 的题；没有这类题时报告显示“不适用”（JSON 为 `null`），如门禁配置了该指标则因缺少结果而失败。`agent.refusalDecisionAccuracy` 使用 Judge 的语义判断，拒答文字即使非空也算拒答；Judge 失败的题不参与此指标分母。
+
 ## 自适应检索评测（adaptive-v1）
 
 `adaptive-v1` 评测 Phase 2A 自适应检索：Agent 通过 `search_docs` 的结构化入参声明查询类型，服务端按类型映射固定策略档位。开启部署实例的 `FILEAGENT_AGENT_ADAPTIVE_RETRIEVAL_ENABLED=true` 后运行：
@@ -108,6 +110,8 @@ FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v1 ./fileagent-evaluation/scripts/
 - `adaptive.subQuestionCoverage`：标注必要子问题被计划覆盖的比例（现阶段为数量代理，语义覆盖需人工核验）。
 
 未执行结构化检索的 Run 不参与自适应指标；Markdown 报告会展示自适应指标与分母口径。`gate.json` 当前只强制 `adaptive.queryCountComplianceRate=1.0`、`adaptive.strategyComplianceRate=1.0`、`agent.toolWhitelistPassRate=1.0`、`agent.budgetComplianceRate=1.0`；`queryTypeAccuracy`、`subQuestionCoverage` 与多跳/比较收益阈值须在首份真实 baseline 经人工确认后填入，在此之前只展示、不断言。
+
+校准后的 `adaptive-v2` 独立保留 13 题与同内容语料，不覆盖 v1 的题库和历史报告。先上传 `./fileagent-evaluation/scripts/upload-corpus.sh adaptive-v2`，部署新代码后运行 `FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v2 ./fileagent-evaluation/scripts/run-agent-evaluation.sh`；不要用 v1 报告作为 v2 baseline。v2 区分并列独立事实的 `MULTI_QUERY`（首轮至少 2 条）和真正依赖中间结果的 `MULTI_HOP`（允许首轮 1 条、最多两轮）；历史年份对比归 `COMPARISON`，不伪装成“当前最新”的 `TIME_SENSITIVE` 样本。`observations.jsonl` 的 `retrievals` 列出全部成功检索轮次，`retrieval` 为兼容字段，仍指最后一轮。类型准确率看首轮，计划/策略合规检查每轮；子问题覆盖率仍为数量代理，多跳累计轮次，其他只看首轮。
 
 普通 RAG 的 `v1` 每次运行会真实生成 30 个回答，并逐题调用 `deepseek-v4-pro` 评判，因此会产生 30 次回答调用和 30 次 Judge 调用。Judge 复用部署已有的 `FILEAGENT_CHAT_API_KEY` 与 DeepSeek 端点，不需要新增 API Key。评测接口是同步批量执行，反向代理的请求超时时间应覆盖整批运行耗时。
 

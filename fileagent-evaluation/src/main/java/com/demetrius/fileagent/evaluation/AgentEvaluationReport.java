@@ -52,7 +52,7 @@ public record AgentEvaluationReport(
     public record AnswerMetrics(
             double answerDecisionAccuracy,
             double requiredFactCoverage,
-            double forbiddenFactSafety,
+            Double forbiddenFactSafety,
             double unsupportedClaimSafety) {
     }
 

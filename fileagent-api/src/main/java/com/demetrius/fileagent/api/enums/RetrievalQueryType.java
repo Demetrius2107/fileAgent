@@ -10,6 +10,7 @@ package com.demetrius.fileagent.api.enums;
 public enum RetrievalQueryType {
     NONE,
     SINGLE_HOP,
+    MULTI_QUERY,
     MULTI_HOP,
     COMPARISON,
     AGGREGATION,

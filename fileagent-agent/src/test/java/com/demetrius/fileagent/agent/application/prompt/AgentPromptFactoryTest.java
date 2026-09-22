@@ -33,6 +33,10 @@ class AgentPromptFactoryTest {
         assertThat(adaptive).contains("按问题实质选择");
         assertThat(adaptive).contains("SINGLE_HOP");
         assertThat(adaptive).contains("MULTI_HOP");
+        assertThat(adaptive).contains("MULTI_QUERY");
+        assertThat(adaptive).contains("当前或最新");
+        assertThat(adaptive).contains("每个文件单独标记");
+        assertThat(adaptive).doesNotContain("拿不准是 MULTI_HOP 还是 SINGLE_HOP 时选 MULTI_HOP");
         assertThat(adaptive).contains("COMPARISON");
         assertThat(adaptive).contains("AGGREGATION");
         assertThat(adaptive).contains("TIME_SENSITIVE");
@@ -42,6 +46,7 @@ class AgentPromptFactoryTest {
         assertThat(adaptive).contains("1～200 个字符");
         assertThat(adaptive).contains("零命中");
         assertThat(adaptive).contains("最多 2 轮 search_docs");
+        assertThat(adaptive).contains("先检索中间结果，再用它检索下一步");
         assertThat(adaptive).contains("会被直接拒绝");
     }
 

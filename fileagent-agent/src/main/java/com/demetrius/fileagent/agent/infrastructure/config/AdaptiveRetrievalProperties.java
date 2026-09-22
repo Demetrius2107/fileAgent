@@ -28,6 +28,7 @@ public class AdaptiveRetrievalProperties {
     private Duration runTimeout = Duration.ofSeconds(90);
 
     private Tier singleHop = new Tier(20, 20, 100, 1.0, 1.0, 5, true, true);
+    private Tier multiQuery = new Tier(20, 20, 100, 1.0, 1.0, 8, true, false);
     private Tier multiHop = new Tier(20, 20, 100, 1.0, 1.0, 8, true, false);
     private Tier comparison = new Tier(20, 20, 100, 1.0, 1.0, 8, true, false);
     private Tier aggregation = new Tier(50, 20, 100, 1.3, 0.7, 12, false, false);
@@ -36,6 +37,7 @@ public class AdaptiveRetrievalProperties {
     /** 启动期校验：档位参数合法且 runTimeout 覆盖最大子查询数预算。 */
     public void validate(Duration baseToolTimeout) {
         validateTier("singleHop", singleHop);
+        validateTier("multiQuery", multiQuery);
         validateTier("multiHop", multiHop);
         validateTier("comparison", comparison);
         validateTier("aggregation", aggregation);
@@ -52,6 +54,7 @@ public class AdaptiveRetrievalProperties {
     public Map<RetrievalQueryType, AdaptiveRetrievalPolicy.Tier> toTiers() {
         Map<RetrievalQueryType, AdaptiveRetrievalPolicy.Tier> tiers = new EnumMap<>(RetrievalQueryType.class);
         tiers.put(RetrievalQueryType.SINGLE_HOP, toPolicyTier(singleHop));
+        tiers.put(RetrievalQueryType.MULTI_QUERY, toPolicyTier(multiQuery));
         tiers.put(RetrievalQueryType.MULTI_HOP, toPolicyTier(multiHop));
         tiers.put(RetrievalQueryType.COMPARISON, toPolicyTier(comparison));
         tiers.put(RetrievalQueryType.AGGREGATION, toPolicyTier(aggregation));

@@ -241,12 +241,12 @@ public class SearchDocsTool extends ToolBase {
         }
     }
 
-    /** 规格合并：COMPARISON 先保留每路 top-1；按归一化分排序后按 chunkId 去重（保留原始分最高版本并合并来源）。 */
+    /** 并列查询和比较先保留每路 top-1；按归一化分排序后按 chunkId 去重（保留原始分最高版本并合并来源）。 */
     private List<ScoredEntry> merge(RetrievalQueryType queryType, List<ScoredEntry> collected) {
         List<ScoredEntry> pool = new ArrayList<>(collected);
         pool.sort(MERGE_ORDER);
         Map<String, ScoredEntry> merged = new LinkedHashMap<>();
-        if (queryType == RetrievalQueryType.COMPARISON) {
+        if (queryType == RetrievalQueryType.COMPARISON || queryType == RetrievalQueryType.MULTI_QUERY) {
             collected.stream()
                     .filter(entry -> entry.rankInQuery() == 0)
                     .forEach(entry -> merged.putIfAbsent(entry.hit().chunkId(), entry));
@@ -360,7 +360,7 @@ public class SearchDocsTool extends ToolBase {
                 "properties", Map.of(
                         "queryType", Map.of(
                                 "type", "string",
-                                "enum", List.of("SINGLE_HOP", "MULTI_HOP", "COMPARISON", "AGGREGATION", "TIME_SENSITIVE"),
+                                "enum", List.of("SINGLE_HOP", "MULTI_QUERY", "MULTI_HOP", "COMPARISON", "AGGREGATION", "TIME_SENSITIVE"),
                                 "description", "检索类型；NONE 仅表示无需检索，不允许作为本工具参数"),
                         "queries", Map.of(
                                 "type", "array",

@@ -52,7 +52,8 @@ public interface AgentAnswerEvaluationPort {
      * @param durationMs       运行耗时
      * @param terminalStatus   终态
      * @param failureCode      失败码（失败/超时/取消时非空）
-     * @param retrieval        自适应检索执行观察（非自适应运行为空）
+     * @param retrieval        最后一轮自适应检索执行观察（非自适应运行为空）
+     * @param retrievals       全部有效检索轮次（按执行顺序）
      */
     record Result(
             String answer,
@@ -65,11 +66,23 @@ public interface AgentAnswerEvaluationPort {
             long durationMs,
             AgentRunStatus terminalStatus,
             String failureCode,
-            RetrievalObservation retrieval) {
+            RetrievalObservation retrieval,
+            List<RetrievalObservation> retrievals) {
         public Result {
             retrieved = retrieved == null ? List.of() : List.copyOf(retrieved);
             citedFilenames = citedFilenames == null ? List.of() : List.copyOf(citedFilenames);
             toolCalls = toolCalls == null ? List.of() : List.copyOf(toolCalls);
+            retrievals = retrievals == null || retrievals.isEmpty()
+                    ? (retrieval == null ? List.of() : List.of(retrieval)) : List.copyOf(retrievals);
+            retrieval = retrievals.isEmpty() ? null : retrievals.getLast();
+        }
+
+        public Result(String answer, boolean refused, List<KnowledgeSearchPort.KnowledgeHit> retrieved,
+                      List<String> citedFilenames, int stepCount, int modelCallCount,
+                      List<String> toolCalls, long durationMs, AgentRunStatus terminalStatus,
+                      String failureCode, RetrievalObservation retrieval) {
+            this(answer, refused, retrieved, citedFilenames, stepCount, modelCallCount, toolCalls,
+                    durationMs, terminalStatus, failureCode, retrieval, null);
         }
     }
 

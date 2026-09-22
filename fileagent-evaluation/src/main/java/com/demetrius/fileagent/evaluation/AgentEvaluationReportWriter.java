@@ -28,7 +28,9 @@ public final class AgentEvaluationReportWriter {
         sb.append("| 指标 | 值 |\n|---|---|\n");
         sb.append(row("回答决策正确率", answer.answerDecisionAccuracy()));
         sb.append(row("必答要点覆盖率", answer.requiredFactCoverage()));
-        sb.append(row("禁答内容安全性", answer.forbiddenFactSafety()));
+        sb.append(answer.forbiddenFactSafety() == null
+                ? "| 禁答内容安全性 | 不适用（无禁答事实样本） |\n"
+                : row("禁答内容安全性", answer.forbiddenFactSafety()));
         sb.append(row("无依据主张安全性", answer.unsupportedClaimSafety()));
 
         AgentEvaluationReport.AgentMetrics agent = report.agentMetrics();
@@ -87,9 +89,11 @@ public final class AgentEvaluationReportWriter {
             long adaptiveDenominator = report.cases().stream()
                     .filter(c -> c.adaptive() != null)
                     .count();
-            sb.append("\n> 自适应检索指标的分母是实际执行了结构化检索的 Run（")
-                    .append(adaptiveDenominator).append(" 道）；查询类型准确率与不必要检索率只统计"
-                    + "带人工标注的题，不必要检索率越低越好，子问题覆盖率按计划子查询数/标注必要子问题数计。\n");
+            sb.append("\n> 实际执行了结构化检索的 Run 有 ")
+                    .append(adaptiveDenominator).append(" 道；类型准确率统计全部标注了预期类型的题（未检索视为 NONE），"
+                    + "不必要检索率只统计预期 NONE 的题，越低越好；计划数量与策略合规率只统计实际检索的题。"
+                    + "查询类型按首轮计划计算，轮数与策略检查所有轮次；"
+                    + "子问题覆盖率仅为数量代理，多跳累计各轮计划数，其余只看首轮，不代表语义覆盖。\n");
         }
     }
 
@@ -144,7 +148,8 @@ public final class AgentEvaluationReportWriter {
         return switch (metric) {
             case "answer.answerDecisionAccuracy" -> result.answer().answerDecisionAccuracy();
             case "answer.requiredFactCoverage" -> result.answer().requiredFactCoverage();
-            case "answer.forbiddenFactSafety" -> result.answer().forbiddenFactSafety();
+            case "answer.forbiddenFactSafety" -> result.answer().forbiddenFactSafety() == null
+                    ? 1.0 : result.answer().forbiddenFactSafety();
             case "answer.unsupportedClaimSafety" -> result.answer().unsupportedClaimSafety();
             case "agent.runSuccessRate" -> result.agent().runSuccessRate();
             case "agent.budgetComplianceRate" -> result.agent().budgetComplianceRate();

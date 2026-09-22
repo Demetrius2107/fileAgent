@@ -21,13 +21,13 @@ class AgentEvaluationReportWriterTest {
                         "case-bad", "KNOWLEDGE_BASED", "员工年假是多少？", "5 天",
                         List.of("employee-handbook.md"), List.of(), AgentRunStatus.SUCCEEDED, null,
                         AgentEvaluationReport.CitationStatus.MISSING,
-                        new AgentEvaluationReport.AnswerMetrics(1, 1, 1, 1),
+                        new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
                         new AgentEvaluationReport.AgentMetrics(1, 1, 1, 0, 1, 1, 1, 10), null),
                 new AgentEvaluationReport.CaseResult(
                         "case-good", "KNOWLEDGE_BASED", "如何申请年假？", "提交申请 [来源：employee-handbook.md]",
                         List.of("employee-handbook.md"), List.of("employee-handbook.md"), AgentRunStatus.SUCCEEDED,
                         null, AgentEvaluationReport.CitationStatus.PASSED,
-                        new AgentEvaluationReport.AnswerMetrics(1, 1, 1, 1),
+                        new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
                         new AgentEvaluationReport.AgentMetrics(1, 1, 1, 1, 1, 1, 1, 10), null));
 
         String markdown = AgentEvaluationReportWriter.toMarkdown(report.withGate(
@@ -46,7 +46,7 @@ class AgentEvaluationReportWriterTest {
                 "case-good", "GENERAL_KNOWLEDGE", "HTTP 404 是什么意思？", "资源未找到",
                 List.of(), List.of(), AgentRunStatus.SUCCEEDED, null,
                 AgentEvaluationReport.CitationStatus.NOT_APPLICABLE,
-                new AgentEvaluationReport.AnswerMetrics(1, 1, 1, 1),
+                new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
                 new AgentEvaluationReport.AgentMetrics(1, 1, 1, 0, 1, 1, 1, 10), null));
 
         String markdown = AgentEvaluationReportWriter.toMarkdown(report.withGate(
@@ -65,14 +65,14 @@ class AgentEvaluationReportWriterTest {
                         "case-bad", "ADAPTIVE", "对比两份合同的赔偿条款", "回答",
                         List.of("a.md"), List.of("a.md"), AgentRunStatus.SUCCEEDED, null,
                         AgentEvaluationReport.CitationStatus.NOT_APPLICABLE,
-                        new AgentEvaluationReport.AnswerMetrics(1, 1, 1, 1),
+                        new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
                         new AgentEvaluationReport.AgentMetrics(1, 1, 1, 1, 1, 1, 1, 10),
                         new AgentEvaluationReport.AdaptiveMetrics(1, 0.0, 0.5, 1.0, 1.0), null),
                 new AgentEvaluationReport.CaseResult(
                         "case-good", "ADAPTIVE", "年假是多少？", "回答",
                         List.of("a.md"), List.of("a.md"), AgentRunStatus.SUCCEEDED, null,
                         AgentEvaluationReport.CitationStatus.NOT_APPLICABLE,
-                        new AgentEvaluationReport.AnswerMetrics(1, 1, 1, 1),
+                        new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
                         new AgentEvaluationReport.AgentMetrics(1, 1, 1, 1, 1, 1, 1, 10),
                         null, null));
         report = new AgentEvaluationReport(report.schemaVersion(), report.datasetVersion(),
@@ -95,7 +95,7 @@ class AgentEvaluationReportWriterTest {
 
     private AgentEvaluationReport report(AgentEvaluationReport.CaseResult... cases) {
         return new AgentEvaluationReport("1.0", "agent-v1", "now", cases.length, cases.length, 0,
-                new AgentEvaluationReport.AnswerMetrics(1, 1, 1, 1),
+                new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
                 new AgentEvaluationReport.AgentMetrics(1, 1, 1, 0.5, 1, 1, 1, 10),
                 List.of(cases), null);
     }

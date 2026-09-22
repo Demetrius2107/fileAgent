@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * {@link KnowledgeSearchPort} 检索契约扩展（Phase 2A）测试：SearchQuery 携带策略参数、
- * searchDetailed 包装 SearchResult、RetrievalQueryType 六类取值。
+ * searchDetailed 包装 SearchResult、RetrievalQueryType 七类取值。
  *
  * @author raosaijie
  * @since 0.1.0
@@ -78,10 +78,11 @@ class KnowledgeSearchPortTest {
     }
 
     @Test
-    void retrievalQueryTypeShouldCoverSixTypes() {
+    void retrievalQueryTypeShouldCoverSevenTypes() {
         assertThat(RetrievalQueryType.values()).containsExactly(
                 RetrievalQueryType.NONE,
                 RetrievalQueryType.SINGLE_HOP,
+                RetrievalQueryType.MULTI_QUERY,
                 RetrievalQueryType.MULTI_HOP,
                 RetrievalQueryType.COMPARISON,
                 RetrievalQueryType.AGGREGATION,

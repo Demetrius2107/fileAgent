@@ -73,4 +73,10 @@ class AgentScopeRuntimeAdapterTest {
         });
         assertThat(run.isTerminal()).isTrue();
     }
+
+    @Test
+    void shouldExtractSeparateFilenamesFromCombinedCitationWithoutDroppingUnknownSources() {
+        assertThat(adapter.extractSources("[来源：a.md；b.md] [来源：a.md] [来源：unknown.md]"))
+                .containsExactly("a.md", "b.md", "unknown.md");
+    }
 }

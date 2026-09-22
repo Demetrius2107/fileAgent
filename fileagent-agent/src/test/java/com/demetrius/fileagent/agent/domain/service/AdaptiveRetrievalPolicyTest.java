@@ -38,6 +38,11 @@ class AdaptiveRetrievalPolicyTest {
         assertThat(multiHop.rerankEnabled()).isTrue();
         assertThat(multiHop.parentExpansionEnabled()).isFalse();
 
+        SearchOptions multiQuery = policy.optionsFor(RetrievalQueryType.MULTI_QUERY);
+        assertThat(multiQuery.strategyId()).isEqualTo("MULTI_QUERY");
+        assertThat(multiQuery.finalTopK()).isEqualTo(8);
+        assertThat(multiQuery.parentExpansionEnabled()).isFalse();
+
         SearchOptions comparison = policy.optionsFor(RetrievalQueryType.COMPARISON);
         assertThat(comparison.strategyId()).isEqualTo("COMPARISON");
         assertThat(comparison.finalTopK()).isEqualTo(8);
@@ -78,8 +83,10 @@ class AdaptiveRetrievalPolicyTest {
 
         assertThat(policy.minSubQueries(RetrievalQueryType.SINGLE_HOP)).isEqualTo(1);
         assertThat(policy.maxSubQueries(RetrievalQueryType.SINGLE_HOP)).isEqualTo(1);
-        assertThat(policy.minSubQueries(RetrievalQueryType.MULTI_HOP)).isEqualTo(2);
+        assertThat(policy.minSubQueries(RetrievalQueryType.MULTI_HOP)).isEqualTo(1);
         assertThat(policy.maxSubQueries(RetrievalQueryType.MULTI_HOP)).isEqualTo(3);
+        assertThat(policy.minSubQueries(RetrievalQueryType.MULTI_QUERY)).isEqualTo(2);
+        assertThat(policy.maxSubQueries(RetrievalQueryType.MULTI_QUERY)).isEqualTo(3);
         assertThat(policy.minSubQueries(RetrievalQueryType.COMPARISON)).isEqualTo(2);
         assertThat(policy.maxSubQueries(RetrievalQueryType.COMPARISON)).isEqualTo(3);
         assertThat(policy.minSubQueries(RetrievalQueryType.AGGREGATION)).isEqualTo(1);
@@ -94,6 +101,7 @@ class AdaptiveRetrievalPolicyTest {
 
         assertThat(policy.finalHitCap(RetrievalQueryType.SINGLE_HOP)).isEqualTo(5);
         assertThat(policy.finalHitCap(RetrievalQueryType.MULTI_HOP)).isEqualTo(8);
+        assertThat(policy.finalHitCap(RetrievalQueryType.MULTI_QUERY)).isEqualTo(8);
         assertThat(policy.finalHitCap(RetrievalQueryType.COMPARISON)).isEqualTo(8);
         assertThat(policy.finalHitCap(RetrievalQueryType.AGGREGATION)).isEqualTo(12);
         assertThat(policy.finalHitCap(RetrievalQueryType.TIME_SENSITIVE)).isEqualTo(8);

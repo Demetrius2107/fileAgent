@@ -46,11 +46,11 @@ public class AdaptiveRetrievalPolicy {
                 tier.parentExpansionEnabled());
     }
 
-    /** 各类型允许的最小子查询数：MULTI_HOP/COMPARISON 需要至少两路证据。 */
+    /** 并列问题与比较至少需要两路；多跳允许逐轮查找依赖证据。 */
     public int minSubQueries(RetrievalQueryType queryType) {
         return switch (queryType) {
-            case MULTI_HOP, COMPARISON -> 2;
-            case SINGLE_HOP, AGGREGATION, TIME_SENSITIVE -> 1;
+            case MULTI_QUERY, COMPARISON -> 2;
+            case SINGLE_HOP, MULTI_HOP, AGGREGATION, TIME_SENSITIVE -> 1;
             case NONE -> throw new BizException("NONE 不允许作为 search_docs 检索类型");
         };
     }
@@ -59,7 +59,7 @@ public class AdaptiveRetrievalPolicy {
     public int maxSubQueries(RetrievalQueryType queryType) {
         return switch (queryType) {
             case SINGLE_HOP -> 1;
-            case MULTI_HOP, COMPARISON, AGGREGATION -> 3;
+            case MULTI_QUERY, MULTI_HOP, COMPARISON, AGGREGATION -> 3;
             case TIME_SENSITIVE -> 2;
             case NONE -> throw new BizException("NONE 不允许作为 search_docs 检索类型");
         };

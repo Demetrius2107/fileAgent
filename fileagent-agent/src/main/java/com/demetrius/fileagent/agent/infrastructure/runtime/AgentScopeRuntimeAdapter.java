@@ -203,6 +203,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                     .blockLast();
 
             String finalAnswer = answer.toString();
+            List<AgentAnswerEvaluationPort.RetrievalObservation> retrievals = mapRetrievalObservations(run);
             return new AgentAnswerEvaluationPort.Result(
                     finalAnswer,
                     finalAnswer.isBlank(),
@@ -214,30 +215,29 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                     durationMs(startedAt),
                     run.status(),
                     run.failureCode(),
-                    mapRetrievalObservation(run));
+                    retrievals.isEmpty() ? null : retrievals.getLast(), retrievals);
         } catch (Exception e) {
             log.warn("Agent 评测运行失败 runId={}: {}", command.runId(), e.getMessage());
             if (run.isRunning()) {
                 run.fail(CODE_RUNTIME_UNAVAILABLE, Instant.now());
             }
+            List<AgentAnswerEvaluationPort.RetrievalObservation> retrievals = mapRetrievalObservations(run);
             return new AgentAnswerEvaluationPort.Result(
                     "", true, List.of(), List.of(), run.stepCount(), run.modelCallCount(),
                     List.of(), durationMs(startedAt), run.status(), run.failureCode(),
-                    mapRetrievalObservation(run));
+                    retrievals.isEmpty() ? null : retrievals.getLast(), retrievals);
         }
     }
 
     /** 运行态检索溯源映射为评测观察；未调用 search_docs 时为空。 */
-    private AgentAnswerEvaluationPort.RetrievalObservation mapRetrievalObservation(AgentRun run) {
-        List<AgentRun.RetrievalExecution> executions = run.retrievalExecutions();
-        if (executions.isEmpty()) {
-            return null;
-        }
-        AgentRun.RetrievalExecution last = executions.get(executions.size() - 1);
-        return new AgentAnswerEvaluationPort.RetrievalObservation(
-                last.queryType(), last.strategyId(), last.plannedQueryCount(), last.executedQueries(),
-                last.perQueryHitCount(), last.candidateChunkIds(), last.finalChunkIds(),
-                last.rerankRequested(), last.rerankApplied(), last.fallbackCode());
+    private List<AgentAnswerEvaluationPort.RetrievalObservation> mapRetrievalObservations(AgentRun run) {
+        return run.retrievalExecutions().stream().map(execution ->
+                new AgentAnswerEvaluationPort.RetrievalObservation(
+                        execution.queryType(), execution.strategyId(), execution.plannedQueryCount(),
+                        execution.executedQueries(), execution.perQueryHitCount(),
+                        execution.candidateChunkIds(), execution.finalChunkIds(),
+                        execution.rerankRequested(), execution.rerankApplied(), execution.fallbackCode()))
+                .toList();
     }
 
     private record AgentAssembly(ReActAgent agent, RuntimeContext context, Msg userMessage,
@@ -382,16 +382,18 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         return sb.toString();
     }
 
-    private List<String> extractSources(String text) {
+    List<String> extractSources(String text) {
         if (text == null || text.isBlank()) {
             return List.of();
         }
         LinkedHashSet<String> files = new LinkedHashSet<>();
         Matcher matcher = CITATION.matcher(text);
         while (matcher.find()) {
-            String name = matcher.group(1).trim();
-            if (!name.isBlank()) {
-                files.add(name);
+            for (String source : matcher.group(1).split("[；;]")) {
+                String name = source.trim();
+                if (!name.isBlank()) {
+                    files.add(name);
+                }
             }
         }
         return List.copyOf(files);

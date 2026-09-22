@@ -38,4 +38,31 @@ class EvaluationDatasetContractTest {
                 "agent.toolWhitelistPassRate", "adaptive.queryCountComplianceRate", "adaptive.strategyComplianceRate");
         assertThat(gate.minimumScores()).doesNotContainKeys("adaptive.queryTypeAccuracy", "adaptive.subQuestionCoverage");
     }
+
+    @Test
+    void shouldKeepCalibratedAdaptiveDatasetSeparateFromVersionOne() {
+        EvaluationFiles files = new EvaluationFiles(new ObjectMapper());
+        var cases = files.loadCases(Path.of("src/main/resources/evaluation/adaptive-v2/cases"));
+        var gate = files.loadGateConfig(Path.of("src/main/resources/evaluation/adaptive-v2/gate.json"));
+
+        assertThat(cases).hasSize(13);
+        assertThat(cases).extracting(EvaluationCase::category)
+                .contains("MULTI_QUERY", "MULTI_HOP", "HISTORICAL_COMPARISON", "PARTIAL_ZERO");
+        assertThat(cases).filteredOn(c -> c.id().equals("adaptive-multi-001"))
+                .singleElement().satisfies(c -> assertThat(c.expected().expectedQueryType()).isEqualTo("MULTI_QUERY"));
+        assertThat(cases).filteredOn(c -> c.id().equals("adaptive-hop-001"))
+                .singleElement().satisfies(c -> {
+                    assertThat(c.expected().expectedQueryType()).isEqualTo("MULTI_HOP");
+                    assertThat(c.expected().expectedSubQuestions()).hasSize(2);
+                });
+        assertThat(cases).filteredOn(c -> c.id().equals("adaptive-time-001"))
+                .singleElement().satisfies(c -> assertThat(c.expected().expectedQueryType()).isEqualTo("COMPARISON"));
+        assertThat(cases).filteredOn(c -> c.id().equals("adaptive-partial-zero-001"))
+                .singleElement().satisfies(c -> assertThat(c.expected().expectedQueryType()).isEqualTo("MULTI_QUERY"));
+        assertThat(cases).extracting(c -> c.filters().ragName())
+                .containsOnly("fileagent-eval-adaptive-v2");
+        assertThat(gate.minimumScores()).containsKeys("agent.runSuccessRate", "agent.budgetComplianceRate",
+                "agent.toolWhitelistPassRate", "adaptive.queryCountComplianceRate", "adaptive.strategyComplianceRate");
+        assertThat(gate.minimumScores()).doesNotContainKeys("adaptive.queryTypeAccuracy", "adaptive.subQuestionCoverage");
+    }
 }

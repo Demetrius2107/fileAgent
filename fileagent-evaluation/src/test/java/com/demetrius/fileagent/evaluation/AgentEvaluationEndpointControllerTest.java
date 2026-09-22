@@ -49,7 +49,7 @@ class AgentEvaluationEndpointControllerTest {
     @Test
     void shouldRunAgentEvaluationWhenTokenIsValid() throws Exception {
         AgentEvaluationReport report = new AgentEvaluationReport("1.0", "agent-v1", "2026-09-17T00:00:00Z",
-                8, 8, 0, new AgentEvaluationReport.AnswerMetrics(1, 1, 1, 1),
+                8, 8, 0, new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
                 new AgentEvaluationReport.AgentMetrics(1, 1, 1, 1, 1, 1, 1, 1),
                 List.of(), new AgentEvaluationReport.GateResult(true, List.of()));
         when(agentEvaluationEndpointService.run(any())).thenReturn(
@@ -65,5 +65,23 @@ class AgentEvaluationEndpointControllerTest {
                 .andExpect(jsonPath("$.data.report.gate.passed").value(true));
 
         verify(agentEvaluationEndpointService).run(any());
+    }
+
+    @Test
+    void shouldSerializeMissingForbiddenFactSafetyAsNull() throws Exception {
+        AgentEvaluationReport report = new AgentEvaluationReport("1.0", "agent-v1", "now", 1, 1, 0,
+                new AgentEvaluationReport.AnswerMetrics(1, 1, null, 1),
+                new AgentEvaluationReport.AgentMetrics(1, 1, 1, 1, 1, 1, 1, 1),
+                List.of(), new AgentEvaluationReport.GateResult(true, List.of()));
+        when(agentEvaluationEndpointService.run(any())).thenReturn(
+                new AgentEvaluationRunResponse(report, List.of(), "# Agent 评测报告"));
+
+        mockMvc.perform(post("/internal/evaluation/agent/run")
+                        .header(AgentEvaluationEndpointController.TOKEN_HEADER, "evaluation-secret")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"datasetVersion\":\"agent-v1\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.report.answerMetrics.forbiddenFactSafety")
+                        .value(org.hamcrest.Matchers.nullValue()));
     }
 }

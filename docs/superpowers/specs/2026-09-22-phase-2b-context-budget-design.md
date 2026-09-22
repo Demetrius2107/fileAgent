@@ -85,7 +85,8 @@ AgentRunAppServiceImpl
 | 单次目录项数 | 50 | 支持从指定 chunkIndex 继续读取 |
 | 模型输出 | 2048 Token | 每次模型调用的输出上限 |
 | Run Token | 60000 Token | 工具扩展软上限，使用供应商真实 usage 累计 |
-| 模型调用 | 4 次 | 包含滚动摘要调用 |
+| Adaptive 模型调用 | 6 次 | 包含滚动摘要调用，并为最终回答保留最后一次调用 |
+| 非 Adaptive 模型调用 | 4 次 | 保持 Phase 1 现有行为 |
 | Agent Step | 8 步 | 沿用现有默认值 |
 
 建议在 `AgentProperties` 中增加或补齐以下配置：
@@ -99,6 +100,12 @@ searchSnippetCharacters=500
 outlineMaxEntries=50
 readMaxChunks=3
 maxTotalTokens=60000
+```
+
+`AdaptiveRetrievalProperties` 增加：
+
+```text
+maxModelCalls=6
 ```
 
 沿用现有：
@@ -125,6 +132,11 @@ toolTimeout
 `maxTotalTokens` 是工具扩展软上限：达到后所有知识工具返回受控的预算耗尽结果，Prompt 要求模型停止扩展并根据已有证据立即回答。
 最后一次回答允许使 Run 总 Token 略微超过该值，否则无法同时保证“达到预算后停止扩展”和“仍然生成最终回答”。
 模型调用次数、步骤数、字符数和超时仍是硬上限。
+
+Adaptive 模式最多允许 6 次模型调用，覆盖以下最坏链路：滚动摘要、第一次搜索、第二次搜索、查看目录、精读和最终回答。
+摘要和最终回答不消耗 Agent Step；搜索、目录、精读等工具调用才消耗 Step，因此 `maxSteps=8` 无需提高。
+在发起第 6 次模型调用前，运行时中间件必须移除全部工具 Schema，使该调用只能生成最终回答；
+Token 软上限已经触发时，下一次模型调用也使用相同的无工具模式。这样既不会产生第 7 次调用，也不会在最后一次调用中再次请求工具。
 
 本期不计算金额。模型价格未进入配置之前，金额无法可靠计算；真实 Token 会完整记录，为后续按模型版本配置价格打基础。
 
@@ -340,6 +352,7 @@ TOKEN_BUDGET_EXHAUSTED
 - 单次工具结果超限：确定性截断并返回截断标记，Run 继续。
 - 累计工具预算耗尽：工具返回受控提示，Agent 使用已有证据回答。
 - Token 软上限达到：停止工具扩展，允许最后一次回答调用。
+- Adaptive 第 6 次模型调用：运行时移除工具 Schema，强制进入最终回答，不允许产生第 7 次调用。
 - 用户当前问题本身超过硬上限以外的预算不足：不直接把 Run 标记失败。
 - 基础设施失败：沿用稳定错误码终止，不能用通用知识掩盖知识库故障。
 - 知识库正常零命中：允许回答通用知识；若问题属于私有事实，则说明无法确认。
@@ -367,6 +380,7 @@ TOKEN_BUDGET_EXHAUSTED
 - 扩展 `AgentProperties`、`AgentRunBudget` 和 `AgentRun`。
 - 增加历史摘要模型适配和历史组装逻辑。
 - 调整 `AgentScopeRuntimeAdapter`，使摘要和正式推理共享同一 Run 预算。
+- 增加最小的模型调用预算中间件；达到 Token 软上限或进入 Adaptive 最后一次调用时移除工具 Schema。
 - 调整 `AgentScopeModelFactory`，实际传递 `maxOutputTokens`。
 - 监听 `ModelCallEndEvent` 并记录真实 usage。
 - 调整 `SearchDocsTool` 和 `ReadDocumentContextTool`。
@@ -440,10 +454,11 @@ historyRequiredFactCoverage >= 0.90
 10. 三类工具共同遵守 12000 字符累计预算。
 11. 模型输出上限实际传给 Provider。
 12. `ModelCallEndEvent` 的真实 Token 正确累计。
-13. Token 软上限停止扩展但仍生成最终回答。
-14. 固定 RAG 和 Adaptive Flag 关闭时行为不变。
-15. `context-v1` 指标、Markdown 报告和质量门禁口径一致。
-16. `adaptive-v2` 回归、受影响模块测试和完整 Maven Reactor 测试。
+13. Adaptive 前 5 次模型调用可使用工具，第 6 次调用移除工具 Schema，并拒绝第 7 次调用。
+14. Token 软上限停止扩展但仍生成最终回答。
+15. 固定 RAG 和 Adaptive Flag 关闭时行为不变，非 Adaptive 模型调用上限仍为 4。
+16. `context-v1` 指标、Markdown 报告和质量门禁口径一致。
+17. `adaptive-v2` 回归、受影响模块测试和完整 Maven Reactor 测试。
 
 真实验收必须使用重启后的 FileAgent 服务、正式模型、Embedding、Elasticsearch 和已上传语料；
 不能用单元测试、旧进程或模拟模型声称真实效果通过。
@@ -483,5 +498,6 @@ Phase 2B 完成必须同时满足：
 - 同会话并发摘要不能覆盖更新版本，检查点只能前进。
 - 模型调用、字符、真实 Token 和截断原因可在 Run Snapshot 与评测中查看。
 - 达到工具或 Token 预算后停止扩展，并根据已有证据完成回答或明确证据不足。
+- Adaptive 最多 6 次模型调用且最后一次不可调用工具；非 Adaptive 继续保持 4 次上限。
 - `context-v1` 强制门禁通过，`adaptive-v2` 不发生回归。
 - 所有受影响模块测试和完整 Maven 构建通过，并由重启后的真实服务完成一次评测。

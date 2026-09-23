@@ -18,6 +18,16 @@ public interface KnowledgeContextPort {
      */
     List<KnowledgeChunkContext> read(List<String> chunkIds);
 
+    /**
+     * 按文件读取可精读的 CHILD 分块目录，不返回完整正文。
+     *
+     * @param fileId 文件 ID
+     * @param afterChunkIndex 排他游标，首次读取传入负数
+     * @param limit 本页大小，服务端最多返回 50 项
+     * @return 文档目录页
+     */
+    DocumentOutlinePage outline(Long fileId, int afterChunkIndex, int limit);
+
     /** 片段上下文（含正文与可引用来源元数据）。 */
     record KnowledgeChunkContext(
             String chunkId,
@@ -27,5 +37,24 @@ public interface KnowledgeContextPort {
             String sheetName,
             String sectionId,
             int chunkIndex) {
+    }
+
+    /** 文档目录分页结果。 */
+    record DocumentOutlinePage(
+            List<DocumentOutlineItem> items,
+            Integer nextChunkIndex) {
+    }
+
+    /** 文档目录项，仅包含授权精读所需的元数据和短预览。 */
+    record DocumentOutlineItem(
+            String chunkId,
+            String parentId,
+            String filename,
+            String sourceType,
+            String sheetName,
+            String sectionId,
+            Integer rowIndex,
+            int chunkIndex,
+            String preview) {
     }
 }

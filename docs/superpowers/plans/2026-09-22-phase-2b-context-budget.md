@@ -498,11 +498,11 @@ git commit -m "feat(agent): 增加持久化滚动摘要"
 - 修改：`fileagent-document/src/main/java/com/demetrius/fileagent/document/infrastructure/knowledge/KnowledgeContextPortImpl.java`
 - 修改：`fileagent-document/src/test/java/com/demetrius/fileagent/document/infrastructure/knowledge/KnowledgeContextPortImplTest.java`
 
-- [ ] **步骤 1：写目录分页失败测试**
+- [x] **步骤 1：写目录分页失败测试**
 
 覆盖：只返回 CHILD chunk；按 `chunkIndex` 升序；`afterChunkIndex` 为排他游标；最多 50 项；多取 1 项判断 `nextChunkIndex`；缺少真实 section 元数据时只回退为 chunkIndex 和短预览，不生成虚假章节名。
 
-- [ ] **步骤 2：运行测试并确认 outline API 不存在**
+- [x] **步骤 2：运行测试并确认 outline API 不存在**
 
 ```bash
 JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
@@ -514,7 +514,7 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-- [ ] **步骤 3：扩展 KnowledgeContextPort**
+- [x] **步骤 3：扩展 KnowledgeContextPort**
 
 ```java
 DocumentOutlinePage outline(Long fileId, int afterChunkIndex, int limit);
@@ -537,11 +537,11 @@ record DocumentOutlineItem(
 }
 ```
 
-- [ ] **步骤 4：实现 Elasticsearch 元数据映射**
+- [x] **步骤 4：实现 Elasticsearch 元数据映射**
 
 复用 `KnowledgeIndexRepository.findByFileId`，过滤 CHILD，按 chunkIndex 排序后分页。XLSX 输出 sheet、section、row；其他格式只输出实际存在的元数据。预览按 Unicode code point 安全截断，不能切坏代理对。
 
-- [ ] **步骤 5：运行测试并提交**
+- [x] **步骤 5：运行测试并提交**
 
 ```bash
 git add fileagent-api/src/main/java/com/demetrius/fileagent/api/port/KnowledgeContextPort.java \

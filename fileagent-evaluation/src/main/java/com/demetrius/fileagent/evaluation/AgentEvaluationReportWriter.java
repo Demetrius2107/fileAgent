@@ -57,6 +57,18 @@ public final class AgentEvaluationReportWriter {
             sb.append(row("子问题覆盖率", adaptive.subQuestionCoverage()));
         }
 
+        if (report.contextMetrics() != null) {
+            AgentEvaluationReport.ContextMetrics context = report.contextMetrics();
+            sb.append("\n## 上下文与预算\n\n");
+            sb.append("| 指标 | 值 | 判读 |\n|---|---:|---|\n");
+            sb.append(contextRow("当前问题保留率", context.promptPreservationRate(), "越高越好"));
+            sb.append(contextRow("工具结果预算合规率", context.toolBudgetComplianceRate(), "越高越好"));
+            sb.append(contextRow("预算耗尽后正常完成率", context.budgetExhaustionCompletionRate(), "越高越好"));
+            sb.append(contextRow("历史摘要无依据主张率", context.summaryUnsupportedClaimRate(), "越低越好"));
+            sb.append(contextRow("通用知识假引用率", context.fakeCitationRate(), "越低越好"));
+            sb.append(contextRow("历史必答事实覆盖率", context.historyRequiredFactCoverage(), "越高越好"));
+        }
+
         if (report.gate() != null) {
             sb.append("\n## 质量门禁\n\n");
             sb.append(report.gate().passed() ? "通过 ✅\n" : "未通过 ❌\n");
@@ -101,9 +113,16 @@ public final class AgentEvaluationReportWriter {
         Set<String> violatedMetrics = report.gate().violations().stream()
                 .map(AgentEvaluationReportWriter::metricName)
                 .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Set<String> maximumMetrics = report.gate().violations().stream()
+                .filter(violation -> violation.contains("高于最高要求"))
+                .map(AgentEvaluationReportWriter::metricName)
+                .collect(java.util.stream.Collectors.toSet());
         List<AgentEvaluationReport.CaseResult> cases = report.cases().stream()
-                .filter(c -> violatedMetrics.stream().anyMatch(metric -> metricValue(metric, c) < 1.0))
-                .sorted(Comparator.comparingDouble(c -> lowestMetricValue(violatedMetrics, c)))
+                .filter(c -> violatedMetrics.stream().anyMatch(metric ->
+                        maximumMetrics.contains(metric)
+                                ? metricValue(metric, c) > 0.0
+                                : metricValue(metric, c) < 1.0))
+                .sorted(Comparator.comparingDouble(c -> lowestMetricValue(violatedMetrics, maximumMetrics, c)))
                 .limit(3)
                 .toList();
         if (cases.isEmpty()) {
@@ -137,9 +156,11 @@ public final class AgentEvaluationReportWriter {
     }
 
     private static double lowestMetricValue(Set<String> metrics,
+                                            Set<String> maximumMetrics,
                                             AgentEvaluationReport.CaseResult result) {
         return metrics.stream()
-                .mapToDouble(metric -> metricValue(metric, result))
+                .mapToDouble(metric -> maximumMetrics.contains(metric)
+                        ? 1.0 - metricValue(metric, result) : metricValue(metric, result))
                 .min()
                 .orElse(1.0);
     }
@@ -167,8 +188,23 @@ public final class AgentEvaluationReportWriter {
                     ? 1.0 : result.adaptive().strategyComplianceRate();
             case "adaptive.subQuestionCoverage" -> result.adaptive() == null
                     ? 1.0 : result.adaptive().subQuestionCoverage();
+            case "context.promptPreservationRate" -> contextValue(result, c -> c.promptPreservationRate());
+            case "context.toolBudgetComplianceRate" -> contextValue(result, c -> c.toolBudgetComplianceRate());
+            case "context.budgetExhaustionCompletionRate" -> contextValue(result, c -> c.budgetExhaustionCompletionRate());
+            case "context.summaryUnsupportedClaimRate" -> contextValue(result, c -> c.summaryUnsupportedClaimRate());
+            case "context.fakeCitationRate" -> contextValue(result, c -> c.fakeCitationRate());
+            case "context.historyRequiredFactCoverage" -> contextValue(result, c -> c.historyRequiredFactCoverage());
             default -> 1.0;
         };
+    }
+
+    private static double contextValue(AgentEvaluationReport.CaseResult result,
+                                       java.util.function.ToDoubleFunction<AgentEvaluationReport.ContextMetrics> value) {
+        return result.context() == null ? 1.0 : value.applyAsDouble(result.context());
+    }
+
+    private static String contextRow(String name, double value, String interpretation) {
+        return "| " + name + " | " + format(value) + " | " + interpretation + " |\n";
     }
 
     private static String row(String name, double value) {

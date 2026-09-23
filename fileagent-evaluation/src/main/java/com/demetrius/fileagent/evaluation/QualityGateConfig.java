@@ -11,6 +11,7 @@ import java.util.Map;
 public record QualityGateConfig(
         String schemaVersion,
         Map<String, Double> minimumScores,
+        Map<String, Double> maximumScores,
         Double maximumRegression,
         List<String> regressionMetrics
 ) {
@@ -18,10 +19,19 @@ public record QualityGateConfig(
     public QualityGateConfig {
         schemaVersion = schemaVersion == null ? "1.0" : schemaVersion;
         minimumScores = minimumScores == null ? Map.of() : Map.copyOf(minimumScores);
+        maximumScores = maximumScores == null ? Map.of() : Map.copyOf(maximumScores);
         maximumRegression = maximumRegression == null ? 0.0 : maximumRegression;
         regressionMetrics = regressionMetrics == null ? List.of() : List.copyOf(regressionMetrics);
         if (maximumRegression < 0.0) {
             throw new IllegalArgumentException("maximumRegression 不能小于 0");
         }
+    }
+
+    /** 兼容未配置上限指标的旧门禁文件。 */
+    public QualityGateConfig(String schemaVersion,
+                             Map<String, Double> minimumScores,
+                             Double maximumRegression,
+                             List<String> regressionMetrics) {
+        this(schemaVersion, minimumScores, Map.of(), maximumRegression, regressionMetrics);
     }
 }

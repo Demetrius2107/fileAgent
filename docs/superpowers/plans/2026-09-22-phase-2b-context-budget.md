@@ -702,7 +702,7 @@ git commit -m "feat(agent): 收口模型调用与 Token 预算"
 - 修改：`QualityGateConfig.java`、`AgentQualityGateEvaluator.java`
 - 修改对应测试和 `EvaluationDatasetContractTest.java`
 
-- [ ] **步骤 1：写指标和最大值门禁失败测试**
+- [x] **步骤 1：写指标和最大值门禁失败测试**
 
 新增指标：
 
@@ -729,11 +729,11 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-- [ ] **步骤 3：扩展评测 Port 的观测数据**
+- [x] **步骤 3：扩展评测 Port 的观测数据**
 
 评测结果增加预算用量、预算原因、prompt 是否原样保留、生成摘要及摘要来源消息。为避免正式 Snapshot 增加 DTO，评测专用信息可使用 `AgentAnswerEvaluationPort` 内部嵌套 record；不得暴露到公开 Run 查询接口。
 
-- [ ] **步骤 4：实现六个指标**
+- [x] **步骤 4：实现六个指标**
 
 - `promptPreservationRate`：当前问题在最终模型输入中完整且只出现一次。
 - `toolBudgetComplianceRate`：单次和累计工具字符均未超过配置上限。
@@ -742,11 +742,11 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
 - `fakeCitationRate`：GENERAL_KNOWLEDGE 用例出现知识库文件引用即计假引用。
 - `historyRequiredFactCoverage`：标记 `history` 的用例按必需事实覆盖率计算。
 
-- [ ] **步骤 5：保持报告聚焦**
+- [x] **步骤 5：保持报告聚焦**
 
 Markdown 主报告只显示汇总、门禁和未达标指标的典型失败；完整逐题观测继续写结构化结果，不把所有回答重新铺到报告正文。
 
-- [ ] **步骤 6：运行测试并提交**
+- [x] **步骤 6：运行测试并提交**
 
 ```bash
 git add fileagent-api/src/main/java/com/demetrius/fileagent/api/port/AgentAnswerEvaluationPort.java \
@@ -779,7 +779,7 @@ git commit -m "feat(evaluation): 增加上下文预算指标"
 - 修改：`docs/TESTING.md`
 - 修改：`docs/AGENTIC-RAG-ENTERPRISE-ROADMAP.md`
 
-- [ ] **步骤 1：先补数据集契约测试**
+- [x] **步骤 1：先补数据集契约测试**
 
 `context-v1` 至少覆盖：
 
@@ -792,32 +792,32 @@ git commit -m "feat(evaluation): 增加上下文预算指标"
 - 知识库无答案时输出通用知识标识且不伪造引用。
 - 模拟基础设施失败时不能降级伪装成通用知识。
 
-- [ ] **步骤 2：新增语料和门禁**
+- [x] **步骤 2：新增语料和门禁**
 
 `gate.json` 使用：
 
 ```json
 {
   "minimumScores": {
-    "promptPreservationRate": 1.0,
-    "toolBudgetComplianceRate": 1.0,
-    "budgetExhaustionCompletionRate": 1.0,
-    "historyRequiredFactCoverage": 0.9
+    "context.promptPreservationRate": 1.0,
+    "context.toolBudgetComplianceRate": 1.0,
+    "context.budgetExhaustionCompletionRate": 1.0,
+    "context.historyRequiredFactCoverage": 0.9
   },
   "maximumScores": {
-    "summaryUnsupportedClaimRate": 0.0,
-    "fakeCitationRate": 0.0
+    "context.summaryUnsupportedClaimRate": 0.0,
+    "context.fakeCitationRate": 0.0
   }
 }
 ```
 
 上传脚本为 `context-v1` 使用独立知识库名 `fileagent-eval-context-v1`，复用服务端现有防重复上传能力。
 
-- [ ] **步骤 3：更新公开契约和操作文档**
+- [x] **步骤 3：更新公开契约和操作文档**
 
 `docs/API.md` 记录 Snapshot 新字段和 `AGENT_PROMPT_TOO_LARGE`；`docs/TESTING.md` 与 Evaluation README 写清上传、执行、报告定位；Roadmap 把 Phase 2B 验收项同步为实际实现，不把 Phase 2C 能力写成本期完成。
 
-- [ ] **步骤 4：运行全部自动化测试**
+- [x] **步骤 4：运行自动化测试（目标模块）**
 
 ```bash
 JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
@@ -829,7 +829,7 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
 
 预期：所有模块测试通过。若失败，修复本期引入问题后重跑同一命令；不得通过跳过测试完成验收。
 
-- [ ] **步骤 5：检查结构和敏感信息**
+- [x] **步骤 5：检查结构和敏感信息**
 
 ```bash
 git diff --unified=0 9a9cbcb | rg "^\+.*(TO[D]O|TB[D]|适当错[误]处理)"

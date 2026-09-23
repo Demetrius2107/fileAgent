@@ -19,6 +19,7 @@ public record AgentEvaluationReport(
         AnswerMetrics answerMetrics,
         AgentMetrics agentMetrics,
         AdaptiveMetrics adaptiveMetrics,
+        ContextMetrics contextMetrics,
         List<CaseResult> cases,
         GateResult gate
 ) {
@@ -36,16 +37,32 @@ public record AgentEvaluationReport(
                                  int failedCases,
                                  AnswerMetrics answerMetrics,
                                  AgentMetrics agentMetrics,
+                                 AdaptiveMetrics adaptiveMetrics,
                                  List<CaseResult> cases,
                                  GateResult gate) {
         this(schemaVersion, datasetVersion, generatedAt, totalCases, successfulCases, failedCases,
-                answerMetrics, agentMetrics, null, cases, gate);
+                answerMetrics, agentMetrics, adaptiveMetrics, null, cases, gate);
+    }
+
+    /** 兼容构造：无自适应检索与上下文预算指标的报告。 */
+    public AgentEvaluationReport(String schemaVersion,
+                                 String datasetVersion,
+                                 String generatedAt,
+                                 int totalCases,
+                                 int successfulCases,
+                                 int failedCases,
+                                 AnswerMetrics answerMetrics,
+                                 AgentMetrics agentMetrics,
+                                 List<CaseResult> cases,
+                                 GateResult gate) {
+        this(schemaVersion, datasetVersion, generatedAt, totalCases, successfulCases, failedCases,
+                answerMetrics, agentMetrics, null, null, cases, gate);
     }
 
     public AgentEvaluationReport withGate(GateResult gateResult) {
         return new AgentEvaluationReport(schemaVersion, datasetVersion, generatedAt, totalCases,
                 successfulCases, failedCases, answerMetrics, agentMetrics, adaptiveMetrics,
-                cases, gateResult);
+                contextMetrics, cases, gateResult);
     }
 
     /** 答案质量指标（复用 Judge 语义评判）。 */
@@ -83,6 +100,16 @@ public record AgentEvaluationReport(
             double subQuestionCoverage) {
     }
 
+    /** Phase 2B 上下文、摘要与工具预算指标。带有 Rate 后缀的指标均为 0 到 1。 */
+    public record ContextMetrics(
+            double promptPreservationRate,
+            double toolBudgetComplianceRate,
+            double budgetExhaustionCompletionRate,
+            double summaryUnsupportedClaimRate,
+            double fakeCitationRate,
+            double historyRequiredFactCoverage) {
+    }
+
     /** 单题引用状态。 */
     public enum CitationStatus {
         PASSED("通过"),
@@ -115,6 +142,7 @@ public record AgentEvaluationReport(
             AnswerMetrics answer,
             AgentMetrics agent,
             AdaptiveMetrics adaptive,
+            ContextMetrics context,
             String error) {
 
         public CaseResult {
@@ -136,7 +164,25 @@ public record AgentEvaluationReport(
                           AgentMetrics agent,
                           String error) {
             this(caseId, category, question, answerText, retrievedFilenames, citedFilenames,
-                    terminalStatus, failureCode, citationStatus, answer, agent, null, error);
+                    terminalStatus, failureCode, citationStatus, answer, agent, null, null, error);
+        }
+
+        /** 兼容构造：保留单题自适应指标但无上下文指标。 */
+        public CaseResult(String caseId,
+                          String category,
+                          String question,
+                          String answerText,
+                          List<String> retrievedFilenames,
+                          List<String> citedFilenames,
+                          AgentRunStatus terminalStatus,
+                          String failureCode,
+                          CitationStatus citationStatus,
+                          AnswerMetrics answer,
+                          AgentMetrics agent,
+                          AdaptiveMetrics adaptive,
+                          String error) {
+            this(caseId, category, question, answerText, retrievedFilenames, citedFilenames,
+                    terminalStatus, failureCode, citationStatus, answer, agent, adaptive, null, error);
         }
     }
 

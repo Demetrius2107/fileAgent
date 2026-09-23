@@ -29,7 +29,7 @@ public final class AgentEvaluationRunner {
     private static final int MAX_CASES = 100;
 
     private static final Set<String> TOOL_WHITELIST =
-            Set.of("search_docs", "list_knowledge_files", "read_document_context");
+            Set.of("search_docs", "list_knowledge_files", "get_document_outline", "read_document_context");
 
     private static final Set<String> BUDGET_VIOLATION_CODES =
             Set.of("AGENT_BUDGET_EXCEEDED", "AGENT_RUN_TIMEOUT");
@@ -114,12 +114,12 @@ public final class AgentEvaluationRunner {
                 evaluationCase.id(), evaluationCase.category(), evaluationCase.question(),
                 result.answer(), result.refused(), filenames(result.retrieved()), result.citedFilenames(),
                 result.stepCount(), result.modelCallCount(), result.toolCalls(), result.durationMs(),
-                result.terminalStatus(), result.failureCode(),
-                assessment == null ? null : assessment.decision(),
+                    result.terminalStatus(), result.failureCode(),
+                    assessment == null ? null : assessment.decision(),
                 assessment != null && assessment.hasUnsupportedClaims(),
                 assessment == null ? List.of() : assessment.requiredFacts(),
                 assessment == null ? List.of() : assessment.forbiddenFacts(), error,
-                result.retrieval(), result.retrievals());
+                result.retrieval(), result.retrievals(), result.details());
     }
 
     public AgentEvaluationReport evaluate(String datasetVersion,
@@ -133,8 +133,65 @@ public final class AgentEvaluationRunner {
                 aggregateAnswerMetrics(cases, observations),
                 aggregateAgentMetrics(cases, observations),
                 aggregateAdaptiveMetrics(cases, observations),
+                aggregateContextMetrics(cases, observations),
                 buildCaseResults(cases, observations),
                 null);
+    }
+
+    private AgentEvaluationReport.ContextMetrics aggregateContextMetrics(
+            List<EvaluationCase> cases, List<AgentEvaluationObservation> observations) {
+        double promptSum = 0;
+        double toolBudgetSum = 0;
+        double exhaustedSum = 0;
+        int exhaustedCount = 0;
+        double summaryUnsupportedSum = 0;
+        int summaryCount = 0;
+        double fakeCitationSum = 0;
+        int generalCount = 0;
+        double historyFactSum = 0;
+        int historyFactCount = 0;
+        for (int i = 0; i < observations.size(); i++) {
+            AgentEvaluationObservation observation = observations.get(i);
+            AgentAnswerEvaluationPort.EvaluationDetails details = observation.details();
+            promptSum += details.promptPreserved() ? 1.0 : 0.0;
+            toolBudgetSum += details.toolBudgetCompliant() ? 1.0 : 0.0;
+            if (details.budgetReasons().stream().anyMatch(AgentEvaluationRunner::isBudgetExhaustion)) {
+                exhaustedCount++;
+                exhaustedSum += details.budgetExhaustionCompleted() ? 1.0 : 0.0;
+            }
+            if (details.summaryCharacters() > 0) {
+                summaryCount++;
+                summaryUnsupportedSum += details.summaryHasUnsupportedClaims() ? 1.0 : 0.0;
+            }
+            EvaluationCase evaluationCase = cases.get(i);
+            if (observation.agentSucceeded()
+                    && evaluationCase.expected().groundingMode() == AnswerGroundingMode.GENERAL_KNOWLEDGE) {
+                generalCount++;
+                fakeCitationSum += observation.citedFilenames().isEmpty() ? 0.0 : 1.0;
+            }
+            if (isHistoryCase(evaluationCase)
+                    && !evaluationCase.expected().requiredFacts().isEmpty()
+                    && !observation.judgeRequiredFacts().isEmpty()) {
+                historyFactCount++;
+                historyFactSum += matchedRatio(observation.judgeRequiredFacts());
+            }
+        }
+        return new AgentEvaluationReport.ContextMetrics(
+                ratio(promptSum, observations.size()),
+                ratio(toolBudgetSum, observations.size()),
+                exhaustedCount == 0 ? 1.0 : ratio(exhaustedSum, exhaustedCount),
+                summaryCount == 0 ? 0.0 : ratio(summaryUnsupportedSum, summaryCount),
+                generalCount == 0 ? 0.0 : ratio(fakeCitationSum, generalCount),
+                historyFactCount == 0 ? 1.0 : ratio(historyFactSum, historyFactCount));
+    }
+
+    private static boolean isBudgetExhaustion(String reason) {
+        return "TOOL_BUDGET_EXHAUSTED".equals(reason) || "TOKEN_BUDGET_EXHAUSTED".equals(reason);
+    }
+
+    private static boolean isHistoryCase(EvaluationCase evaluationCase) {
+        return evaluationCase.tags().stream().anyMatch(tag -> "history".equalsIgnoreCase(tag))
+                || evaluationCase.category().toLowerCase(Locale.ROOT).contains("history");
     }
 
     private AgentEvaluationReport.AnswerMetrics aggregateAnswerMetrics(
@@ -234,9 +291,30 @@ public final class AgentEvaluationRunner {
                     o.caseId(), o.category(), o.question(),
                     o.answer(), o.retrievedFilenames(), o.citedFilenames(),
                     o.terminalStatus(), o.failureCode(), citationStatus(c, o),
-                    answerMetricsOf(c, o), agentMetricsOf(c, o), adaptiveMetricsOf(c, o), o.error()));
+                    answerMetricsOf(c, o), agentMetricsOf(c, o), adaptiveMetricsOf(c, o),
+                    contextMetricsOf(c, o), o.error()));
         }
         return results;
+    }
+
+    private static AgentEvaluationReport.ContextMetrics contextMetricsOf(
+            EvaluationCase evaluationCase, AgentEvaluationObservation observation) {
+        AgentAnswerEvaluationPort.EvaluationDetails details = observation.details();
+        boolean exhausted = details.budgetReasons().stream().anyMatch(AgentEvaluationRunner::isBudgetExhaustion);
+        double historyCoverage = isHistoryCase(evaluationCase)
+                && !evaluationCase.expected().requiredFacts().isEmpty()
+                && !observation.judgeRequiredFacts().isEmpty()
+                ? matchedRatio(observation.judgeRequiredFacts()) : 1.0;
+        double fakeCitation = observation.agentSucceeded()
+                && evaluationCase.expected().groundingMode() == AnswerGroundingMode.GENERAL_KNOWLEDGE
+                ? (observation.citedFilenames().isEmpty() ? 0.0 : 1.0) : 0.0;
+        return new AgentEvaluationReport.ContextMetrics(
+                details.promptPreserved() ? 1.0 : 0.0,
+                details.toolBudgetCompliant() ? 1.0 : 0.0,
+                !exhausted || details.budgetExhaustionCompleted() ? 1.0 : 0.0,
+                details.summaryCharacters() > 0 && details.summaryHasUnsupportedClaims() ? 1.0 : 0.0,
+                fakeCitation,
+                historyCoverage);
     }
 
     /**

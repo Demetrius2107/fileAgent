@@ -65,4 +65,23 @@ class EvaluationDatasetContractTest {
                 "agent.toolWhitelistPassRate", "adaptive.queryCountComplianceRate", "adaptive.strategyComplianceRate");
         assertThat(gate.minimumScores()).doesNotContainKeys("adaptive.queryTypeAccuracy", "adaptive.subQuestionCoverage");
     }
+
+    @Test
+    void shouldKeepContextBudgetDatasetAndUpperBoundGates() {
+        EvaluationFiles files = new EvaluationFiles(new ObjectMapper());
+
+        var cases = files.loadCases(Path.of("src/main/resources/evaluation/context-v1/cases"));
+        var gate = files.loadGateConfig(Path.of("src/main/resources/evaluation/context-v1/gate.json"));
+
+        assertThat(cases).hasSize(8);
+        assertThat(cases).extracting(EvaluationCase::category)
+                .contains("HISTORY", "DOCUMENT_CONTEXT", "BUDGET_EXHAUSTION", "GENERAL_KNOWLEDGE", "INFRA_FAILURE");
+        assertThat(cases).extracting(c -> c.filters().ragName())
+                .containsOnly("fileagent-eval-context-v1");
+        assertThat(gate.minimumScores()).containsKeys("context.promptPreservationRate",
+                "context.toolBudgetComplianceRate", "context.budgetExhaustionCompletionRate",
+                "context.historyRequiredFactCoverage");
+        assertThat(gate.maximumScores()).containsKeys("context.summaryUnsupportedClaimRate",
+                "context.fakeCitationRate");
+    }
 }

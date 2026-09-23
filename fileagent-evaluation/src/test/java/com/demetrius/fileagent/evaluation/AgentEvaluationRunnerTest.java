@@ -231,6 +231,53 @@ class AgentEvaluationRunnerTest {
     }
 
     @Test
+    void contextMetricsShouldMeasureFakeCitationAndHistoryCoverage() {
+        EvaluationCase generalCase = new EvaluationCase("1.0", "general-001", "GENERAL_KNOWLEDGE",
+                List.of(), "HTTP 404 是什么意思？", List.of(), new EvaluationCase.Filters(null, null, null),
+                new EvaluationCase.Expected(true, List.of(), List.of(), List.of(),
+                        AnswerGroundingMode.GENERAL_KNOWLEDGE));
+        EvaluationCase historyCase = new EvaluationCase("1.0", "history-001", "HISTORY",
+                List.of("history"), "上次约定的额度是多少？", List.of(), new EvaluationCase.Filters(null, null, null),
+                new EvaluationCase.Expected(true, List.of(), List.of("额度为 500 元"), List.of(),
+                        AnswerGroundingMode.KNOWLEDGE_BASED));
+        AgentAnswerEvaluationPort.EvaluationDetails details = new AgentAnswerEvaluationPort.EvaluationDetails(
+                100, 80, 0, 0, 200, 10, 20, 30, true, List.of("HISTORY_SUMMARIZED"),
+                true, true, false, false);
+        AgentEvaluationObservation general = new AgentEvaluationObservation(
+                "general-001", "GENERAL_KNOWLEDGE", generalCase.question(),
+                "404 [来源：fake.md]", false, List.of(), List.of("fake.md"), 1, 1, List.of(), 10,
+                AgentRunStatus.SUCCEEDED, null, RagAnswerJudgePort.Decision.ANSWERED, false,
+                List.of(), List.of(), null, null, null, details);
+        AgentEvaluationObservation history = new AgentEvaluationObservation(
+                "history-001", "HISTORY", historyCase.question(), "500 元", false, List.of(), List.of(),
+                1, 1, List.of(), 10, AgentRunStatus.SUCCEEDED, null, RagAnswerJudgePort.Decision.ANSWERED,
+                false, List.of(new RagAnswerJudgePort.FactAssessment("额度为 500 元", true, "覆盖")),
+                List.of(), null, null, null, details);
+
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null)
+                .evaluate("context-v1", List.of(generalCase, historyCase), List.of(general, history));
+
+        assertThat(report.contextMetrics().promptPreservationRate()).isEqualTo(1.0);
+        assertThat(report.contextMetrics().fakeCitationRate()).isEqualTo(1.0);
+        assertThat(report.contextMetrics().historyRequiredFactCoverage()).isEqualTo(1.0);
+    }
+
+    @Test
+    void gateShouldEnforceMaximumContextScores() {
+        AgentEvaluationReport report = new AgentEvaluationReport("1.0", "context-v1", "now", 1, 1, 0,
+                new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
+                new AgentEvaluationReport.AgentMetrics(1, 1, 1, 1, 1, 1, 1, 10), null,
+                new AgentEvaluationReport.ContextMetrics(1, 1, 1, 0.2, 0, 1), List.of(), null);
+        QualityGateConfig config = new QualityGateConfig("1.0", java.util.Map.of(),
+                java.util.Map.of("context.summaryUnsupportedClaimRate", 0.0), 0.1, List.of());
+
+        AgentEvaluationReport.GateResult gate = new AgentQualityGateEvaluator().evaluate(report, config, null);
+
+        assertThat(gate.passed()).isFalse();
+        assertThat(gate.violations()).anyMatch(v -> v.contains("高于最高要求"));
+    }
+
+    @Test
     void adaptiveMetricsShouldMeasurePlanningComplianceAndAccuracy() {
         List<AgentEvaluationObservation> observations = List.of(
                 adaptiveObservation("single-001",

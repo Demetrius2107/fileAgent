@@ -43,7 +43,7 @@ public class AgentHistoryService {
         if (old.isEmpty() && existingSummaryCharacters + currentHistoryCharacters <= budget.maxHistoryCharacters()) {
             run.recordHistoryUsage(existingSummaryCharacters + currentHistoryCharacters,
                     existingSummaryCharacters, false);
-            return new PreparedHistory(existingSummary, recent, false);
+            return new PreparedHistory(existingSummary, recent, false, command.historySummaryThroughMessageId());
         }
 
         if (old.isEmpty()) {
@@ -58,7 +58,7 @@ public class AgentHistoryService {
             run.addBudgetReason("SUMMARY_FAILED_FALLBACK");
             run.recordHistoryUsage(existingSummaryCharacters + currentHistoryCharacters,
                     existingSummaryCharacters, false);
-            return new PreparedHistory(existingSummary, recent, false);
+            return new PreparedHistory(existingSummary, recent, false, command.historySummaryThroughMessageId());
         }
 
         String summary = existingSummary;
@@ -84,7 +84,7 @@ public class AgentHistoryService {
         int summaryCharacters = length(summary);
         int finalHistoryCharacters = summaryCharacters + totalCharacters(recent);
         run.recordHistoryUsage(finalHistoryCharacters, summaryCharacters, !summaryBatch.isEmpty());
-        return new PreparedHistory(summary, recent, true);
+        return new PreparedHistory(summary, recent, true, summaryBatch.getLast().id());
     }
 
     private String persistSummary(AgentRunCommand command, String summary, Long checkpoint, AgentRun run) {
@@ -151,7 +151,14 @@ public class AgentHistoryService {
         }
     }
 
-    public record PreparedHistory(String summary, List<MessageDto> recentMessages, boolean compressed) {
+    public record PreparedHistory(String summary,
+                                  List<MessageDto> recentMessages,
+                                  boolean compressed,
+                                  Long summaryThroughMessageId) {
+        public PreparedHistory(String summary, List<MessageDto> recentMessages, boolean compressed) {
+            this(summary, recentMessages, compressed, null);
+        }
+
         public PreparedHistory {
             recentMessages = recentMessages == null ? List.of() : List.copyOf(recentMessages);
         }

@@ -59,6 +59,24 @@ class AgentEvaluationReportWriterTest {
     }
 
     @Test
+    void shouldRenderContextBudgetSectionAndInterpretation() {
+        AgentEvaluationReport report = new AgentEvaluationReport(
+                "1.0", "context-v1", "now", 1, 1, 0,
+                new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
+                new AgentEvaluationReport.AgentMetrics(1, 1, 1, 1, 1, 1, 1, 10),
+                null,
+                new AgentEvaluationReport.ContextMetrics(1, 1, 1, 0, 0, 1),
+                List.of(), null);
+
+        String markdown = AgentEvaluationReportWriter.toMarkdown(report.withGate(
+                new AgentEvaluationReport.GateResult(true, List.of())));
+
+        assertThat(markdown).contains("## 上下文与预算");
+        assertThat(markdown).contains("历史摘要无依据主张率");
+        assertThat(markdown).contains("越低越好");
+    }
+
+    @Test
     void shouldRenderAdaptiveSectionAndSelectAdaptiveRepresentativeCases() {
         AgentEvaluationReport report = report(
                 new AgentEvaluationReport.CaseResult(

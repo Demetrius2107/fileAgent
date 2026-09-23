@@ -54,6 +54,7 @@ public interface AgentAnswerEvaluationPort {
      * @param failureCode      失败码（失败/超时/取消时非空）
      * @param retrieval        最后一轮自适应检索执行观察（非自适应运行为空）
      * @param retrievals       全部有效检索轮次（按执行顺序）
+     * @param details           上下文预算与历史摘要观察
      */
     record Result(
             String answer,
@@ -67,7 +68,8 @@ public interface AgentAnswerEvaluationPort {
             AgentRunStatus terminalStatus,
             String failureCode,
             RetrievalObservation retrieval,
-            List<RetrievalObservation> retrievals) {
+            List<RetrievalObservation> retrievals,
+            EvaluationDetails details) {
         public Result {
             retrieved = retrieved == null ? List.of() : List.copyOf(retrieved);
             citedFilenames = citedFilenames == null ? List.of() : List.copyOf(citedFilenames);
@@ -75,6 +77,7 @@ public interface AgentAnswerEvaluationPort {
             retrievals = retrievals == null || retrievals.isEmpty()
                     ? (retrieval == null ? List.of() : List.of(retrieval)) : List.copyOf(retrievals);
             retrieval = retrievals.isEmpty() ? null : retrievals.getLast();
+            details = details == null ? EvaluationDetails.empty() : details;
         }
 
         public Result(String answer, boolean refused, List<KnowledgeSearchPort.KnowledgeHit> retrieved,
@@ -82,7 +85,76 @@ public interface AgentAnswerEvaluationPort {
                       List<String> toolCalls, long durationMs, AgentRunStatus terminalStatus,
                       String failureCode, RetrievalObservation retrieval) {
             this(answer, refused, retrieved, citedFilenames, stepCount, modelCallCount, toolCalls,
-                    durationMs, terminalStatus, failureCode, retrieval, null);
+                    durationMs, terminalStatus, failureCode, retrieval, null, EvaluationDetails.empty());
+        }
+
+        public Result(String answer, boolean refused, List<KnowledgeSearchPort.KnowledgeHit> retrieved,
+                      List<String> citedFilenames, int stepCount, int modelCallCount,
+                      List<String> toolCalls, long durationMs, AgentRunStatus terminalStatus,
+                      String failureCode, RetrievalObservation retrieval,
+                      List<RetrievalObservation> retrievals) {
+            this(answer, refused, retrieved, citedFilenames, stepCount, modelCallCount, toolCalls,
+                    durationMs, terminalStatus, failureCode, retrieval, retrievals,
+                    EvaluationDetails.empty());
+        }
+    }
+
+    /**
+     * 单次评测的上下文预算观察。字符数按 Java code point 口径记录，Token 数来自模型 usage。
+     * 布尔字段由运行时根据实际组装和预算收口结果给出，不从答案文本反推。
+     */
+    record EvaluationDetails(
+            int historyCharacters,
+            int summaryCharacters,
+            int searchSnippetCharacters,
+            int documentReadCharacters,
+            int toolResultCharacters,
+            long inputTokens,
+            long outputTokens,
+            long totalTokens,
+            boolean historyCompressed,
+            List<String> budgetReasons,
+            boolean promptPreserved,
+            boolean toolBudgetCompliant,
+            boolean budgetExhaustionCompleted,
+            boolean summaryHasUnsupportedClaims,
+            String summary,
+            Long summaryThroughMessageId) {
+        public EvaluationDetails {
+            budgetReasons = budgetReasons == null ? List.of() : List.copyOf(budgetReasons);
+            historyCharacters = Math.max(0, historyCharacters);
+            summaryCharacters = Math.max(0, summaryCharacters);
+            searchSnippetCharacters = Math.max(0, searchSnippetCharacters);
+            documentReadCharacters = Math.max(0, documentReadCharacters);
+            toolResultCharacters = Math.max(0, toolResultCharacters);
+            inputTokens = Math.max(0, inputTokens);
+            outputTokens = Math.max(0, outputTokens);
+            totalTokens = Math.max(0, totalTokens);
+        }
+
+        public EvaluationDetails(int historyCharacters,
+                                 int summaryCharacters,
+                                 int searchSnippetCharacters,
+                                 int documentReadCharacters,
+                                 int toolResultCharacters,
+                                 long inputTokens,
+                                 long outputTokens,
+                                 long totalTokens,
+                                 boolean historyCompressed,
+                                 List<String> budgetReasons,
+                                 boolean promptPreserved,
+                                 boolean toolBudgetCompliant,
+                                 boolean budgetExhaustionCompleted,
+                                 boolean summaryHasUnsupportedClaims) {
+            this(historyCharacters, summaryCharacters, searchSnippetCharacters, documentReadCharacters,
+                    toolResultCharacters, inputTokens, outputTokens, totalTokens, historyCompressed,
+                    budgetReasons, promptPreserved, toolBudgetCompliant, budgetExhaustionCompleted,
+                    summaryHasUnsupportedClaims, null, null);
+        }
+
+        public static EvaluationDetails empty() {
+            return new EvaluationDetails(0, 0, 0, 0, 0, 0, 0, 0,
+                    false, List.of(), false, false, false, false, null, null);
         }
     }
 

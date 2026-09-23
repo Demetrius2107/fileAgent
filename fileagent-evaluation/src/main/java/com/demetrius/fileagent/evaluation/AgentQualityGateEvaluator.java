@@ -24,6 +24,14 @@ public final class AgentQualityGateEvaluator {
                 violations.add(metric + "=" + format(actual) + " 低于最低要求 " + format(minimum));
             }
         });
+        config.maximumScores().forEach((metric, maximum) -> {
+            Double actual = scores.get(metric);
+            if (actual == null) {
+                violations.add(metric + " 缺少结果，最高要求 " + format(maximum));
+            } else if (actual > maximum) {
+                violations.add(metric + "=" + format(actual) + " 高于最高要求 " + format(maximum));
+            }
+        });
 
         if (baseline != null) {
             Map<String, Double> baselineScores = flatten(baseline);
@@ -64,6 +72,15 @@ public final class AgentQualityGateEvaluator {
             scores.put("adaptive.queryCountComplianceRate", adaptive.queryCountComplianceRate());
             scores.put("adaptive.strategyComplianceRate", adaptive.strategyComplianceRate());
             scores.put("adaptive.subQuestionCoverage", adaptive.subQuestionCoverage());
+        }
+        AgentEvaluationReport.ContextMetrics context = report.contextMetrics();
+        if (context != null) {
+            scores.put("context.promptPreservationRate", context.promptPreservationRate());
+            scores.put("context.toolBudgetComplianceRate", context.toolBudgetComplianceRate());
+            scores.put("context.budgetExhaustionCompletionRate", context.budgetExhaustionCompletionRate());
+            scores.put("context.summaryUnsupportedClaimRate", context.summaryUnsupportedClaimRate());
+            scores.put("context.fakeCitationRate", context.fakeCitationRate());
+            scores.put("context.historyRequiredFactCoverage", context.historyRequiredFactCoverage());
         }
         return scores;
     }

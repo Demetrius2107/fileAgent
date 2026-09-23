@@ -223,7 +223,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                     durationMs(startedAt),
                     run.status(),
                     run.failureCode(),
-                    retrievals.isEmpty() ? null : retrievals.getLast(), retrievals);
+                    retrievals.isEmpty() ? null : retrievals.getLast(), retrievals,
+                    evaluationDetails(run, command, assembly.userMessage(), preparedHistory));
         } catch (Exception e) {
             log.warn("Agent 评测运行失败 runId={}: {}", command.runId(), e.getMessage());
             if (run.isRunning()) {
@@ -233,7 +234,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             return new AgentAnswerEvaluationPort.Result(
                     "", true, List.of(), List.of(), run.stepCount(), run.modelCallCount(),
                     List.of(), durationMs(startedAt), run.status(), run.failureCode(),
-                    retrievals.isEmpty() ? null : retrievals.getLast(), retrievals);
+                    retrievals.isEmpty() ? null : retrievals.getLast(), retrievals,
+                    evaluationDetails(run, command, null, null));
         }
     }
 
@@ -484,5 +486,41 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 properties.getReadMaxChunks(),
                 properties.getMaxTotalTokens(),
                 effectiveRunTimeout());
+    }
+
+    private AgentAnswerEvaluationPort.EvaluationDetails evaluationDetails(AgentRun run,
+                                                                            AgentRunCommand command,
+                                                                            Msg userMessage,
+                                                                            AgentHistoryService.PreparedHistory preparedHistory) {
+        AgentRunBudget budget = currentBudget();
+        boolean exhausted = run.budgetReasons().stream()
+                .anyMatch(reason -> "TOOL_BUDGET_EXHAUSTED".equals(reason)
+                        || "TOKEN_BUDGET_EXHAUSTED".equals(reason));
+        return new AgentAnswerEvaluationPort.EvaluationDetails(
+                run.historyCharacters(),
+                run.summaryCharacters(),
+                run.searchSnippetCharacters(),
+                run.documentReadCharacters(),
+                run.toolResultCharacters(),
+                run.inputTokens(),
+                run.outputTokens(),
+                run.totalTokens(),
+                run.historyCompressed(),
+                run.budgetReasons(),
+                promptPreserved(command.prompt(), userMessage),
+                run.toolResultCharacters() <= budget.maxToolResultCharacters(),
+                exhausted && run.status() == AgentRunStatus.SUCCEEDED,
+                false,
+                preparedHistory == null ? null : preparedHistory.summary(),
+                preparedHistory == null ? null : preparedHistory.summaryThroughMessageId());
+    }
+
+    private boolean promptPreserved(String prompt, Msg userMessage) {
+        if (prompt == null || prompt.isBlank() || userMessage == null) {
+            return false;
+        }
+        String text = extractText(userMessage);
+        int first = text.indexOf(prompt);
+        return first >= 0 && first == text.lastIndexOf(prompt);
     }
 }

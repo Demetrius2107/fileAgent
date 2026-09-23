@@ -59,14 +59,30 @@ public class AgentRunAppServiceImpl implements AgentRunAppService {
 
         KnowledgeScope scope = request.knowledgeScope() == null ? KnowledgeScope.global() : request.knowledgeScope();
         String prompt = request.prompt().trim();
+        int maxPromptCharacters = properties.getMaxPromptCharacters();
+        if (maxPromptCharacters > 0 && prompt.codePointCount(0, prompt.length()) > maxPromptCharacters) {
+            throw new BizException("AGENT_PROMPT_TOO_LARGE: prompt 超过 " + maxPromptCharacters + " 个字符");
+        }
 
         return Flux.defer(() -> {
             // 读取历史须在保存当前 USER 之前，避免当前问题在上下文中出现两次
-            List<MessageDto> history = tail(sessionQueryPort.listMessages(sessionId), historyLimit);
+            AgentRunCommand command;
+            if (properties.isAdaptiveRetrievalEnabled()) {
+                SessionQueryPort.SessionSummary summary = sessionQueryPort.getSummary(sessionId);
+                List<MessageDto> history = summary.throughMessageId() == null
+                        ? sessionQueryPort.listMessages(sessionId)
+                        : sessionQueryPort.listMessagesAfter(sessionId, summary.throughMessageId());
+                command = new AgentRunCommand(
+                        UUID.randomUUID().toString(), sessionId, traceId, prompt,
+                        summary.content(), summary.throughMessageId(), summary.version(),
+                        summary.sourceHash(), history, scope);
+            } else {
+                List<MessageDto> history = tail(sessionQueryPort.listMessages(sessionId), historyLimit);
+                command = new AgentRunCommand(UUID.randomUUID().toString(), sessionId, traceId,
+                        prompt, history, scope);
+            }
             sessionMessagePort.append(sessionId, MessageType.USER, prompt);
-
-            String runId = UUID.randomUUID().toString();
-            AgentRunCommand command = new AgentRunCommand(runId, sessionId, traceId, prompt, history, scope);
+            String runId = command.runId();
 
             StringBuilder answer = new StringBuilder();
             return agentRuntimePort.run(command)

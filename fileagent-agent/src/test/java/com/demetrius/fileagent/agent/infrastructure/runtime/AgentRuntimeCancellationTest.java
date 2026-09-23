@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.infrastructure.runtime;
 
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
+import com.demetrius.fileagent.agent.application.AgentHistoryService;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
@@ -49,7 +50,8 @@ class AgentRuntimeCancellationTest {
                 new AgentScopeEventMapper(),
                 mock(SearchDocsTool.class),
                 mock(ListKnowledgeFilesTool.class),
-                mock(ReadDocumentContextTool.class));
+                mock(ReadDocumentContextTool.class),
+                mock(AgentHistoryService.class));
     }
 
     @Test

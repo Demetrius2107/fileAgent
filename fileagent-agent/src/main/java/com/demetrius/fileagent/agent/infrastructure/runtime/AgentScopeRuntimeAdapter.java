@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.infrastructure.runtime;
 
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
+import com.demetrius.fileagent.agent.application.AgentHistoryService;
 import com.demetrius.fileagent.agent.application.tool.AgentToolContext;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.agent.domain.run.AgentRunBudget;
@@ -86,6 +87,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
     private final SearchDocsTool searchDocsTool;
     private final ListKnowledgeFilesTool listKnowledgeFilesTool;
     private final ReadDocumentContextTool readDocumentContextTool;
+    private final AgentHistoryService historyService;
 
     @Override
     public Flux<AgentRunEvent> run(AgentRunCommand command) {
@@ -94,7 +96,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         registry.save(run);
 
         try {
-            AgentAssembly assembly = assemble(command, run);
+            AgentHistoryService.PreparedHistory preparedHistory = prepareHistory(run, command);
+            AgentAssembly assembly = assemble(command, run, preparedHistory);
             ReActAgent agent = assembly.agent();
             RuntimeContext ctx = assembly.context();
             Msg userMessage = assembly.userMessage();
@@ -147,7 +150,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 : properties.getRunTimeout();
     }
 
-    private AgentAssembly assemble(AgentRunCommand command, AgentRun run) {
+    private AgentAssembly assemble(AgentRunCommand command, AgentRun run,
+                                   AgentHistoryService.PreparedHistory preparedHistory) {
         Toolkit toolkit = new Toolkit();
         toolkit.registerAgentTool(searchDocsTool);
         toolkit.registerAgentTool(listKnowledgeFilesTool);
@@ -173,7 +177,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 .put(AgentToolContext.class, toolContext)
                 .build();
 
-        return new AgentAssembly(agent, ctx, buildUserMessage(command), toolContext);
+        return new AgentAssembly(agent, ctx, buildUserMessage(command, preparedHistory), toolContext);
     }
 
     /**
@@ -186,7 +190,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         registry.save(run);
         long startedAt = System.nanoTime();
         try {
-            AgentAssembly assembly = assemble(command, run);
+            AgentHistoryService.PreparedHistory preparedHistory = prepareHistory(run, command);
+            AgentAssembly assembly = assemble(command, run, preparedHistory);
             List<String> toolCalls = new CopyOnWriteArrayList<>();
             StringBuilder answer = new StringBuilder();
             AtomicInteger step = new AtomicInteger(0);
@@ -353,11 +358,25 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         return Flux.just(eventMapper.failed(run.runId(), CODE_MODEL_UNAVAILABLE, "模型调用失败", run.traceId()));
     }
 
-    private Msg buildUserMessage(AgentRunCommand command) {
+    private AgentHistoryService.PreparedHistory prepareHistory(AgentRun run, AgentRunCommand command) {
+        AgentHistoryService.PreparedHistory prepared = historyService.prepare(run, currentBudget(), command);
+        if (prepared != null) {
+            return prepared;
+        }
+        return new AgentHistoryService.PreparedHistory(
+                command.historySummary(), command.history(), false);
+    }
+
+    private Msg buildUserMessage(AgentRunCommand command,
+                                 AgentHistoryService.PreparedHistory preparedHistory) {
         StringBuilder text = new StringBuilder();
-        if (command.history() != null && !command.history().isEmpty()) {
+        if (preparedHistory.summary() != null && !preparedHistory.summary().isBlank()) {
+            text.append("（以下为历史摘要，仅供理解上下文，不构成知识库证据）\n")
+                    .append(preparedHistory.summary()).append('\n');
+        }
+        if (preparedHistory.recentMessages() != null && !preparedHistory.recentMessages().isEmpty()) {
             text.append("（以下为历史对话，仅供理解上下文，不构成事实证据）\n");
-            for (MessageDto message : command.history()) {
+            for (MessageDto message : preparedHistory.recentMessages()) {
                 String role = message.role() == MessageType.USER ? "用户" : "助手";
                 text.append(role).append("：").append(message.content()).append('\n');
             }

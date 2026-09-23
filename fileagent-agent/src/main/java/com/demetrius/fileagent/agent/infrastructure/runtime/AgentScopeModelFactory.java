@@ -3,6 +3,7 @@ package com.demetrius.fileagent.agent.infrastructure.runtime;
 import com.demetrius.fileagent.api.dto.AgentModelConfig;
 import com.demetrius.fileagent.api.enums.ModelProvider;
 import com.demetrius.fileagent.api.port.AgentModelConfigPort;
+import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import io.agentscope.core.formatter.Formatter;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
@@ -14,7 +15,6 @@ import io.agentscope.extensions.model.openai.dto.OpenAIMessage;
 import io.agentscope.extensions.model.openai.dto.OpenAIRequest;
 import io.agentscope.extensions.model.openai.dto.OpenAIResponse;
 import io.agentscope.extensions.model.openai.formatter.OpenAIChatFormatter;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -26,10 +26,19 @@ import org.springframework.stereotype.Component;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class AgentScopeModelFactory {
 
     private final AgentModelConfigPort agentModelConfigPort;
+    private final AgentProperties agentProperties;
+
+    public AgentScopeModelFactory(AgentModelConfigPort agentModelConfigPort) {
+        this(agentModelConfigPort, new AgentProperties());
+    }
+
+    public AgentScopeModelFactory(AgentModelConfigPort agentModelConfigPort, AgentProperties agentProperties) {
+        this.agentModelConfigPort = agentModelConfigPort;
+        this.agentProperties = agentProperties;
+    }
 
     /**
      * 依据当前启用配置构建一个流式 AgentScope 模型（OpenAI 兼容）。
@@ -38,8 +47,19 @@ public class AgentScopeModelFactory {
      */
     public Model create() {
         AgentModelConfig config = agentModelConfigPort.current();
+        return create(config, config.temperature());
+    }
+
+    /** 创建历史摘要专用模型：固定温度 0，和正式回答共享当前模型配置。 */
+    public Model createSummary() {
+        AgentModelConfig config = agentModelConfigPort.current();
+        return create(config, 0.0);
+    }
+
+    private Model create(AgentModelConfig config, double temperature) {
         GenerateOptions options = GenerateOptions.builder()
-                .temperature(config.temperature())
+                .temperature(temperature)
+                .maxTokens(agentProperties.getMaxOutputTokens())
                 .build();
         Model model = OpenAIChatModel.builder()
                 .apiKey(config.apiKey())

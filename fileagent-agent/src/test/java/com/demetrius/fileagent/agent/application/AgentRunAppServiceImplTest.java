@@ -28,6 +28,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.argThat;
 
 @ExtendWith(MockitoExtension.class)
 class AgentRunAppServiceImplTest {
@@ -114,5 +115,43 @@ class AgentRunAppServiceImplTest {
         assertThat(events).extracting(AgentRunEvent::type).containsExactly("run.failed");
         assertThat(events.get(0).code()).isEqualTo("AGENT_FEATURE_DISABLED");
         verifyNoInteractions(agentRuntimePort, sessionMessagePort, sessionQueryPort);
+    }
+
+    @Test
+    void adaptiveRunShouldPassPersistedSummaryBaselineToRuntime() {
+        when(properties.isAdaptiveRetrievalEnabled()).thenReturn(true);
+        when(sessionQueryPort.exists(1L)).thenReturn(true);
+        when(sessionQueryPort.getSummary(1L)).thenReturn(new SessionQueryPort.SessionSummary(
+                "{\"confirmedFacts\":[\"已确认\"]}", 7L, null, 3L, "hash-3"));
+        when(sessionQueryPort.listMessagesAfter(1L, 7L)).thenReturn(List.of());
+        when(agentRuntimePort.run(argThat(command ->
+                command.historySummary().contains("已确认")
+                        && command.historySummaryThroughMessageId().equals(7L)
+                        && command.historySummaryVersion() == 3L)))
+                .thenReturn(Flux.just(AgentRunEvent.delta("run-1", "回答"),
+                        AgentRunEvent.completed("run-1", null)));
+        when(sessionMessagePort.append(eq(1L), eq(MessageType.USER), eq("问题"))).thenReturn(100L);
+        when(sessionMessagePort.append(eq(1L), eq(MessageType.ASSISTANT), eq("回答"))).thenReturn(101L);
+
+        List<AgentRunEvent> events = service.run(1L,
+                        new StartAgentRunRequest("问题", null), "trace-1")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentRunEvent::type)
+                .containsExactly("message.delta", "run.completed");
+        verify(sessionQueryPort).listMessagesAfter(1L, 7L);
+    }
+
+    @Test
+    void shouldRejectPromptBeforeSavingUserMessageWhenItExceedsBudget() {
+        when(properties.getMaxPromptCharacters()).thenReturn(3);
+        when(sessionQueryPort.exists(1L)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.run(1L,
+                new StartAgentRunRequest("超过限制", null), "trace-1"))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("AGENT_PROMPT_TOO_LARGE");
+
+        verifyNoInteractions(sessionMessagePort, agentRuntimePort);
     }
 }

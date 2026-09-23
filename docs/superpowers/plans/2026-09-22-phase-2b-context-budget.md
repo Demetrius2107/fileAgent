@@ -391,7 +391,7 @@ git commit -m "feat(agent): 建立上下文与 Token 预算"
 - 修改：`fileagent-agent/src/main/java/com/demetrius/fileagent/agent/infrastructure/runtime/AgentScopeModelFactory.java`
 - 新增及修改测试：`AgentHistoryServiceTest`、`AgentScopeHistorySummaryAdapterTest`、`AgentRunAppServiceImplTest`、`AgentScopeRuntimeAdapterTest`、`AgentScopeModelFactoryTest`
 
-- [ ] **步骤 1：写历史选择与摘要失败测试**
+- [x] **步骤 1：写历史选择与摘要失败测试**
 
 测试至少覆盖：
 
@@ -405,7 +405,7 @@ git commit -m "feat(agent): 建立上下文与 Token 预算"
 8. 当前 prompt 不进入摘要来源，且最终模型输入只出现一次。
 9. Adaptive 关闭时沿用现有最近 10 条历史行为，不触发摘要。
 
-- [ ] **步骤 2：运行测试并确认失败**
+- [x] **步骤 2：运行测试并确认失败**
 
 ```bash
 JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
@@ -419,7 +419,7 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
 
 预期：新增服务和 Port 不存在，测试先红。
 
-- [ ] **步骤 3：扩展 AgentRunCommand 的历史基线**
+- [x] **步骤 3：扩展 AgentRunCommand 的历史基线**
 
 命令增加摘要内容、检查点、摘要版本和来源哈希；保留一个六参数兼容构造器，避免非 Adaptive 测试和评测调用被迫感知摘要细节：
 
@@ -436,7 +436,7 @@ public AgentRunCommand(
 }
 ```
 
-- [ ] **步骤 4：定义最小摘要 Port**
+- [x] **步骤 4：定义最小摘要 Port**
 
 ```java
 public interface HistorySummaryPort {
@@ -450,7 +450,7 @@ public interface HistorySummaryPort {
 
 摘要适配器使用温度 `0`、固定 JSON Schema、`maxTokens=2048`；校验五个数组字段均存在且总字符不超过 2000。Prompt 明确只能提取原消息中的显式事实，保留否定、数字、单位、日期、文件名和 ID。
 
-- [ ] **步骤 5：在 AgentHistoryService 中实现选择算法**
+- [x] **步骤 5：在 AgentHistoryService 中实现选择算法**
 
 服务返回内部嵌套 record `PreparedHistory`，不新增通用 Context 类型。算法固定为：
 
@@ -462,15 +462,15 @@ public interface HistorySummaryPort {
 
 哈希基于“旧摘要版本 + 新摘要消息 ID 和正文”的 UTF-8 SHA-256，日志只记录哈希，不记录正文。
 
-- [ ] **步骤 6：把摘要调用纳入同一 Run**
+- [x] **步骤 6：把摘要调用纳入同一 Run**
 
 Runtime 创建并注册 `AgentRun`、发送 `run.started` 后，再调用 `AgentHistoryService`。摘要的模型次数和 Token 直接累计到同一个 `AgentRun`，并受相同总超时控制。摘要不调用工具，因此不增加 `stepCount`。
 
-- [ ] **步骤 7：运行测试并确认通过**
+- [x] **步骤 7：运行测试并确认通过**
 
 运行步骤 2 的命令。额外断言：有摘要时 `modelCallCount` 增加 1，但 `stepCount` 仍为 0。
 
-- [ ] **步骤 8：提交任务 3**
+- [x] **步骤 8：提交任务 3**
 
 ```bash
 git add fileagent-api/src/main/java/com/demetrius/fileagent/api/dto/AgentRunCommand.java \

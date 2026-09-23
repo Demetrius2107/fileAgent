@@ -13,6 +13,20 @@ public record AgentRunCommand(
         Long sessionId,
         String traceId,
         String prompt,
+        String historySummary,
+        Long historySummaryThroughMessageId,
+        long historySummaryVersion,
+        String historySummarySourceHash,
         List<MessageDto> history,
         KnowledgeScope knowledgeScope) {
+
+    public AgentRunCommand(
+            String runId,
+            Long sessionId,
+            String traceId,
+            String prompt,
+            List<MessageDto> history,
+            KnowledgeScope knowledgeScope) {
+        this(runId, sessionId, traceId, prompt, null, null, 0L, null, history, knowledgeScope);
+    }
 }

@@ -64,6 +64,14 @@ fileagent:
     enabled: ${FILEAGENT_AGENT_ENABLED:false}
     # 自适应检索子开关（Phase 2A）：默认关闭；不改变 Agent 总开关与固定 /chat 行为
     adaptive-retrieval-enabled: ${FILEAGENT_AGENT_ADAPTIVE_RETRIEVAL_ENABLED:false}
+    max-prompt-characters: ${FILEAGENT_AGENT_MAX_PROMPT_CHARACTERS:8000}
+    max-history-characters: ${FILEAGENT_AGENT_MAX_HISTORY_CHARACTERS:8000}
+    max-summary-characters: ${FILEAGENT_AGENT_MAX_SUMMARY_CHARACTERS:2000}
+    max-recent-history-characters: ${FILEAGENT_AGENT_MAX_RECENT_HISTORY_CHARACTERS:6000}
+    search-snippet-characters: ${FILEAGENT_AGENT_SEARCH_SNIPPET_CHARACTERS:500}
+    outline-max-entries: ${FILEAGENT_AGENT_OUTLINE_MAX_ENTRIES:50}
+    read-max-chunks: ${FILEAGENT_AGENT_READ_MAX_CHUNKS:3}
+    max-total-tokens: ${FILEAGENT_AGENT_MAX_TOTAL_TOKENS:60000}
   chunk-size: 800
   chunk-overlap: 120
   elasticsearch:

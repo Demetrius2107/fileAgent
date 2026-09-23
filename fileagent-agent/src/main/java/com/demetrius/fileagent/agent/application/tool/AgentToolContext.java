@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.application.tool;
 
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
+import com.demetrius.fileagent.agent.domain.run.AgentRunBudget;
 import com.demetrius.fileagent.api.dto.KnowledgeScope;
 import com.demetrius.fileagent.api.port.KnowledgeCatalogPort;
 import com.demetrius.fileagent.api.port.KnowledgeContextPort;
@@ -14,9 +15,27 @@ import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
  */
 public record AgentToolContext(
         AgentRun run,
+        AgentRunBudget budget,
         KnowledgeSearchPort knowledgeSearchPort,
         KnowledgeCatalogPort knowledgeCatalogPort,
         KnowledgeContextPort knowledgeContextPort,
-        KnowledgeScope scope,
-        int singleToolResultCharacters) {
+        KnowledgeScope scope) {
+
+    /** 兼容 Phase 1 工具测试的构造方式，生产装配使用带完整预算的构造器。 */
+    public AgentToolContext(
+            AgentRun run,
+            KnowledgeSearchPort knowledgeSearchPort,
+            KnowledgeCatalogPort knowledgeCatalogPort,
+            KnowledgeContextPort knowledgeContextPort,
+            KnowledgeScope scope,
+            int singleToolResultCharacters) {
+        this(run,
+                new AgentRunBudget(8, 4, singleToolResultCharacters, 12000,
+                        java.time.Duration.ofSeconds(45)),
+                knowledgeSearchPort, knowledgeCatalogPort, knowledgeContextPort, scope);
+    }
+
+    public int singleToolResultCharacters() {
+        return budget.singleToolResultCharacters();
+    }
 }

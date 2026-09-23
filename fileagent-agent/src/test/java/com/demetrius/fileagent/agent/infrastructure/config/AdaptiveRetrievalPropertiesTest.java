@@ -67,4 +67,36 @@ class AdaptiveRetrievalPropertiesTest {
     void adaptiveRetrievalShouldDefaultToDisabled() {
         assertThat(new AgentProperties().isAdaptiveRetrievalEnabled()).isFalse();
     }
+
+    @Test
+    void modelCallDefaultsShouldKeepEightStepsAndAllowSixAdaptiveCalls() {
+        AgentProperties base = new AgentProperties();
+        AdaptiveRetrievalProperties adaptive = new AdaptiveRetrievalProperties();
+
+        assertThat(base.getMaxSteps()).isEqualTo(8);
+        assertThat(base.getMaxModelCalls()).isEqualTo(4);
+        assertThat(adaptive.getMaxModelCalls()).isEqualTo(6);
+    }
+
+    @Test
+    void contextBudgetDefaultsShouldBeValidated() {
+        AgentProperties properties = new AgentProperties();
+
+        assertThat(properties.getMaxPromptCharacters()).isEqualTo(8_000);
+        assertThat(properties.getMaxHistoryCharacters()).isEqualTo(8_000);
+        assertThat(properties.getMaxSummaryCharacters()).isEqualTo(2_000);
+        assertThat(properties.getMaxRecentHistoryCharacters()).isEqualTo(6_000);
+        assertThat(properties.getMaxTotalTokens()).isEqualTo(60_000);
+        assertThatCode(properties::validate).doesNotThrowAnyException();
+    }
+
+    @Test
+    void summaryAndRecentHistoryBudgetCannotExceedHistoryBudget() {
+        AgentProperties properties = new AgentProperties();
+        properties.setMaxSummaryCharacters(5_000);
+        properties.setMaxRecentHistoryCharacters(5_000);
+
+        assertThatThrownBy(properties::validate)
+                .isInstanceOf(BizException.class);
+    }
 }

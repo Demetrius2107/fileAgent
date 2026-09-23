@@ -53,7 +53,7 @@ fileAgent/
 ├── fileagent-agent/               ✅ Agent 运行域（Phase 1 最小 Agentic RAG）
 │   ├── interfaces/                   AgentRunController（SSE / 状态查询 / 取消）
 │   ├── application/                  AgentRunAppService（编排落库）/ AgentPromptFactory / AgentToolContext
-│   ├── domain/                       AgentRun / AgentRunBudget（状态机与预算）
+│   ├── domain/                       AgentRun / AgentRunBudget（状态机、字符预算、Token 用量与截断原因）
 │   └── infrastructure/               AgentScopeRuntimeAdapter / AgentScopeModelFactory / 三个只读工具 / 内存 Run Registry
 
 ├── fileagent-action/              ✅ 动作执行域

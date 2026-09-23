@@ -3,6 +3,7 @@ package com.demetrius.fileagent.agent.infrastructure.runtime;
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
 import com.demetrius.fileagent.agent.application.tool.AgentToolContext;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
+import com.demetrius.fileagent.agent.domain.run.AgentRunBudget;
 import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.run.InMemoryAgentRunRegistry;
@@ -163,8 +164,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 .build();
 
         AgentToolContext toolContext = new AgentToolContext(
-                run, knowledgeSearchPort, knowledgeCatalogPort, knowledgeContextPort,
-                command.knowledgeScope(), properties.getSingleToolResultCharacters());
+                run, currentBudget(), knowledgeSearchPort, knowledgeCatalogPort, knowledgeContextPort,
+                command.knowledgeScope());
 
         RuntimeContext ctx = RuntimeContext.builder()
                 .sessionId(String.valueOf(command.sessionId()))
@@ -254,7 +255,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 ToolCallStartEvent start = (ToolCallStartEvent) event;
                 run.incrementStep();
                 int currentStep = step.incrementAndGet();
-                if (currentStep > properties.getMaxSteps()) {
+                if (currentStep > toolContext.budget().maxSteps()) {
                     agent.interrupt(ctx);
                     return failIfRunning(run, CODE_BUDGET_EXCEEDED, "超出步骤预算");
                 }
@@ -277,7 +278,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             case MODEL_CALL_START -> {
                 run.incrementModelCall();
                 int calls = modelCalls.incrementAndGet();
-                if (calls > properties.getMaxModelCalls()) {
+                if (calls > toolContext.budget().maxModelCalls()) {
                     agent.interrupt(ctx);
                     return failIfRunning(run, CODE_BUDGET_EXCEEDED, "超出模型调用预算");
                 }
@@ -432,6 +433,35 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 run.modelCallCount(),
                 run.assistantMessageId(),
                 run.failureCode(),
-                run.traceId());
+                run.traceId(),
+                run.historyCharacters(),
+                run.summaryCharacters(),
+                run.searchSnippetCharacters(),
+                run.documentReadCharacters(),
+                run.toolResultCharacters(),
+                run.inputTokens(),
+                run.outputTokens(),
+                run.totalTokens(),
+                run.historyCompressed(),
+                run.budgetReasons());
+    }
+
+    private AgentRunBudget currentBudget() {
+        return new AgentRunBudget(
+                properties.getMaxSteps(),
+                properties.isAdaptiveRetrievalEnabled()
+                        ? adaptiveRetrievalProperties.getMaxModelCalls()
+                        : properties.getMaxModelCalls(),
+                properties.getSingleToolResultCharacters(),
+                properties.getMaxToolResultCharacters(),
+                properties.getMaxPromptCharacters(),
+                properties.getMaxHistoryCharacters(),
+                properties.getMaxSummaryCharacters(),
+                properties.getMaxRecentHistoryCharacters(),
+                properties.getSearchSnippetCharacters(),
+                properties.getOutlineMaxEntries(),
+                properties.getReadMaxChunks(),
+                properties.getMaxTotalTokens(),
+                effectiveRunTimeout());
     }
 }

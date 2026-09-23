@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
+import java.util.List;
 
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -45,7 +46,8 @@ class AgentRunQueryControllerTest {
     @Test
     void snapshotShouldReturnApiResultWithSnapshot() throws Exception {
         AgentRunSnapshot snapshot = new AgentRunSnapshot(
-                "run-1", 1L, AgentRunStatus.RUNNING, Instant.now(), null, 1, 1, null, null, "trace-1");
+                "run-1", 1L, AgentRunStatus.RUNNING, Instant.now(), null, 1, 1, null, null, "trace-1",
+                0, 0, 0, 0, 0, 0, 0, 0, false, List.of());
         when(agentRuntimePort.snapshot("run-1")).thenReturn(snapshot);
 
         mockMvc.perform(get("/api/agent-runs/run-1"))
@@ -67,7 +69,8 @@ class AgentRunQueryControllerTest {
     @Test
     void cancelShouldReturnApiResultWithCancelledStatus() throws Exception {
         AgentRunSnapshot snapshot = new AgentRunSnapshot(
-                "run-1", 1L, AgentRunStatus.CANCELLED, Instant.now(), Instant.now(), 0, 0, null, null, "trace-1");
+                "run-1", 1L, AgentRunStatus.CANCELLED, Instant.now(), Instant.now(), 0, 0, null, null, "trace-1",
+                0, 0, 0, 0, 0, 0, 0, 0, false, List.of());
         when(agentRuntimePort.cancel("run-1")).thenReturn(snapshot);
 
         mockMvc.perform(post("/api/agent-runs/run-1/cancel"))

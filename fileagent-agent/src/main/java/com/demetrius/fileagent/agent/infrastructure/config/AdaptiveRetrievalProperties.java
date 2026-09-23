@@ -27,6 +27,9 @@ public class AdaptiveRetrievalProperties {
     /** Adaptive 生效时的 Run 总时长预算，须大于 toolTimeout 的 3 倍（3 条子查询的预算上限）。 */
     private Duration runTimeout = Duration.ofSeconds(90);
 
+    /** Adaptive 单次 Run 的模型调用上限，包含历史摘要调用。 */
+    private int maxModelCalls = 6;
+
     private Tier singleHop = new Tier(20, 20, 100, 1.0, 1.0, 5, true, true);
     private Tier multiQuery = new Tier(20, 20, 100, 1.0, 1.0, 8, true, false);
     private Tier multiHop = new Tier(20, 20, 100, 1.0, 1.0, 8, true, false);
@@ -36,6 +39,9 @@ public class AdaptiveRetrievalProperties {
 
     /** 启动期校验：档位参数合法且 runTimeout 覆盖最大子查询数预算。 */
     public void validate(Duration baseToolTimeout) {
+        if (maxModelCalls < 1) {
+            throw new BizException("fileagent.agent.adaptive-retrieval.maxModelCalls 必须大于等于 1");
+        }
         validateTier("singleHop", singleHop);
         validateTier("multiQuery", multiQuery);
         validateTier("multiHop", multiHop);

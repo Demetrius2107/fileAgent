@@ -6,6 +6,7 @@ import com.demetrius.fileagent.api.port.KnowledgeSearchPort.KnowledgeHit;
 
 import java.time.Instant;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,7 +36,18 @@ public class AgentRun {
     private Instant endedAt;
     private int stepCount;
     private int modelCallCount;
+    private int historyCharacters;
+    private int summaryCharacters;
+    private int searchSnippetCharacters;
+    private int documentReadCharacters;
+    private int toolResultCharacters;
+    private long inputTokens;
+    private long outputTokens;
+    private long totalTokens;
+    private boolean historyCompressed;
     private final Set<String> allowedChunkIds = ConcurrentHashMap.newKeySet();
+    private final Set<Long> allowedFileIds = ConcurrentHashMap.newKeySet();
+    private final List<String> budgetReasons = new CopyOnWriteArrayList<>();
     private final List<KnowledgeHit> retrievedHits = new CopyOnWriteArrayList<>();
     private volatile boolean cancelRequested;
     private Long assistantMessageId;
@@ -136,6 +148,59 @@ public class AgentRun {
         }
     }
 
+    public void addAllowedFile(Long fileId) {
+        if (fileId != null) {
+            allowedFileIds.add(fileId);
+        }
+    }
+
+    public boolean isAllowedFile(Long fileId) {
+        return fileId != null && allowedFileIds.contains(fileId);
+    }
+
+    public void recordHistoryUsage(int historyCharacters, int summaryCharacters, boolean compressed) {
+        this.historyCharacters = Math.max(0, historyCharacters);
+        this.summaryCharacters = Math.max(0, summaryCharacters);
+        this.historyCompressed = compressed;
+    }
+
+    public void recordSearchSnippetCharacters(int characters) {
+        this.searchSnippetCharacters += Math.max(0, characters);
+    }
+
+    public void recordDocumentReadCharacters(int characters) {
+        this.documentReadCharacters += Math.max(0, characters);
+    }
+
+    public void recordToolResultCharacters(int characters) {
+        this.toolResultCharacters += Math.max(0, characters);
+    }
+
+    public void recordModelUsage(int inputTokens, int outputTokens, int totalTokens) {
+        this.inputTokens += Math.max(0, inputTokens);
+        this.outputTokens += Math.max(0, outputTokens);
+        this.totalTokens += Math.max(0, totalTokens > 0 ? totalTokens : inputTokens + outputTokens);
+    }
+
+    public void addBudgetReason(String reason) {
+        if (reason != null && !reason.isBlank() && !budgetReasons.contains(reason)) {
+            budgetReasons.add(reason);
+        }
+    }
+
+    public boolean shouldStopToolExpansion(AgentRunBudget budget) {
+        boolean stopped = false;
+        if (toolResultCharacters >= budget.maxToolResultCharacters()) {
+            addBudgetReason("TOOL_BUDGET_EXHAUSTED");
+            stopped = true;
+        }
+        if (totalTokens >= budget.maxTotalTokens()) {
+            addBudgetReason("TOKEN_BUDGET_EXHAUSTED");
+            stopped = true;
+        }
+        return stopped;
+    }
+
     /** 记录一次检索命中的完整片段（供离线评测收集检索证据）。 */
     public void addRetrievedHit(KnowledgeHit hit) {
         if (hit != null) {
@@ -214,6 +279,50 @@ public class AgentRun {
 
     public Set<String> allowedChunkIds() {
         return Collections.unmodifiableSet(allowedChunkIds);
+    }
+
+    public Set<Long> allowedFileIds() {
+        return Collections.unmodifiableSet(new LinkedHashSet<>(allowedFileIds));
+    }
+
+    public int historyCharacters() {
+        return historyCharacters;
+    }
+
+    public int summaryCharacters() {
+        return summaryCharacters;
+    }
+
+    public int searchSnippetCharacters() {
+        return searchSnippetCharacters;
+    }
+
+    public int documentReadCharacters() {
+        return documentReadCharacters;
+    }
+
+    public int toolResultCharacters() {
+        return toolResultCharacters;
+    }
+
+    public long inputTokens() {
+        return inputTokens;
+    }
+
+    public long outputTokens() {
+        return outputTokens;
+    }
+
+    public long totalTokens() {
+        return totalTokens;
+    }
+
+    public boolean historyCompressed() {
+        return historyCompressed;
+    }
+
+    public List<String> budgetReasons() {
+        return List.copyOf(budgetReasons);
     }
 
     public List<KnowledgeHit> retrievedHits() {

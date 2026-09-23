@@ -114,7 +114,7 @@ fileagent-evaluation/README.md
 - 修改：`fileagent-session/src/test/java/com/demetrius/fileagent/session/infrastructure/SessionMessagePortImplTest.java`
 - 修改：`docs/SKELETON.md`
 
-- [ ] **步骤 1：先写 CAS 持久化失败测试**
+- [x] **步骤 1：先写 CAS 持久化失败测试**
 
 覆盖以下行为：
 
@@ -135,7 +135,7 @@ class SessionSummaryJpaTest {
 }
 ```
 
-- [ ] **步骤 2：运行测试，确认因契约和字段不存在而失败**
+- [x] **步骤 2：运行测试，确认因契约和字段不存在而失败**
 
 ```bash
 JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
@@ -149,7 +149,7 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
 
 预期：编译失败，指出摘要查询或 CAS 更新 API 尚不存在。
 
-- [ ] **步骤 3：扩展跨域 Port，不暴露 session 实体**
+- [x] **步骤 3：扩展跨域 Port，不暴露 session 实体**
 
 `SessionQueryPort` 增加：
 
@@ -182,7 +182,7 @@ boolean updateSummary(
         String sourceHash);
 ```
 
-- [ ] **步骤 4：增加实体字段和只向前推进的条件更新**
+- [x] **步骤 4：增加实体字段和只向前推进的条件更新**
 
 `SessionEntity` 增加 `summary`、`summaryThroughMessageId`、`summaryUpdatedAt`、`summaryVersion`、`summarySourceHash`。`summary` 使用 `@Lob` 和 `CLOB`，`summaryVersion` 初始值为 `0L`。
 
@@ -207,19 +207,19 @@ int updateSummary(...);
 
 不使用 JPA `@Version`，避免普通消息追加造成无关版本冲突。
 
-- [ ] **步骤 5：实现查询和写入适配器**
+- [x] **步骤 5：实现查询和写入适配器**
 
 `MessageJpaRepository` 增加按消息 ID 查询；`SessionQueryPortImpl` 在会话不存在时沿用现有异常语义；`SessionMessagePortImpl.updateSummary` 在事务中调用条件更新并返回 `updatedRows == 1`。
 
-- [ ] **步骤 6：补测试依赖和架构文档**
+- [x] **步骤 6：补测试依赖和架构文档**
 
 仅在 `fileagent-session/pom.xml` 增加 `spring-boot-data-jpa-test` 测试依赖，并在 `docs/SKELETON.md` 的依赖表同步说明。项目当前依赖 `ddl-auto=update`，本任务不引入 Flyway；文档明确生产数据库需要在上线阶段补正式 DDL。
 
-- [ ] **步骤 7：运行任务 1 测试，确认通过**
+- [x] **步骤 7：运行任务 1 测试，确认通过**
 
 运行步骤 2 的同一命令。预期：测试通过，CAS 旧版本和检查点回退用例均返回 `false`。
 
-- [ ] **步骤 8：提交任务 1**
+- [x] **步骤 8：提交任务 1**
 
 ```bash
 git add fileagent-api/src/main/java/com/demetrius/fileagent/api/port/SessionQueryPort.java \
@@ -251,7 +251,7 @@ git commit -m "feat(session): 持久化会话滚动摘要"
 - 修改：`fileagent-starter/src/main/resources/application.yml`
 - 修改测试：对应的 `AgentRunTest`、`AdaptiveRetrievalPropertiesTest`、`AgentScopeRuntimeAdapterTest`、`AgentRunQueryControllerTest`
 
-- [ ] **步骤 1：写预算聚合根失败测试**
+- [x] **步骤 1：写预算聚合根失败测试**
 
 测试必须覆盖：
 
@@ -271,7 +271,7 @@ assertThat(run.shouldStopToolExpansion(adaptiveBudget)).isTrue();
 assertThat(run.budgetReasons()).contains("TOKEN_BUDGET_EXHAUSTED");
 ```
 
-- [ ] **步骤 2：运行测试，确认新增 API 尚不存在**
+- [x] **步骤 2：运行测试，确认新增 API 尚不存在**
 
 ```bash
 JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
@@ -285,7 +285,7 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
 
 预期：编译失败或断言失败，证明新预算尚未生效。
 
-- [ ] **步骤 3：扩展配置并做启动校验**
+- [x] **步骤 3：扩展配置并做启动校验**
 
 `AgentProperties` 增加默认值：
 
@@ -302,11 +302,11 @@ maxTotalTokens=60000
 
 `AdaptiveRetrievalProperties` 增加 `maxModelCalls=6`。校验摘要加最近消息预算不超过历史总预算、单次工具结果不超过累计工具结果、所有限制为正数。
 
-- [ ] **步骤 4：扩展不可变 AgentRunBudget**
+- [x] **步骤 4：扩展不可变 AgentRunBudget**
 
 `AgentRunBudget` 保存所有固定上限；通过 `AgentProperties` 和 Adaptive 开关创建，不能在工具内临时读取配置。保留 `maxSteps=8`，不要因摘要调用增加 Step。
 
-- [ ] **步骤 5：扩展 AgentRun 实际用量和授权状态**
+- [x] **步骤 5：扩展 AgentRun 实际用量和授权状态**
 
 直接在现有 `AgentRun` 增加：
 
@@ -337,7 +337,7 @@ TOOL_BUDGET_EXHAUSTED
 TOKEN_BUDGET_EXHAUSTED
 ```
 
-- [ ] **步骤 6：简化 AgentToolContext 并扩展 Snapshot**
+- [x] **步骤 6：简化 AgentToolContext 并扩展 Snapshot**
 
 `AgentToolContext` 只保存现有对象：
 
@@ -354,11 +354,11 @@ public record AgentToolContext(
 
 `AgentRunSnapshot` 直接增加预算字段，不再创建 Budget DTO。
 
-- [ ] **步骤 7：运行测试，确认 `maxSteps=8` 与 Adaptive `maxModelCalls=6` 同时成立**
+- [x] **步骤 7：运行测试，确认 `maxSteps=8` 与 Adaptive `maxModelCalls=6` 同时成立**
 
 运行步骤 2 的命令。预期：全部通过。
 
-- [ ] **步骤 8：提交任务 2**
+- [x] **步骤 8：提交任务 2**
 
 ```bash
 git add fileagent-agent/src/main/java/com/demetrius/fileagent/agent/infrastructure/config/AgentProperties.java \

@@ -3,6 +3,7 @@ package com.demetrius.fileagent.api.dto;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * Agent Run 查询快照（GET 接口返回）。
@@ -19,5 +20,15 @@ public record AgentRunSnapshot(
         int modelCallCount,
         Long assistantMessageId,
         String failureCode,
-        String traceId) {
+        String traceId,
+        int historyCharacters,
+        int summaryCharacters,
+        int searchSnippetCharacters,
+        int documentReadCharacters,
+        int toolResultCharacters,
+        long inputTokens,
+        long outputTokens,
+        long totalTokens,
+        boolean historyCompressed,
+        List<String> budgetReasons) {
 }

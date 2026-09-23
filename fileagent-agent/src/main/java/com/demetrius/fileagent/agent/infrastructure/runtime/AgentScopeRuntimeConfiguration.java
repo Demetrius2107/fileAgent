@@ -26,6 +26,7 @@ public class AgentScopeRuntimeConfiguration {
     @Bean
     AdaptiveRetrievalPolicy adaptiveRetrievalPolicy(AgentProperties agentProperties,
                                                     AdaptiveRetrievalProperties adaptiveRetrievalProperties) {
+        agentProperties.validate();
         adaptiveRetrievalProperties.validate(agentProperties.getToolTimeout());
         return new AdaptiveRetrievalPolicy(adaptiveRetrievalProperties.toTiers());
     }

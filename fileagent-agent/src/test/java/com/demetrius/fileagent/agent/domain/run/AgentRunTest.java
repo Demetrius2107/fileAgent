@@ -51,6 +51,51 @@ class AgentRunTest {
     }
 
     @Test
+    void shouldTrackContextUsageAndStopExpansionAtBudget() {
+        AgentRun run = AgentRun.pending("run-usage", 8L, "trace-usage");
+        run.start(NOW);
+
+        run.addAllowedFile(12L);
+        run.recordHistoryUsage(7_500, 2_000, true);
+        run.recordSearchSnippetCharacters(500);
+        run.recordDocumentReadCharacters(300);
+        run.recordToolResultCharacters(4_000);
+        run.recordModelUsage(1_000, 2_000, 3_000);
+        run.addBudgetReason("HISTORY_SUMMARIZED");
+
+        assertThat(run.isAllowedFile(12L)).isTrue();
+        assertThat(run.historyCharacters()).isEqualTo(7_500);
+        assertThat(run.summaryCharacters()).isEqualTo(2_000);
+        assertThat(run.searchSnippetCharacters()).isEqualTo(500);
+        assertThat(run.documentReadCharacters()).isEqualTo(300);
+        assertThat(run.toolResultCharacters()).isEqualTo(4_000);
+        assertThat(run.inputTokens()).isEqualTo(1_000);
+        assertThat(run.outputTokens()).isEqualTo(2_000);
+        assertThat(run.totalTokens()).isEqualTo(3_000);
+        assertThat(run.historyCompressed()).isTrue();
+        assertThat(run.budgetReasons()).containsExactly("HISTORY_SUMMARIZED");
+
+        AgentRunBudget budget = new AgentRunBudget(
+                8, 6, 4_000, 12_000,
+                8_000, 8_000, 2_000, 6_000,
+                500, 50, 3, 3_000, java.time.Duration.ofSeconds(90));
+        assertThat(run.shouldStopToolExpansion(budget)).isTrue();
+    }
+
+    @Test
+    void shouldDeduplicateBudgetReasonsAndTrackTokenTotals() {
+        AgentRun run = AgentRun.pending("run-reasons", 8L, "trace-reasons");
+        run.start(NOW);
+
+        run.addBudgetReason("TOKEN_BUDGET_EXHAUSTED");
+        run.addBudgetReason("TOKEN_BUDGET_EXHAUSTED");
+        run.recordModelUsage(10, 20, 0);
+
+        assertThat(run.totalTokens()).isEqualTo(30);
+        assertThat(run.budgetReasons()).containsExactly("TOKEN_BUDGET_EXHAUSTED");
+    }
+
+    @Test
     void shouldRecordFailureCodeOnFailAndTimeout() {
         AgentRun failed = AgentRun.pending("f", 8L, "trace-1");
         failed.start(NOW);

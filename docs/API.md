@@ -500,7 +500,7 @@ Request:
 ### 4.3 Agent Run 快照查询
 `GET /api/agent-runs/{runId}`
 
-返回 `ApiResult<AgentRunSnapshot>`，含 `runId`/`status`/`stepCount`/`modelCallCount`/`assistantMessageId`/`failureCode`/`traceId`；不含思维链与工具正文。Run 不存在返回 HTTP 404 + `code=404`。
+返回 `ApiResult<AgentRunSnapshot>`，含 `runId`/`status`/`stepCount`/`modelCallCount`/`assistantMessageId`/`failureCode`/`traceId`，以及 `historyCharacters`、`summaryCharacters`、`searchSnippetCharacters`、`documentReadCharacters`、`toolResultCharacters`、`inputTokens`、`outputTokens`、`totalTokens`、`historyCompressed`、`budgetReasons`；不含思维链、Prompt、摘要正文与工具正文。Run 不存在返回 HTTP 404 + `code=404`。
 
 > Run 快照保存在进程内存，进程重启后不可查询。
 

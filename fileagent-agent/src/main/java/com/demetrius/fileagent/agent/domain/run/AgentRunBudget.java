@@ -12,7 +12,25 @@ public record AgentRunBudget(
         int maxModelCalls,
         int singleToolResultCharacters,
         int maxToolResultCharacters,
+        int maxPromptCharacters,
+        int maxHistoryCharacters,
+        int maxSummaryCharacters,
+        int maxRecentHistoryCharacters,
+        int searchSnippetCharacters,
+        int outlineMaxEntries,
+        int readMaxChunks,
+        int maxTotalTokens,
         Duration runTimeout) {
+
+    public AgentRunBudget(
+            int maxSteps,
+            int maxModelCalls,
+            int singleToolResultCharacters,
+            int maxToolResultCharacters,
+            Duration runTimeout) {
+        this(maxSteps, maxModelCalls, singleToolResultCharacters, maxToolResultCharacters,
+                8000, 8000, 2000, 6000, 500, 50, 3, 60000, runTimeout);
+    }
 
     public boolean stepsExceeded(int currentSteps) {
         return currentSteps >= maxSteps;

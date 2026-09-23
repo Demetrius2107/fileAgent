@@ -38,6 +38,7 @@ fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/runti
 fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/tool/GetDocumentOutlineToolTest.java
 fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/tool/ListKnowledgeFilesToolTest.java
 fileagent-session/src/test/java/com/demetrius/fileagent/session/infrastructure/SessionSummaryJpaTest.java
+fileagent-session/src/test/java/com/demetrius/fileagent/session/SessionJpaTestBootstrap.java
 fileagent-evaluation/src/main/resources/evaluation/context-v1/cases/agent.jsonl
 fileagent-evaluation/src/main/resources/evaluation/context-v1/corpus/context-budget-handbook.md
 fileagent-evaluation/src/main/resources/evaluation/context-v1/corpus/context-budget-procedure.md
@@ -109,6 +110,7 @@ fileagent-evaluation/README.md
 - 修改：`fileagent-session/src/main/java/com/demetrius/fileagent/session/infrastructure/SessionMessagePortImpl.java`
 - 修改：`fileagent-session/pom.xml`
 - 新增：`fileagent-session/src/test/java/com/demetrius/fileagent/session/infrastructure/SessionSummaryJpaTest.java`
+- 新增：`fileagent-session/src/test/java/com/demetrius/fileagent/session/SessionJpaTestBootstrap.java`
 - 修改：`fileagent-session/src/test/java/com/demetrius/fileagent/session/infrastructure/SessionMessagePortImplTest.java`
 - 修改：`docs/SKELETON.md`
 

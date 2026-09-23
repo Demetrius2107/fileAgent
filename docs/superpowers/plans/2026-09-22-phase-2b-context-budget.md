@@ -840,7 +840,7 @@ git diff --check
 
 预期：本期新增代码没有占位实现；配置中只有环境变量占位和字段名，没有真实密钥；未跟踪的 `AnswerCitationExtractorTest.java` 仍未被暂存；`git diff --check` 无错误。
 
-- [ ] **步骤 6：提交数据集和文档**
+- [x] **步骤 6：提交数据集和文档**
 
 ```bash
 git add fileagent-evaluation/src/main/resources/evaluation/context-v1 \
@@ -877,12 +877,12 @@ FILEAGENT_EVALUATION_RUN_ID=phase2b-adaptive-regression-$(date -u +%Y%m%dT%H%M%S
 
 ## 完成标准
 
-- [ ] Adaptive 模式历史超限时压缩而不是删除，摘要可跨 Run 持久化。
-- [ ] 摘要失败和 CAS 冲突均受控降级，不覆盖较新摘要。
-- [ ] 搜索、文件列表、目录、精读遵守逐级授权与 4000/12000 字符预算。
-- [ ] `maxSteps=8` 未调整，并有“8 步允许、第 9 步拒绝、摘要和最终回答不计 Step”的测试。
-- [ ] Adaptive 模型调用最多 6 次，最后一次无工具；非 Adaptive 保持 4 次。
-- [ ] Snapshot 和评测记录真实字符与 Token，不泄露正文和内部 Prompt。
-- [ ] 无知识库证据时可明确标识通用知识，不伪造引用；基础设施失败不会伪装成零命中。
+- [x] Adaptive 模式历史超限时压缩而不是删除，摘要可跨 Run 持久化。
+- [x] 摘要失败和 CAS 冲突均受控降级，不覆盖较新摘要。
+- [x] 搜索、文件列表、目录、精读遵守逐级授权与 4000/12000 字符预算。
+- [x] `maxSteps=8` 未调整，并有“8 步允许、第 9 步拒绝、摘要和最终回答不计 Step”的测试。
+- [x] Adaptive 模型调用最多 6 次，最后一次无工具；非 Adaptive 保持 4 次。
+- [x] Snapshot 和评测记录真实字符与 Token，不泄露正文和内部 Prompt。
+- [x] 无知识库证据时可明确标识通用知识，不伪造引用；基础设施失败不会伪装成零命中。
 - [ ] `context-v1` 和 `adaptive-v2` 使用真实模型完成评测，报告保存在不同 Run 目录。
-- [ ] 全量 Maven 测试通过，`git diff --check` 通过，未夹带用户的未跟踪文件。
+- [x] 全量 Maven 测试通过，`git diff --check` 通过，未夹带用户的未跟踪文件。

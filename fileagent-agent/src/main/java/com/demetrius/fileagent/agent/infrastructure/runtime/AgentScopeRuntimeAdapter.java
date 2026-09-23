@@ -511,6 +511,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 run.toolResultCharacters() <= budget.maxToolResultCharacters(),
                 exhausted && run.status() == AgentRunStatus.SUCCEEDED,
                 false,
+                false,
                 preparedHistory == null ? null : preparedHistory.summary(),
                 preparedHistory == null ? null : preparedHistory.summaryThroughMessageId());
     }

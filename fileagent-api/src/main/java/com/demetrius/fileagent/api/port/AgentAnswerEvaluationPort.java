@@ -118,6 +118,7 @@ public interface AgentAnswerEvaluationPort {
             boolean toolBudgetCompliant,
             boolean budgetExhaustionCompleted,
             boolean summaryHasUnsupportedClaims,
+            boolean summaryJudgeCompleted,
             String summary,
             Long summaryThroughMessageId) {
         public EvaluationDetails {
@@ -149,12 +150,19 @@ public interface AgentAnswerEvaluationPort {
             this(historyCharacters, summaryCharacters, searchSnippetCharacters, documentReadCharacters,
                     toolResultCharacters, inputTokens, outputTokens, totalTokens, historyCompressed,
                     budgetReasons, promptPreserved, toolBudgetCompliant, budgetExhaustionCompleted,
-                    summaryHasUnsupportedClaims, null, null);
+                    summaryHasUnsupportedClaims, false, null, null);
+        }
+
+        public EvaluationDetails withSummaryJudge(boolean hasUnsupportedClaims) {
+            return new EvaluationDetails(historyCharacters, summaryCharacters, searchSnippetCharacters,
+                    documentReadCharacters, toolResultCharacters, inputTokens, outputTokens, totalTokens,
+                    historyCompressed, budgetReasons, promptPreserved, toolBudgetCompliant,
+                    budgetExhaustionCompleted, hasUnsupportedClaims, true, summary, summaryThroughMessageId);
         }
 
         public static EvaluationDetails empty() {
             return new EvaluationDetails(0, 0, 0, 0, 0, 0, 0, 0,
-                    false, List.of(), false, false, false, false, null, null);
+                    false, List.of(), false, false, false, false, false, null, null);
         }
     }
 

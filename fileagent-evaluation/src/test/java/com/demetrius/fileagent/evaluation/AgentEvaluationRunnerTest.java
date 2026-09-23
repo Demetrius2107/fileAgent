@@ -278,6 +278,35 @@ class AgentEvaluationRunnerTest {
     }
 
     @Test
+    void summaryUnsupportedClaimRateShouldUseSeparateHistoryJudge() {
+        EvaluationCase evaluationCase = new EvaluationCase("1.0", "history-judge-001", "HISTORY",
+                List.of("history"), "之前约定了什么？",
+                List.of(new EvaluationCase.HistoryMessage("user", "约定额度为 500 元。")),
+                new EvaluationCase.Filters(null, null, null),
+                new EvaluationCase.Expected(true, List.of(), List.of("500 元"), List.of(),
+                        AnswerGroundingMode.KNOWLEDGE_BASED));
+        AgentAnswerEvaluationPort.EvaluationDetails details = new AgentAnswerEvaluationPort.EvaluationDetails(
+                50, 20, 0, 0, 0, 1, 1, 2, true, List.of("HISTORY_SUMMARIZED"),
+                true, true, false, false, false, "{\"confirmedFacts\":[\"500 元\"]}", 1L);
+        AgentAnswerEvaluationPort agentPort = query -> new AgentAnswerEvaluationPort.Result(
+                "500 元 [来源：context-budget-handbook.md]", false, List.of(),
+                List.of("context-budget-handbook.md"), 1, 1, List.of(), 10,
+                AgentRunStatus.SUCCEEDED, null, null, null, details);
+        RagAnswerJudgePort judgePort = request -> new RagAnswerJudgePort.Result(
+                RagAnswerJudgePort.Decision.ANSWERED, "通过", request.question().startsWith("请判断"),
+                request.question().startsWith("请判断") ? "摘要包含未在历史出现的事实" : null,
+                List.of(), List.of(), "{}", 1);
+
+        AgentEvaluationRunner runner = new AgentEvaluationRunner(judgePort);
+        List<AgentEvaluationObservation> observations = runner.collect(List.of(evaluationCase), agentPort);
+        AgentEvaluationReport report = runner.evaluate("context-v1", List.of(evaluationCase), observations);
+
+        assertThat(observations).singleElement().extracting(o -> o.details().summaryJudgeCompleted())
+                .isEqualTo(true);
+        assertThat(report.contextMetrics().summaryUnsupportedClaimRate()).isEqualTo(1.0);
+    }
+
+    @Test
     void adaptiveMetricsShouldMeasurePlanningComplianceAndAccuracy() {
         List<AgentEvaluationObservation> observations = List.of(
                 adaptiveObservation("single-001",

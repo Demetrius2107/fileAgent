@@ -100,7 +100,8 @@ public final class AgentEvaluationRunner {
         }
         try {
             RagAnswerJudgePort.Result assessment = judgePort.judge(toJudgeRequest(evaluationCase, result));
-            return observation(evaluationCase, result, assessment, null);
+            return observation(evaluationCase, result, assessment, null,
+                    judgeSummary(evaluationCase, result));
         } catch (RuntimeException e) {
             return observation(evaluationCase, result, null, message(e));
         }
@@ -110,6 +111,14 @@ public final class AgentEvaluationRunner {
                                                    AgentAnswerEvaluationPort.Result result,
                                                    RagAnswerJudgePort.Result assessment,
                                                    String error) {
+        return observation(evaluationCase, result, assessment, error, result.details());
+    }
+
+    private AgentEvaluationObservation observation(EvaluationCase evaluationCase,
+                                                   AgentAnswerEvaluationPort.Result result,
+                                                   RagAnswerJudgePort.Result assessment,
+                                                   String error,
+                                                   AgentAnswerEvaluationPort.EvaluationDetails details) {
         return new AgentEvaluationObservation(
                 evaluationCase.id(), evaluationCase.category(), evaluationCase.question(),
                 result.answer(), result.refused(), filenames(result.retrieved()), result.citedFilenames(),
@@ -119,7 +128,31 @@ public final class AgentEvaluationRunner {
                 assessment != null && assessment.hasUnsupportedClaims(),
                 assessment == null ? List.of() : assessment.requiredFacts(),
                 assessment == null ? List.of() : assessment.forbiddenFacts(), error,
-                result.retrieval(), result.retrievals(), result.details());
+                result.retrieval(), result.retrievals(), details);
+    }
+
+    private AgentAnswerEvaluationPort.EvaluationDetails judgeSummary(
+            EvaluationCase evaluationCase, AgentAnswerEvaluationPort.Result result) {
+        AgentAnswerEvaluationPort.EvaluationDetails details = result.details();
+        if (details.summary() == null || details.summary().isBlank() || evaluationCase.history().isEmpty()) {
+            return details;
+        }
+        List<RagAnswerJudgePort.Evidence> historyEvidence = evaluationCase.history().stream()
+                .map(message -> new RagAnswerJudgePort.Evidence("history-" + message.role(), message.content()))
+                .toList();
+        try {
+            RagAnswerJudgePort.Result assessment = judgePort.judge(new RagAnswerJudgePort.Request(
+                    "请判断历史摘要是否只包含历史消息中明确出现的信息。",
+                    true,
+                    AnswerGroundingMode.KNOWLEDGE_BASED,
+                    List.of(),
+                    List.of(),
+                    details.summary(),
+                    historyEvidence));
+            return details.withSummaryJudge(assessment.hasUnsupportedClaims());
+        } catch (RuntimeException e) {
+            return details;
+        }
     }
 
     public AgentEvaluationReport evaluate(String datasetVersion,
@@ -159,7 +192,7 @@ public final class AgentEvaluationRunner {
                 exhaustedCount++;
                 exhaustedSum += details.budgetExhaustionCompleted() ? 1.0 : 0.0;
             }
-            if (details.summaryCharacters() > 0) {
+            if (details.summaryCharacters() > 0 && details.summaryJudgeCompleted()) {
                 summaryCount++;
                 summaryUnsupportedSum += details.summaryHasUnsupportedClaims() ? 1.0 : 0.0;
             }

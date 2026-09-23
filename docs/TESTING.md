@@ -64,6 +64,8 @@ mvn verify            # 含集成（如有）
 - 端到端入口：`fileagent-evaluation/scripts/run-agent-evaluation.sh` 调用已部署实例的 `/internal/evaluation/agent/run`，真实执行 AgentScope、当前知识库、当前启用的聊天模型和 `deepseek-v4-pro` Judge。它不启动新应用，也不要求重复配置模型 API Key。
 - `mvn test` 中的 `AgentEvaluationRunnerTest` 只是评测器单元测试，验证数据解析、指标与门禁计算，不能替代真实报告。
 - 真实评测路径 `AgentAnswerEvaluationPort -> AgentScopeRuntimeAdapter.evaluate()` 复用生产运行时，但**不创建会话、不写数据库**，只保留受控观察供评测分析。
+- Phase 2B 使用独立数据集 `context-v1`，包含长历史摘要、否定/日期/金额/ID 原样保留、目录与细粒度读取、工具预算耗尽后正常收口、通用知识无假引用和知识库基础设施失败等场景。先上传 `./fileagent-evaluation/scripts/upload-corpus.sh context-v1`，再执行 `FILEAGENT_EVALUATION_DATASET_VERSION=context-v1 ./fileagent-evaluation/scripts/run-agent-evaluation.sh`。
+- `context.*` 指标定义：`promptPreservationRate` 当前问题是否被完整保留；`toolBudgetComplianceRate` 工具结果是否未超过单次/累计上限；`budgetExhaustionCompletionRate` 预算耗尽后是否仍正常完成；`historyRequiredFactCoverage` 历史题必答事实覆盖；`summaryUnsupportedClaimRate` 摘要无依据主张率；`fakeCitationRate` 通用知识题输出知识库引用的比例。前四项通常配置最低值，后两项配置最高值。
 
 ## 8. 自适应检索评测（adaptive-v1）
 

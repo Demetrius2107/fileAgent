@@ -64,7 +64,7 @@ fileAgent/
 │
 ├── fileagent-evaluation/          ✅ RAG 端到端评测工具
 │   ├── evaluation/                   JSONL 加载 / Runner / 指标 / 报告 / 质量门禁
-│   └── resources/evaluation/v1/      固定语料、30 题数据集、门禁阈值
+│   └── resources/evaluation/         v1、adaptive-v1/v2、context-v1 语料、题集与门禁阈值
 │
 ├── fileagent-starter/             ✅ 主应用启动装配（自研 RAG Boot 入口）
 │   ├── FileAgentApplication.java

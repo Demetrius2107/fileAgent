@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "1.0",
+  "minimumScores": {
+    "context.promptPreservationRate": 1.0,
+    "context.toolBudgetComplianceRate": 1.0,
+    "context.budgetExhaustionCompletionRate": 1.0,
+    "context.historyRequiredFactCoverage": 0.9
+  },
+  "maximumScores": {
+    "context.summaryUnsupportedClaimRate": 0.0,
+    "context.fakeCitationRate": 0.0
+  },
+  "maximumRegression": 0.0,
+  "regressionMetrics": []
+}

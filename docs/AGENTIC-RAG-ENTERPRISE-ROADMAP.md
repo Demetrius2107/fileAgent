@@ -314,10 +314,19 @@ flowchart LR
 
 **开发任务**：
 
-- 增加 `get_chunk` / `get_document_outline`，避免每次把大父块全部塞给模型。
+- 增加 `get_document_outline` / `read_document_context`，避免每次把大父块全部塞给模型。
 - 建立上下文预算器，分别限制历史、检索证据、工具结果和用户输入。
 - 对截断、去重、父块展开和证据选择建立确定性顺序，预算不足时优先保留高相关且来源多样的证据。
 - 记录各类上下文实际消耗和被截断原因，不保存模型思维链或未脱敏工具原文。
+
+**已落地实现（`feat/m3-context-budget`）**：
+
+- `get_document_outline` 先返回受限目录预览，`read_document_context` 按 `fileId + chunkIndex` 读取细粒度原文；工具只授权实际渲染给模型的 chunk/file。
+- `AgentRun` 统一记录历史、摘要、搜索摘要、原文读取、工具结果和模型 Token 用量；工具结果采用单次 4000、单次 Run 累计 12000 字符预算。
+- 历史超限时保留最近消息并调用滚动摘要；摘要失败保留已有上下文并记录受控原因，不把失败伪装成知识库零命中。
+- `AgentBudgetMiddleware` 在模型调用前收口工具列表，在 Token 软上限或模型调用预算耗尽时允许 Agent 基于已有证据结束回答。
+- 评测报告新增上下文指标：当前问题保留率、工具预算合规率、预算耗尽后完成率、历史必答事实覆盖率，以及摘要无依据主张率、通用知识假引用率两个上限指标。
+- 新增 `context-v1` 数据集和独立语料；执行 `./fileagent-evaluation/scripts/upload-corpus.sh context-v1` 后，用 `FILEAGENT_EVALUATION_DATASET_VERSION=context-v1` 运行真实评测。
 
 **验收门槛**：
 

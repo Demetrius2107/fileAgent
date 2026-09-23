@@ -14,6 +14,11 @@ src/main/resources/evaluation/adaptive-v1/
 ├── corpus/                 2 份含可比条目与跨文档多跳关系的 Markdown 语料
 ├── cases/agent.jsonl       12 类自适应检索场景
 └── gate.json               四项强制门 =1.0；自适应收益阈值待 baseline 人工确认
+
+src/main/resources/evaluation/context-v1/
+├── corpus/                 上下文预算与细粒度证据读取语料
+├── cases/agent.jsonl       历史摘要、预算收口、引用和通用知识场景
+└── gate.json               Phase 2B 上下限门禁
 ```
 
 v1 首批包含 7 份语料和 30 道题，覆盖事实、语义、CSV 表格、跨文件比较、版本冲突、无答案、提示注入和错误前提。
@@ -112,6 +117,19 @@ FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v1 ./fileagent-evaluation/scripts/
 未执行结构化检索的 Run 不参与自适应指标；Markdown 报告会展示自适应指标与分母口径。`gate.json` 当前只强制 `adaptive.queryCountComplianceRate=1.0`、`adaptive.strategyComplianceRate=1.0`、`agent.toolWhitelistPassRate=1.0`、`agent.budgetComplianceRate=1.0`；`queryTypeAccuracy`、`subQuestionCoverage` 与多跳/比较收益阈值须在首份真实 baseline 经人工确认后填入，在此之前只展示、不断言。
 
 校准后的 `adaptive-v2` 独立保留 13 题与同内容语料，不覆盖 v1 的题库和历史报告。先上传 `./fileagent-evaluation/scripts/upload-corpus.sh adaptive-v2`，部署新代码后运行 `FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v2 ./fileagent-evaluation/scripts/run-agent-evaluation.sh`；不要用 v1 报告作为 v2 baseline。v2 区分并列独立事实的 `MULTI_QUERY`（首轮至少 2 条）和真正依赖中间结果的 `MULTI_HOP`（允许首轮 1 条、最多两轮）；历史年份对比归 `COMPARISON`，不伪装成“当前最新”的 `TIME_SENSITIVE` 样本。`observations.jsonl` 的 `retrievals` 列出全部成功检索轮次，`retrieval` 为兼容字段，仍指最后一轮。类型准确率看首轮，计划/策略合规检查每轮；子问题覆盖率仍为数量代理，多跳累计轮次，其他只看首轮。
+
+## 上下文预算评测（context-v1）
+
+`context-v1` 验证 Phase 2B 的历史上下文、滚动摘要、目录与原文读取、工具预算收口和通用知识边界。先上传独立语料，再调用已部署服务：
+
+```bash
+./fileagent-evaluation/scripts/upload-corpus.sh context-v1
+FILEAGENT_EVALUATION_DATASET_VERSION=context-v1 \
+FILEAGENT_EVALUATION_RUN_ID=phase2b-context-$(date -u +%Y%m%dT%H%M%SZ) \
+./fileagent-evaluation/scripts/run-agent-evaluation.sh
+```
+
+报告新增 `context.*` 指标：当前问题保留率、工具预算合规率、预算耗尽后完成率、历史必答事实覆盖率、历史摘要无依据主张率和通用知识假引用率。前四项配置最低值，后两项通过 `maximumScores` 配置最高值。`observations.jsonl` 的 `details` 记录字符数、Token、预算原因、受控布尔状态，以及受 `maxSummaryCharacters` 限制的摘要和覆盖消息 ID；不包含完整 Prompt、思维链或工具正文。真实模型评测需要服务端已有的 Chat、Embedding、reranker、Elasticsearch 和 Judge 配置，脚本不接收额外模型 API Key。
 
 普通 RAG 的 `v1` 每次运行会真实生成 30 个回答，并逐题调用 `deepseek-v4-pro` 评判，因此会产生 30 次回答调用和 30 次 Judge 调用。Judge 复用部署已有的 `FILEAGENT_CHAT_API_KEY` 与 DeepSeek 端点，不需要新增 API Key。评测接口是同步批量执行，反向代理的请求超时时间应覆盖整批运行耗时。
 

@@ -402,6 +402,7 @@ Request（字段可省略）：
 - `agent.citationCoverageRate` 只统计成功的 `KNOWLEDGE_BASED` 题中是否至少引用一个本次检索命中的文件；`agent.citationValidityRate` 只统计这些题实际写出引用时，引用文件是否全部来自本次检索结果。`GENERAL_KNOWLEDGE`、`REFUSE` 和失败 Run 的引用状态为 `NOT_APPLICABLE`。
 - `answer.forbiddenFactSafety` 在没有标注禁答事实且成功完成 Judge 的样本时为 `null`（报告显示“不适用”），配置了该指标的门禁会因缺少结果而失败；`agent.refusalDecisionAccuracy` 依据 Judge 的 `REFUSED` / `ANSWERED` 判定，Judge 失败的题不参与该指标分母。
 - 自适应检索评测的 `observations[].retrievals` 按执行顺序列出所有成功检索轮次，`retrieval` 保留最后一轮以兼容旧报告；查询类型准确率看首轮，检索轮数与策略合规检查全部轮次。检索类型包括 `MULTI_QUERY`（并列独立事实）和 `MULTI_HOP`（依赖前一步结果），均由服务端控制实际检索参数。
+- Phase 2B 的 `observations[].details` 记录上下文预算观察：历史/摘要/检索摘要/原文读取/工具结果字符数、模型 Token 用量、摘要是否发生、受控摘要及其覆盖到的消息 ID、预算原因和预算收口结果。摘要受 `maxSummaryCharacters` 限制；该字段只出现在内部评测结果，不进入公开 Run Snapshot，也不返回思维链或完整工具正文。报告中的 `context.*` 指标分为越高越好的保留/完成/覆盖率，以及越低越好的摘要无依据主张率和通用知识假引用率；后两者通过 `gate.json.maximumScores` 配置上限。
 
 ---
 

@@ -21,4 +21,16 @@ public interface SessionMessagePort {
      * @return 新消息 id
      */
     Long append(Long sessionId, MessageType type, String content);
+
+    /**
+     * 以摘要版本和消息检查点为条件更新滚动摘要。
+     *
+     * @return 仅当 CAS 和检查点前进同时满足时返回 true
+     */
+    boolean updateSummary(
+            Long sessionId,
+            long expectedVersion,
+            String summary,
+            Long throughMessageId,
+            String sourceHash);
 }

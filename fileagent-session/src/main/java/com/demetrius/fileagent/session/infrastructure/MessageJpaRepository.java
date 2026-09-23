@@ -11,4 +11,7 @@ import java.util.List;
 public interface MessageJpaRepository extends JpaRepository<MessageEntity, Long> {
 
     List<MessageEntity> findBySession_IdOrderByCreatedAtAsc(Long sessionId);
+
+    List<MessageEntity> findBySession_IdAndIdGreaterThanOrderByCreatedAtAsc(
+            Long sessionId, Long messageId);
 }

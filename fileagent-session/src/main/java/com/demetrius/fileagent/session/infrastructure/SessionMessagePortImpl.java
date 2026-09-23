@@ -39,4 +39,24 @@ public class SessionMessagePortImpl implements SessionMessagePort {
         sessionJpaRepository.save(session);
         return saved.getId();
     }
+
+    @Override
+    @Transactional
+    public boolean updateSummary(
+            Long sessionId,
+            long expectedVersion,
+            String summary,
+            Long throughMessageId,
+            String sourceHash) {
+        if (throughMessageId == null) {
+            return false;
+        }
+        return sessionJpaRepository.updateSummary(
+                sessionId,
+                expectedVersion,
+                summary,
+                throughMessageId,
+                LocalDateTime.now(),
+                sourceHash) == 1;
+    }
 }

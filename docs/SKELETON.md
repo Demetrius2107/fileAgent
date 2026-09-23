@@ -36,7 +36,7 @@ fileAgent/
 │   ├── interfaces/                   SessionController（已实现）
 │   ├── application/                  SessionAppService（接口）+ SessionAppServiceImpl（已实现）
 │   ├── domain/                       SessionEntity / MessageEntity / SessionRepository
-│   └── infrastructure/               SessionJpaRepository / MessageJpaRepository / SessionRepositoryImpl / SessionQueryPortImpl / SessionMessagePortImpl
+│   └── infrastructure/               SessionJpaRepository / MessageJpaRepository / SessionRepositoryImpl / SessionQueryPortImpl / SessionMessagePortImpl（含滚动摘要 CAS）
 │
 ├── fileagent-document/            ✅ 文档域
 │   ├── interfaces/                   FileController / RagFileController（已实现）
@@ -122,7 +122,7 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 |---|---|
 | common | spring-boot-starter-web + spring-boot-starter-test(test) |
 | api | common + reactor-core（Flux 契约） |
-| session | api + web + data-jpa + h2(runtime) |
+| session | api + web + data-jpa + h2(runtime) + spring-boot-data-jpa-test(test) |
 | document | api + web + data-jpa + spring-ai-starter-model-openai（Embedding）+ spring-boot-starter-elasticsearch（知识索引与检索）+ pdfbox + poi-ooxml + h2(runtime) + testcontainers-elasticsearch / testcontainers-junit-jupiter / spring-boot-data-jpa-test(test) |
 | chat | api + web + webflux（流式调用）+ spring-ai-starter-model-deepseek + spring-ai-starter-model-openai（多 Provider 动态构建）+ data-jpa（模型配置实体）+ micrometer-tracing + reactor-test(test) |
 | agent | api + web + webflux（SSE）+ agentscope-core + agentscope-extensions-model-openai + swagger-annotations-jakarta + micrometer-tracing + reactor-test(test) |

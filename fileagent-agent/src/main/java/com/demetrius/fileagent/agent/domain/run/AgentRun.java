@@ -201,6 +201,14 @@ public class AgentRun {
         return stopped;
     }
 
+    /** 返回本次 Run 还可以产生的工具结果字符数。 */
+    public int remainingToolResultCharacters(AgentRunBudget budget) {
+        if (budget == null) {
+            return 0;
+        }
+        return Math.max(0, budget.maxToolResultCharacters() - toolResultCharacters);
+    }
+
     /** 记录一次检索命中的完整片段（供离线评测收集检索证据）。 */
     public void addRetrievedHit(KnowledgeHit hit) {
         if (hit != null) {

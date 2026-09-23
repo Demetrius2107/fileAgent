@@ -7,6 +7,7 @@ import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProp
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.run.InMemoryAgentRunRegistry;
 import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
+import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
 import com.demetrius.fileagent.api.dto.AgentRunSnapshot;
@@ -51,6 +52,7 @@ class AgentRuntimeCancellationTest {
                 mock(SearchDocsTool.class),
                 mock(ListKnowledgeFilesTool.class),
                 mock(ReadDocumentContextTool.class),
+                mock(GetDocumentOutlineTool.class),
                 mock(AgentHistoryService.class));
     }
 

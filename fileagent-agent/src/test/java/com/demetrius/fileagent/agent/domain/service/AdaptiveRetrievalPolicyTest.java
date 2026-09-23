@@ -30,7 +30,7 @@ class AdaptiveRetrievalPolicyTest {
         assertThat(singleHop.knnWeight()).isEqualTo(1.0);
         assertThat(singleHop.finalTopK()).isEqualTo(5);
         assertThat(singleHop.rerankEnabled()).isTrue();
-        assertThat(singleHop.parentExpansionEnabled()).isTrue();
+        assertThat(singleHop.parentExpansionEnabled()).isFalse();
 
         SearchOptions multiHop = policy.optionsFor(RetrievalQueryType.MULTI_HOP);
         assertThat(multiHop.strategyId()).isEqualTo("MULTI_HOP");

@@ -19,8 +19,6 @@ import java.util.Map;
  */
 public class ReadDocumentContextTool extends ToolBase {
 
-    private static final int MAX_CHUNKS = 3;
-
     public ReadDocumentContextTool() {
         super(ToolBase.builder()
                 .name("read_document_context")
@@ -38,17 +36,25 @@ public class ReadDocumentContextTool extends ToolBase {
     }
 
     public ToolResultBlock execute(AgentToolContext context, List<String> chunkIds) {
-        if (chunkIds == null || chunkIds.isEmpty() || chunkIds.size() > MAX_CHUNKS) {
-            throw new BizException("read_document_context 每次只能读取 1~" + MAX_CHUNKS + " 个 chunk");
+        int maxChunks = context.budget().readMaxChunks();
+        if (chunkIds == null || chunkIds.isEmpty() || chunkIds.size() > maxChunks) {
+            throw new BizException("read_document_context 每次只能读取 1~" + maxChunks + " 个 chunk");
         }
         for (String id : chunkIds) {
             if (!context.run().isAllowedChunk(id)) {
                 throw new BizException("chunk " + id + " 未在本次检索结果中，拒绝读取");
             }
         }
+        if (context.run().shouldStopToolExpansion(context.budget())) {
+            context.run().recordToolResult(0);
+            return ToolResultBlock.text(ToolOutputBudget.BUDGET_EXHAUSTED_MESSAGE);
+        }
         List<KnowledgeContextPort.KnowledgeChunkContext> chunks = context.knowledgeContextPort().read(chunkIds);
-        context.run().recordToolResult(chunks.size());
-        return ToolResultBlock.text(render(chunks, context.singleToolResultCharacters()));
+        RenderedContext rendered = render(chunks, context);
+        context.run().recordToolResult(rendered.count());
+        context.run().recordDocumentReadCharacters(rendered.contentCharacters());
+        context.run().recordToolResultCharacters(ToolOutputBudget.length(rendered.text()));
+        return ToolResultBlock.text(rendered.text());
     }
 
     private AgentToolContext context(ToolCallParam param) {
@@ -66,27 +72,37 @@ public class ReadDocumentContextTool extends ToolBase {
         return list.stream().map(String::valueOf).toList();
     }
 
-    private String render(List<KnowledgeContextPort.KnowledgeChunkContext> chunks, int maxChars) {
+    private RenderedContext render(List<KnowledgeContextPort.KnowledgeChunkContext> chunks,
+                                   AgentToolContext context) {
         if (chunks.isEmpty()) {
-            return "未读取到任何片段。";
+            return new RenderedContext(0, 0, "未读取到任何片段。");
         }
+        int maxChars = Math.min(context.singleToolResultCharacters(),
+                context.run().remainingToolResultCharacters(context.budget()));
         StringBuilder sb = new StringBuilder();
+        int contentCharacters = 0;
+        int count = 0;
         for (KnowledgeContextPort.KnowledgeChunkContext chunk : chunks) {
-            sb.append("chunkId=").append(chunk.chunkId())
-                    .append(" 来源=").append(chunk.filename())
-                    .append(" sheet=").append(chunk.sheetName())
-                    .append(" section=").append(chunk.sectionId())
-                    .append(" chunkIndex=").append(chunk.chunkIndex()).append('\n')
-                    .append(truncate(chunk.content(), maxChars)).append("\n\n");
+            String prefix = "chunkId=" + chunk.chunkId()
+                    + " 来源=" + chunk.filename()
+                    + " sheet=" + chunk.sheetName()
+                    + " section=" + chunk.sectionId()
+                    + " chunkIndex=" + chunk.chunkIndex() + "\n";
+            int before = ToolOutputBudget.length(sb.toString());
+            int remaining = maxChars - before;
+            if (remaining <= 0 || !ToolOutputBudget.append(sb, prefix, chunk.content(), "\n\n", maxChars)) {
+                break;
+            }
+            int available = remaining - ToolOutputBudget.length(prefix) - 2;
+            int bodyLength = ToolOutputBudget.length(chunk.content());
+            if (bodyLength > Math.max(0, available)) {
+                bodyLength = Math.max(0, available - ToolOutputBudget.length("…(截断)"));
+            }
+            contentCharacters += Math.min(bodyLength, ToolOutputBudget.length(chunk.content()));
+            count++;
         }
-        return sb.toString();
-    }
-
-    private String truncate(String text, int max) {
-        if (text == null) {
-            return "";
-        }
-        return text.length() <= max ? text : text.substring(0, max) + "…(截断)";
+        return new RenderedContext(count, contentCharacters,
+                sb.isEmpty() ? "未读取到任何片段。" : sb.toString());
     }
 
     private static Map<String, Object> inputSchema() {
@@ -98,5 +114,8 @@ public class ReadDocumentContextTool extends ToolBase {
                                 "description", "要读取的 chunkId 列表（1-3 个）",
                                 "items", Map.of("type", "string"))),
                 "required", List.of("chunkIds"));
+    }
+
+    private record RenderedContext(int count, int contentCharacters, String text) {
     }
 }

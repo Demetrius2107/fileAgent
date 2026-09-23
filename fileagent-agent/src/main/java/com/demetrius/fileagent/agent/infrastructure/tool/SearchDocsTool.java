@@ -48,6 +48,11 @@ public class SearchDocsTool extends ToolBase {
             .thenComparingInt(ScoredEntry::queryIndex)
             .thenComparingInt(ScoredEntry::rankInQuery)
             .thenComparing(entry -> entry.hit().chunkId(), Comparator.nullsLast(Comparator.naturalOrder()));
+    private static final Comparator<KnowledgeHit> HIT_ORDER = Comparator
+            .comparingDouble(KnowledgeHit::score).reversed()
+            .thenComparing(KnowledgeHit::fileId, Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparingInt(KnowledgeHit::chunkIndex)
+            .thenComparing(KnowledgeHit::chunkId, Comparator.nullsLast(Comparator.naturalOrder()));
 
     private final AgentProperties agentProperties;
     private final AdaptiveRetrievalPolicy adaptiveRetrievalPolicy;
@@ -86,6 +91,9 @@ public class SearchDocsTool extends ToolBase {
         if (trimmed.length() > MAX_QUERY_LENGTH) {
             throw new BizException("search_docs 检索关键词不能超过 " + MAX_QUERY_LENGTH + " 字");
         }
+        if (context.run().shouldStopToolExpansion(context.budget())) {
+            return budgetExhausted(context);
+        }
         List<KnowledgeHit> hits;
         try {
             KnowledgeSearchPort.SearchQuery searchQuery = new KnowledgeSearchPort.SearchQuery(
@@ -98,12 +106,12 @@ public class SearchDocsTool extends ToolBase {
                     context.run().runId(), trimmed.length(), exception);
             return controlledFailure(context);
         }
-        hits.forEach(hit -> {
-            context.run().addAllowedChunk(hit.chunkId());
-            context.run().addRetrievedHit(hit);
-        });
-        context.run().recordToolResult(hits.size());
-        return ToolResultBlock.text(render(hits, context.singleToolResultCharacters()));
+        RenderedHits rendered = render(deduplicateAndSort(hits).stream().limit(MAX_HITS).toList(), context);
+        authorize(context, rendered.hits());
+        context.run().recordToolResult(rendered.hits().size());
+        context.run().recordSearchSnippetCharacters(rendered.contentCharacters());
+        context.run().recordToolResultCharacters(ToolOutputBudget.length(rendered.text()));
+        return ToolResultBlock.text(rendered.text());
     }
 
     /** 结构化入口：第三轮检索直接拒绝；校验失败递增非法计划计数并返回受控校验信息，允许模型修正一次。 */
@@ -132,6 +140,9 @@ public class SearchDocsTool extends ToolBase {
      */
     public ToolResultBlock executeStructured(AgentToolContext context, RetrievalQueryType queryType,
                                              List<String> queries) {
+        if (context.run().shouldStopToolExpansion(context.budget())) {
+            return budgetExhausted(context);
+        }
         List<String> ordered = validateStructured(queryType, queries);
         SearchOptions planned = adaptiveRetrievalPolicy.optionsFor(queryType);
         Instant deadline = Instant.now().plus(
@@ -141,6 +152,9 @@ public class SearchDocsTool extends ToolBase {
         List<Integer> perQueryHitCounts = new ArrayList<>();
         List<KnowledgeSearchPort.SearchResult> executedResults = new ArrayList<>();
         for (int i = 0; i < ordered.size(); i++) {
+            if (context.run().shouldStopToolExpansion(context.budget())) {
+                return budgetExhausted(context);
+            }
             if (i > 0 && Instant.now().isAfter(deadline)) {
                 return controlledFailure(context);
             }
@@ -151,7 +165,6 @@ public class SearchDocsTool extends ToolBase {
                 executedResults.add(result);
                 perQueryHitCounts.add(result.finalHits().size());
                 appendEntries(collected, missingQueries, subQuery, i, result.finalHits());
-                result.finalHits().forEach(context.run()::addRetrievedHit);
             } catch (RuntimeException exception) {
                 log.warn("search_docs 子查询检索失败 runId={}, queryType={}, subQueryLength={}",
                         context.run().runId(), queryType, subQuery.length(), exception);
@@ -162,7 +175,13 @@ public class SearchDocsTool extends ToolBase {
         List<ScoredEntry> merged = candidates.stream()
                 .limit(adaptiveRetrievalPolicy.finalHitCap(queryType))
                 .toList();
-        merged.forEach(entry -> context.run().addAllowedChunk(entry.hit().chunkId()));
+        RenderedScoredHits rendered = renderStructured(merged, missingQueries, context);
+        rendered.hits().forEach(entry -> {
+            context.run().addAllowedChunk(entry.hit().chunkId());
+            context.run().addAllowedChunk(entry.hit().parentId());
+            context.run().addAllowedFile(entry.hit().fileId());
+            context.run().addRetrievedHit(entry.hit());
+        });
         context.run().recordRetrievalExecution(new AgentRun.RetrievalExecution(
                 queryType,
                 planned.strategyId(),
@@ -170,7 +189,7 @@ public class SearchDocsTool extends ToolBase {
                 executedResults.size(),
                 perQueryHitCounts,
                 chunkIds(candidates),
-                chunkIds(merged),
+                chunkIds(rendered.hits()),
                 planned.rerankEnabled(),
                 planned.rerankEnabled() && executedResults.stream()
                         .allMatch(KnowledgeSearchPort.SearchResult::rerankApplied),
@@ -179,8 +198,10 @@ public class SearchDocsTool extends ToolBase {
                         .filter(Objects::nonNull)
                         .findFirst()
                         .orElse(null)));
-        context.run().recordToolResult(merged.size());
-        return ToolResultBlock.text(renderStructured(merged, missingQueries, context.singleToolResultCharacters()));
+        context.run().recordToolResult(rendered.hits().size());
+        context.run().recordSearchSnippetCharacters(rendered.contentCharacters());
+        context.run().recordToolResultCharacters(ToolOutputBudget.length(rendered.text()));
+        return ToolResultBlock.text(rendered.text());
     }
 
     private List<String> validateStructured(RetrievalQueryType queryType, List<String> queries) {
@@ -268,27 +289,40 @@ public class SearchDocsTool extends ToolBase {
         return entries.stream().map(entry -> entry.hit().chunkId()).toList();
     }
 
-    private String renderStructured(List<ScoredEntry> merged, List<String> missingQueries, int maxChars) {
+    private RenderedScoredHits renderStructured(List<ScoredEntry> merged,
+                                                List<String> missingQueries,
+                                                AgentToolContext context) {
+        int maxChars = Math.min(context.singleToolResultCharacters(),
+                context.run().remainingToolResultCharacters(context.budget()));
+        List<ScoredEntry> ordered = prioritizeScoredByFile(merged);
         StringBuilder sb = new StringBuilder();
-        if (merged.isEmpty()) {
-            sb.append("未检索到相关文档片段。\n");
-        } else {
-            for (int i = 0; i < merged.size(); i++) {
-                ScoredEntry entry = merged.get(i);
-                sb.append("[").append(i + 1).append("] chunkId=").append(entry.hit().chunkId())
-                        .append(" 来源=").append(entry.hit().filename())
-                        .append(" 分数=").append(entry.hit().score())
-                        .append(" 查询=").append(entry.sourceIndices()).append('\n')
-                        .append(truncate(entry.hit().content(), maxChars)).append("\n\n");
+        List<ScoredEntry> rendered = new ArrayList<>();
+        int contentCharacters = 0;
+        for (int i = 0; i < ordered.size(); i++) {
+            ScoredEntry entry = ordered.get(i);
+            String prefix = "[" + (i + 1) + "] chunkId=" + entry.hit().chunkId()
+                    + " 来源=" + entry.hit().filename()
+                    + " 分数=" + entry.hit().score()
+                    + " 查询=" + entry.sourceIndices() + "\n";
+            String content = ToolOutputBudget.truncate(entry.hit().content(), context.budget().searchSnippetCharacters());
+            int before = ToolOutputBudget.length(sb.toString());
+            int remaining = maxChars - before;
+            if (remaining <= 0 || !ToolOutputBudget.append(sb, prefix, content, "\n\n", maxChars)) {
+                break;
             }
+            rendered.add(entry);
+            contentCharacters += includedContentCharacters(content, prefix, remaining);
+        }
+        if (rendered.isEmpty() && ordered.isEmpty()) {
+            ToolOutputBudget.append(sb, "未检索到相关文档片段。\n", "", "", maxChars);
         }
         if (!missingQueries.isEmpty()) {
-            sb.append("缺失子查询：\n");
-            for (String query : missingQueries) {
-                sb.append("- ").append(query).append('\n');
-            }
+            ToolOutputBudget.append(sb, "缺失子查询：\n", missingQueries.stream()
+                    .map(query -> "- " + query).collect(java.util.stream.Collectors.joining("\n"))
+                    + "\n", "", maxChars);
         }
-        return sb.toString();
+        String text = sb.isEmpty() ? ToolOutputBudget.truncate("未检索到相关文档片段。", maxChars) : sb.toString();
+        return new RenderedScoredHits(List.copyOf(rendered), contentCharacters, text);
     }
 
     private AgentToolContext context(ToolCallParam param) {
@@ -304,26 +338,97 @@ public class SearchDocsTool extends ToolBase {
         return ToolResultBlock.text(UNAVAILABLE_TEXT);
     }
 
-    private String render(List<KnowledgeHit> hits, int maxChars) {
-        if (hits.isEmpty()) {
-            return "未检索到相关文档片段。";
-        }
+    private RenderedHits render(List<KnowledgeHit> hits, AgentToolContext context) {
+        int maxChars = Math.min(context.singleToolResultCharacters(),
+                context.run().remainingToolResultCharacters(context.budget()));
+        List<KnowledgeHit> ordered = prioritizeByFile(deduplicateAndSort(hits));
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < hits.size(); i++) {
-            KnowledgeHit hit = hits.get(i);
-            sb.append("[").append(i + 1).append("] chunkId=").append(hit.chunkId())
-                    .append(" 来源=").append(hit.filename())
-                    .append(" 分数=").append(hit.score()).append('\n')
-                    .append(truncate(hit.content(), maxChars)).append("\n\n");
+        List<KnowledgeHit> rendered = new ArrayList<>();
+        int contentCharacters = 0;
+        for (int i = 0; i < ordered.size(); i++) {
+            KnowledgeHit hit = ordered.get(i);
+            String prefix = "[" + (i + 1) + "] chunkId=" + hit.chunkId()
+                    + " 来源=" + hit.filename()
+                    + " 分数=" + hit.score() + "\n";
+            String content = ToolOutputBudget.truncate(hit.content(), context.budget().searchSnippetCharacters());
+            int before = ToolOutputBudget.length(sb.toString());
+            int remaining = maxChars - before;
+            if (remaining <= 0 || !ToolOutputBudget.append(sb, prefix, content, "\n\n", maxChars)) {
+                break;
+            }
+            rendered.add(hit);
+            contentCharacters += includedContentCharacters(content, prefix, remaining);
         }
-        return sb.toString();
+        String text = rendered.isEmpty()
+                ? ToolOutputBudget.truncate("未检索到相关文档片段。", maxChars)
+                : sb.toString();
+        return new RenderedHits(List.copyOf(rendered), contentCharacters, text);
     }
 
-    private String truncate(String text, int max) {
-        if (text == null) {
-            return "";
+    private List<KnowledgeHit> deduplicateAndSort(List<KnowledgeHit> hits) {
+        Map<String, KnowledgeHit> unique = new LinkedHashMap<>();
+        for (KnowledgeHit hit : hits == null ? List.<KnowledgeHit>of() : hits) {
+            if (hit == null || hit.chunkId() == null) {
+                continue;
+            }
+            KnowledgeHit previous = unique.get(hit.chunkId());
+            if (previous == null || HIT_ORDER.compare(hit, previous) < 0) {
+                unique.put(hit.chunkId(), hit);
+            }
         }
-        return text.length() <= max ? text : text.substring(0, max) + "…(截断)";
+        return unique.values().stream().sorted(HIT_ORDER).toList();
+    }
+
+    private List<KnowledgeHit> prioritizeByFile(List<KnowledgeHit> hits) {
+        List<KnowledgeHit> firstPerFile = new ArrayList<>();
+        List<KnowledgeHit> remaining = new ArrayList<>();
+        Set<Long> files = new LinkedHashSet<>();
+        for (KnowledgeHit hit : hits) {
+            if (files.add(hit.fileId())) {
+                firstPerFile.add(hit);
+            } else {
+                remaining.add(hit);
+            }
+        }
+        firstPerFile.addAll(remaining);
+        return firstPerFile;
+    }
+
+    private List<ScoredEntry> prioritizeScoredByFile(List<ScoredEntry> entries) {
+        List<ScoredEntry> firstPerFile = new ArrayList<>();
+        List<ScoredEntry> remaining = new ArrayList<>();
+        Set<Long> files = new LinkedHashSet<>();
+        for (ScoredEntry entry : entries) {
+            if (files.add(entry.hit().fileId())) {
+                firstPerFile.add(entry);
+            } else {
+                remaining.add(entry);
+            }
+        }
+        firstPerFile.addAll(remaining);
+        return firstPerFile;
+    }
+
+    private int includedContentCharacters(String content, String prefix, int remaining) {
+        int available = remaining - ToolOutputBudget.length(prefix) - 2;
+        if (available >= ToolOutputBudget.length(content)) {
+            return ToolOutputBudget.length(content);
+        }
+        return Math.max(0, available - ToolOutputBudget.length("…(截断)"));
+    }
+
+    private void authorize(AgentToolContext context, List<KnowledgeHit> hits) {
+        hits.forEach(hit -> {
+            context.run().addAllowedChunk(hit.chunkId());
+            context.run().addAllowedChunk(hit.parentId());
+            context.run().addAllowedFile(hit.fileId());
+            context.run().addRetrievedHit(hit);
+        });
+    }
+
+    private ToolResultBlock budgetExhausted(AgentToolContext context) {
+        context.run().recordToolResult(0);
+        return ToolResultBlock.text(ToolOutputBudget.BUDGET_EXHAUSTED_MESSAGE);
     }
 
     private RetrievalQueryType parseQueryType(Object raw) {
@@ -369,6 +474,12 @@ public class SearchDocsTool extends ToolBase {
                                 "maxItems", 3,
                                 "description", "子查询列表（每条 1-200 字）")),
                 "required", List.of("queryType", "queries"));
+    }
+
+    private record RenderedHits(List<KnowledgeHit> hits, int contentCharacters, String text) {
+    }
+
+    private record RenderedScoredHits(List<ScoredEntry> hits, int contentCharacters, String text) {
     }
 
     /** 合并池条目：命中片段 + 来源查询下标 + 归一化分；去重时保留原始分最高版本并合并来源下标。 */

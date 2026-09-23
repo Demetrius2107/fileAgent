@@ -2,6 +2,7 @@ package com.demetrius.fileagent.agent.infrastructure.tool;
 
 import com.demetrius.fileagent.agent.application.tool.AgentToolContext;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
+import com.demetrius.fileagent.agent.domain.run.AgentRunBudget;
 import com.demetrius.fileagent.agent.domain.service.AdaptiveRetrievalPolicy;
 import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
@@ -87,6 +88,54 @@ class SearchDocsToolTest {
 
         assertThat(run.isAllowedChunk("c-1")).isTrue();
         assertThat(text(result)).contains("c-1", "a.pdf", "正文内容");
+    }
+
+    @Test
+    void executeShouldAuthorizeOnlyRenderedHitFileAndParent() {
+        KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
+        when(port.search(any(KnowledgeSearchPort.SearchQuery.class))).thenReturn(List.of(
+                new KnowledgeSearchPort.KnowledgeHit("c-1", 7L, "正文内容", "a.pdf", null, null, "p-1", 0, 0.9),
+                new KnowledgeSearchPort.KnowledgeHit("c-2", 8L, "未渲染", "b.pdf", null, null, null, 1, 0.8)));
+        AgentRun run = startedRun();
+
+        new SearchDocsTool(new AgentProperties(), defaultPolicy()).execute(context(run, port), "关键词");
+
+        assertThat(run.allowedChunkIds()).contains("c-1", "p-1", "c-2");
+        assertThat(run.allowedFileIds()).containsExactlyInAnyOrder(7L, 8L);
+    }
+
+    @Test
+    void executeShouldPreferDifferentFilesBeforeFillingGlobalResultsAndShareBudget() {
+        KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
+        when(port.search(any(KnowledgeSearchPort.SearchQuery.class))).thenReturn(List.of(
+                new KnowledgeSearchPort.KnowledgeHit("a-1", 1L, "甲".repeat(1000), "a.pdf", null, null, null, 0, 0.99),
+                new KnowledgeSearchPort.KnowledgeHit("a-2", 1L, "乙".repeat(1000), "a.pdf", null, null, null, 1, 0.98),
+                new KnowledgeSearchPort.KnowledgeHit("b-1", 2L, "丙".repeat(1000), "b.pdf", null, null, null, 0, 0.50)));
+        AgentRun run = startedRun();
+        AgentRunBudget budget = new AgentRunBudget(8, 4, 600, 1200, 8000, 8000,
+                2000, 6000, 500, 50, 3, 60000, Duration.ofSeconds(45));
+        AgentToolContext context = new AgentToolContext(run, budget, port, null, null, KnowledgeScope.global());
+
+        ToolResultBlock result = new SearchDocsTool(new AgentProperties(), defaultPolicy()).execute(context, "关键词");
+
+        String rendered = text(result);
+        assertThat(rendered.codePointCount(0, rendered.length())).isLessThanOrEqualTo(600);
+        assertThat(rendered).contains("a.pdf", "b.pdf");
+        assertThat(run.allowedFileIds()).containsExactlyInAnyOrder(1L, 2L);
+        assertThat(run.allowedChunkIds()).contains("a-1", "b-1").doesNotContain("a-2");
+    }
+
+    @Test
+    void executeShouldNotCallSearchWhenSharedBudgetIsExhausted() {
+        KnowledgeSearchPort port = mock(KnowledgeSearchPort.class);
+        AgentRun run = startedRun();
+        run.recordToolResultCharacters(12000);
+
+        ToolResultBlock result = new SearchDocsTool(new AgentProperties(), defaultPolicy())
+                .execute(context(run, port), "关键词");
+
+        assertThat(text(result)).contains("预算已用尽");
+        verify(port, never()).search(any(KnowledgeSearchPort.SearchQuery.class));
     }
 
     @Test

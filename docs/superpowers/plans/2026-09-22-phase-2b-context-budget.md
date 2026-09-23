@@ -564,7 +564,7 @@ git commit -m "feat(document): 提供文档目录读取"
 - 修改：`AdaptiveRetrievalProperties.java`
 - 修改：`AgentScopeRuntimeAdapterTest.java`、`AgentPromptFactoryTest.java`、`AdaptiveRetrievalPropertiesTest.java`
 
-- [ ] **步骤 1：先写四类工具的失败测试**
+- [x] **步骤 1：先写四类工具的失败测试**
 
 断言以下规则：
 
@@ -578,7 +578,7 @@ git commit -m "feat(document): 提供文档目录读取"
 - 搜索和精读截断分别记录对应原因。
 - Adaptive 各检索档位都关闭自动父块扩展。
 
-- [ ] **步骤 2：运行工具测试并确认失败**
+- [x] **步骤 2：运行工具测试并确认失败**
 
 ```bash
 JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
@@ -590,27 +590,27 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-- [ ] **步骤 3：修正 SearchDocsTool 总量截断和授权时机**
+- [x] **步骤 3：修正 SearchDocsTool 总量截断和授权时机**
 
 先完成去重、确定性排序和跨文件优先选择，再渲染到剩余单次及累计预算。只有成功进入最终工具结果的条目才能调用 `addAllowedChunk`、`addAllowedFile` 和 `addRetrievedHit`。
 
-- [ ] **步骤 4：实现目录工具和文件授权**
+- [x] **步骤 4：实现目录工具和文件授权**
 
 `list_knowledge_files` 的返回文件进入 `allowedFileIds`；`get_document_outline` 拒绝未授权 fileId。目录响应包含游标但不包含整段正文。
 
-- [ ] **步骤 5：修正精读总量预算**
+- [x] **步骤 5：修正精读总量预算**
 
 按请求顺序返回，缺失 chunk 跳过；累计到整次 4000 或 Run 剩余预算即停止。字符截断统一使用 code point 工具方法，避免在各工具复制算法。
 
-- [ ] **步骤 6：更新 Prompt 和 Runtime 工具注册**
+- [x] **步骤 6：更新 Prompt 和 Runtime 工具注册**
 
 Prompt 告诉模型：先看搜索摘要，信息不足再看目录或精读；知识库无答案可用通用知识，但必须以“以下内容基于通用知识”标识，且不得伪造知识库引用；基础设施失败不能当成零命中。
 
-- [ ] **步骤 7：验证 `maxSteps=8` 的边界**
+- [x] **步骤 7：验证 `maxSteps=8` 的边界**
 
 在 Runtime 测试构造 8 次工具调用，断言前 8 步可按现有边界执行、第 9 步被拒绝；再构造摘要加最终回答，断言两者不增加 Step。该测试是本期不调整 `maxSteps` 的回归保护。
 
-- [ ] **步骤 8：运行测试并提交**
+- [x] **步骤 8：运行测试并提交**
 
 ```bash
 git add fileagent-agent/src/main/java/com/demetrius/fileagent/agent/application/prompt/AgentPromptFactory.java \
@@ -641,7 +641,7 @@ git commit -m "feat(agent): 实现细粒度证据读取"
 - 修改：`AgentScopeModelFactory.java`、`AgentScopeRuntimeAdapter.java`
 - 修改：对应 Runtime 与 ModelFactory 测试
 
-- [ ] **步骤 1：写模型预算失败测试**
+- [x] **步骤 1：写模型预算失败测试**
 
 覆盖：
 
@@ -653,7 +653,7 @@ git commit -m "feat(agent): 实现细粒度证据读取"
 6. 非 Adaptive 仍最多 4 次模型调用。
 7. 模型调用超限是硬失败，Token 软上限只停止工具扩展并允许最后回答。
 
-- [ ] **步骤 2：运行测试并确认失败**
+- [x] **步骤 2：运行测试并确认失败**
 
 ```bash
 JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
@@ -665,19 +665,19 @@ JAVA_HOME="/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home" \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-- [ ] **步骤 3：在 ModelFactory 统一设置输出上限**
+- [x] **步骤 3：在 ModelFactory 统一设置输出上限**
 
 通过 `GenerateOptions.builder().maxTokens(properties.getMaxOutputTokens())` 设置正式回答；摘要模型另外固定 temperature 0，但不创建第二套预算配置。
 
-- [ ] **步骤 4：实现最小 AgentBudgetMiddleware**
+- [x] **步骤 4：实现最小 AgentBudgetMiddleware**
 
 中间件只做一件事：当 Token 软上限已触发，或当前调用即将使用最后一个模型调用名额时，把 `ModelCallInput.tools()` 替换为 `List.of()`，其他输入原样透传。调用次数的判断仍委托 `AgentRun`。
 
-- [ ] **步骤 5：消费 ModelCallEndEvent usage**
+- [x] **步骤 5：消费 ModelCallEndEvent usage**
 
 从 `ChatUsage` 读取真实 input/output/total tokens；供应商未返回某项时保留未知状态，不用字符数伪造 Token。日志和 Snapshot 仅记录数值。
 
-- [ ] **步骤 6：运行测试并提交**
+- [x] **步骤 6：运行测试并提交**
 
 ```bash
 git add fileagent-agent/src/main/java/com/demetrius/fileagent/agent/infrastructure/runtime/AgentBudgetMiddleware.java \

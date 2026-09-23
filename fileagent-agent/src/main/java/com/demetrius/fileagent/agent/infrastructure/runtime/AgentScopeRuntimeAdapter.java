@@ -9,6 +9,7 @@ import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProp
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.run.InMemoryAgentRunRegistry;
 import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
+import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
@@ -87,6 +88,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
     private final SearchDocsTool searchDocsTool;
     private final ListKnowledgeFilesTool listKnowledgeFilesTool;
     private final ReadDocumentContextTool readDocumentContextTool;
+    private final GetDocumentOutlineTool getDocumentOutlineTool;
     private final AgentHistoryService historyService;
 
     @Override
@@ -114,12 +116,11 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             Map<String, Long> toolStartNanos = new ConcurrentHashMap<>();
             StringBuilder answer = new StringBuilder();
             AtomicInteger step = new AtomicInteger(0);
-            AtomicInteger modelCalls = new AtomicInteger(0);
 
             return Flux.concat(
                             Flux.just(eventMapper.started(run.runId(), run.traceId())),
                             agent.streamEvents(userMessage, ctx)
-                                    .concatMap(ev -> mapEvent(ev, run, agent, ctx, step, modelCalls,
+                                    .concatMap(ev -> mapEvent(ev, run, agent, ctx, step,
                                             toolStartNanos, answer, assembly.toolContext(), null)))
                     .timeout(effectiveRunTimeout())
                     .onErrorResume(e -> onError(e, run))
@@ -156,6 +157,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
         toolkit.registerAgentTool(searchDocsTool);
         toolkit.registerAgentTool(listKnowledgeFilesTool);
         toolkit.registerAgentTool(readDocumentContextTool);
+        toolkit.registerAgentTool(getDocumentOutlineTool);
 
         Model model = modelFactory.create();
         ReActAgent agent = ReActAgent.builder()
@@ -164,6 +166,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 .sysPrompt(promptFactory.systemInstruction(properties.isAdaptiveRetrievalEnabled()))
                 .model(model)
                 .toolkit(toolkit)
+                .middleware(new AgentBudgetMiddleware())
                 .maxIters(properties.getMaxSteps())
                 .build();
 
@@ -195,14 +198,13 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             List<String> toolCalls = new CopyOnWriteArrayList<>();
             StringBuilder answer = new StringBuilder();
             AtomicInteger step = new AtomicInteger(0);
-            AtomicInteger modelCalls = new AtomicInteger(0);
             Map<String, Long> toolStartNanos = new ConcurrentHashMap<>();
 
             Flux.concat(
                             Flux.just(eventMapper.started(run.runId(), run.traceId())),
                             assembly.agent().streamEvents(assembly.userMessage(), assembly.context())
                                     .concatMap(ev -> mapEvent(ev, run, assembly.agent(), assembly.context(),
-                                            step, modelCalls, toolStartNanos, answer,
+                                            step, toolStartNanos, answer,
                                             assembly.toolContext(), toolCalls)))
                     .timeout(effectiveRunTimeout())
                     .onErrorResume(e -> onError(e, run))
@@ -251,7 +253,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
     }
 
     private Flux<AgentRunEvent> mapEvent(AgentEvent event, AgentRun run, ReActAgent agent, RuntimeContext ctx,
-                                         AtomicInteger step, AtomicInteger modelCalls,
+                                         AtomicInteger step,
                                          Map<String, Long> toolStartNanos, StringBuilder answer,
                                          AgentToolContext toolContext,
                                          List<String> toolCalls) {
@@ -282,7 +284,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             }
             case MODEL_CALL_START -> {
                 run.incrementModelCall();
-                int calls = modelCalls.incrementAndGet();
+                int calls = run.modelCallCount();
                 if (calls > toolContext.budget().maxModelCalls()) {
                     agent.interrupt(ctx);
                     return failIfRunning(run, CODE_BUDGET_EXCEEDED, "超出模型调用预算");

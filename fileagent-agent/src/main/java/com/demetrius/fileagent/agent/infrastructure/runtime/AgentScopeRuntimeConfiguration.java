@@ -4,6 +4,7 @@ import com.demetrius.fileagent.agent.domain.service.AdaptiveRetrievalPolicy;
 import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
+import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
 import org.springframework.context.annotation.Bean;
@@ -45,5 +46,10 @@ public class AgentScopeRuntimeConfiguration {
     @Bean
     ReadDocumentContextTool readDocumentContextTool() {
         return new ReadDocumentContextTool();
+    }
+
+    @Bean
+    GetDocumentOutlineTool getDocumentOutlineTool() {
+        return new GetDocumentOutlineTool();
     }
 }

@@ -30,7 +30,7 @@ public class AdaptiveRetrievalProperties {
     /** Adaptive 单次 Run 的模型调用上限，包含历史摘要调用。 */
     private int maxModelCalls = 6;
 
-    private Tier singleHop = new Tier(20, 20, 100, 1.0, 1.0, 5, true, true);
+    private Tier singleHop = new Tier(20, 20, 100, 1.0, 1.0, 5, true, false);
     private Tier multiQuery = new Tier(20, 20, 100, 1.0, 1.0, 8, true, false);
     private Tier multiHop = new Tier(20, 20, 100, 1.0, 1.0, 8, true, false);
     private Tier comparison = new Tier(20, 20, 100, 1.0, 1.0, 8, true, false);

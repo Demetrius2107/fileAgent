@@ -39,12 +39,19 @@ public class ListKnowledgeFilesTool extends ToolBase {
     }
 
     public ToolResultBlock execute(AgentToolContext context, String ragName, String knowledgeTag) {
+        if (context.run().shouldStopToolExpansion(context.budget())) {
+            context.run().recordToolResult(0);
+            return ToolResultBlock.text(ToolOutputBudget.BUDGET_EXHAUSTED_MESSAGE);
+        }
         String effectiveRagName = context.scope().ragName() != null ? context.scope().ragName() : ragName;
         String effectiveTag = context.scope().knowledgeTag() != null ? context.scope().knowledgeTag() : knowledgeTag;
         List<KnowledgeCatalogPort.KnowledgeFile> files = context.knowledgeCatalogPort()
                 .list(new KnowledgeCatalogPort.Query(effectiveRagName, effectiveTag, MAX_FILES));
-        context.run().recordToolResult(files.size());
-        return ToolResultBlock.text(render(files));
+        RenderedFiles rendered = render(files, context);
+        rendered.files().forEach(file -> context.run().addAllowedFile(file.fileId()));
+        context.run().recordToolResult(rendered.files().size());
+        context.run().recordToolResultCharacters(ToolOutputBudget.length(rendered.text()));
+        return ToolResultBlock.text(rendered.text());
     }
 
     private AgentToolContext context(ToolCallParam param) {
@@ -54,20 +61,29 @@ public class ListKnowledgeFilesTool extends ToolBase {
         return param.getRuntimeContext().get(AgentToolContext.class);
     }
 
-    private String render(List<KnowledgeCatalogPort.KnowledgeFile> files) {
+    private RenderedFiles render(List<KnowledgeCatalogPort.KnowledgeFile> files, AgentToolContext context) {
         if (files.isEmpty()) {
-            return "没有可检索的知识文件。";
+            return new RenderedFiles(List.of(), "没有可检索的知识文件。");
         }
+        int max = Math.min(context.singleToolResultCharacters(),
+                context.run().remainingToolResultCharacters(context.budget()));
         StringBuilder sb = new StringBuilder();
+        List<KnowledgeCatalogPort.KnowledgeFile> rendered = new java.util.ArrayList<>();
         for (KnowledgeCatalogPort.KnowledgeFile file : files) {
-            sb.append("fileId=").append(file.fileId())
-                    .append(" 知识库=").append(file.ragName())
-                    .append(" 标签=").append(file.knowledgeTag())
-                    .append(" 文件=").append(file.filename())
-                    .append(" 状态=").append(file.status())
-                    .append(" 分片数=").append(file.chunkCount()).append('\n');
+            String prefix = "fileId=" + file.fileId()
+                    + " 知识库=" + file.ragName()
+                    + " 标签=" + file.knowledgeTag()
+                    + " 文件=" + file.filename()
+                    + " 状态=" + file.status()
+                    + " 分片数=" + file.chunkCount() + "\n";
+            if (!ToolOutputBudget.append(sb, prefix, "", "", max)) {
+                break;
+            }
+            rendered.add(file);
         }
-        return sb.toString();
+        return new RenderedFiles(List.copyOf(rendered), sb.isEmpty()
+                ? ToolOutputBudget.truncate("没有可检索的知识文件。", max)
+                : sb.toString());
     }
 
     private String stringValue(Object value) {
@@ -80,5 +96,8 @@ public class ListKnowledgeFilesTool extends ToolBase {
                 "properties", Map.of(
                         "ragName", Map.of("type", "string", "description", "知识库名称（可选）"),
                         "knowledgeTag", Map.of("type", "string", "description", "知识标签（可选）")));
+    }
+
+    private record RenderedFiles(List<KnowledgeCatalogPort.KnowledgeFile> files, String text) {
     }
 }

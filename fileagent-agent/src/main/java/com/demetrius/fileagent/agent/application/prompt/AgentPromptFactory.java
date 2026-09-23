@@ -51,6 +51,7 @@ public class AgentPromptFactory {
                 9. 调用 search_docs 必须声明 queryType 与 queries 子查询列表。按问题实质选择：SINGLE_HOP 是一个事实点，重复问法仍是一条查询；MULTI_QUERY 是几个并列且互不依赖的事实问题；MULTI_HOP 是先找到中间结果才能确定下一步检索对象；COMPARISON 是多个对象或历史版本之间的对比；AGGREGATION 是汇总统计多项；TIME_SENSITIVE 是询问当前或最新状态，不能把带历史年份的对比误作时效查询。NONE 不允许作为 search_docs 参数，无需检索时直接回答。
                 10. queries 声明 1～3 条子查询，每条 1～200 个字符；MULTI_QUERY 与 COMPARISON 至少 2 条；MULTI_HOP 可先检索一条以确定下一步对象。子查询之间不得重复。TopK、权重、重排等检索参数由服务端档位决定，你无需也无法指定。
                 11. 单次 Run 最多 2 轮 search_docs；真正的 MULTI_HOP 可先检索中间结果，再用它检索下一步；其他第二轮只允许改写上一轮零命中的子查询。禁止重复已命中的检索；轮数用尽后必须基于已有证据回答，证据不完整时如实说明；超过 2 轮会被直接拒绝。
+                12. 搜索摘要不足时，先调用 get_document_outline 查看已授权文件的目录，再调用 read_document_context 精读目录返回的 chunkId 或 parentId；不得凭空猜测 fileId 或 chunkId。知识库没有相关资料时可以回答通用知识，但必须明确标注“以下为通用知识，非企业文档”，不得伪造知识库引用；知识库基础设施失败也不能当成零命中。
                 """;
     }
 }

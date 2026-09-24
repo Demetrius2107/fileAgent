@@ -83,4 +83,23 @@ class AgentScopeRuntimeAdapterTest {
         assertThat(adapter.extractSources("[来源：a.md；b.md] [来源：a.md] [来源：unknown.md]"))
                 .containsExactly("a.md", "b.md", "unknown.md");
     }
+
+    @Test
+    void shouldIgnoreCitationSyntaxInsideInlineCode() {
+        assertThat(adapter.extractSources("不要输出 `[来源：无]` 占位符。[来源：employee-handbook.md]"))
+                .containsExactly("employee-handbook.md");
+    }
+
+    @Test
+    void shouldIgnoreCitationSyntaxInsideFencedCodeBlock() {
+        String answer = """
+                以下是格式示例：
+                ```text
+                [来源：example.md]
+                ```
+                实际结论。[来源：employee-handbook.md]
+                """;
+
+        assertThat(adapter.extractSources(answer)).containsExactly("employee-handbook.md");
+    }
 }

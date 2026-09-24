@@ -31,10 +31,6 @@ public class AgentScopeModelFactory {
     private final AgentModelConfigPort agentModelConfigPort;
     private final AgentProperties agentProperties;
 
-    public AgentScopeModelFactory(AgentModelConfigPort agentModelConfigPort) {
-        this(agentModelConfigPort, new AgentProperties());
-    }
-
     public AgentScopeModelFactory(AgentModelConfigPort agentModelConfigPort, AgentProperties agentProperties) {
         this.agentModelConfigPort = agentModelConfigPort;
         this.agentProperties = agentProperties;

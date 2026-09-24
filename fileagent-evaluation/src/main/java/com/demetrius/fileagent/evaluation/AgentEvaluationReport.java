@@ -90,14 +90,25 @@ public record AgentEvaluationReport(
      * {@code queryTypeAccuracy}/{@code unnecessaryRetrievalRate} 的分母是带人工标注的题
      * （前者看实际检索类型是否一致，后者只统计预期 NONE 的题，越低越好）；
      * {@code queryCountComplianceRate}/{@code strategyComplianceRate} 的分母是实际执行了
-     * 结构化检索的 Run；{@code subQuestionCoverage} 的分母是其中带子问题标注的多跳/比较题。
+     * 结构化检索的 Run；{@code subQuestionCoverage} 与 {@code excessSearchAttemptRate}
+     * 的分母分别是其中带子问题标注的多跳/比较题和实际执行了结构化检索的 Run。
      */
     public record AdaptiveMetrics(
             double queryTypeAccuracy,
             double unnecessaryRetrievalRate,
             double queryCountComplianceRate,
             double strategyComplianceRate,
-            double subQuestionCoverage) {
+            double subQuestionCoverage,
+            double excessSearchAttemptRate) {
+
+        public AdaptiveMetrics(double queryTypeAccuracy,
+                               double unnecessaryRetrievalRate,
+                               double queryCountComplianceRate,
+                               double strategyComplianceRate,
+                               double subQuestionCoverage) {
+            this(queryTypeAccuracy, unnecessaryRetrievalRate, queryCountComplianceRate,
+                    strategyComplianceRate, subQuestionCoverage, 0.0);
+        }
     }
 
     /** Phase 2B 上下文、摘要与工具预算指标。带有 Rate 后缀的指标均为 0 到 1。 */

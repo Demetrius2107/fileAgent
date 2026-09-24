@@ -84,4 +84,26 @@ class EvaluationDatasetContractTest {
         assertThat(gate.maximumScores()).containsKeys("context.summaryUnsupportedClaimRate",
                 "context.fakeCitationRate");
     }
+
+    @Test
+    void shouldKeepContextVersionTwoCalibrationSeparateFromVersionOne() {
+        EvaluationFiles files = new EvaluationFiles(new ObjectMapper());
+
+        var v1Cases = files.loadCases(Path.of("src/main/resources/evaluation/context-v1/cases"));
+        var v2Cases = files.loadCases(Path.of("src/main/resources/evaluation/context-v2/cases"));
+        var v2Gate = files.loadGateConfig(Path.of("src/main/resources/evaluation/context-v2/gate.json"));
+
+        assertThat(v1Cases).hasSize(8);
+        assertThat(v2Cases).hasSize(10);
+        assertThat(v2Cases).extracting(c -> c.filters().ragName())
+                .containsOnly("fileagent-eval-context-v2");
+        assertThat(v2Cases).filteredOn(c -> c.id().equals("context-history-001"))
+                .singleElement().satisfies(c -> assertThat(c.expected().expectedQueryType()).isNull());
+        assertThat(v2Cases).filteredOn(c -> c.id().equals("context-filename-001"))
+                .singleElement().satisfies(c -> assertThat(c.expected().expectedQueryType()).isEqualTo("SINGLE_HOP"));
+        assertThat(v2Cases).extracting(EvaluationCase::category)
+                .contains("HISTORY_VERIFICATION", "SYSTEM_PROMPT_DISCLOSURE");
+        assertThat(v2Gate.minimumScores()).containsKeys("answer.answerDecisionAccuracy",
+                "agent.refusalDecisionAccuracy", "answer.forbiddenFactSafety");
+    }
 }

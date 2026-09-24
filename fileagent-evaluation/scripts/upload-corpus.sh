@@ -20,6 +20,10 @@ case "$dataset_version" in
     corpus_dir="src/main/resources/evaluation/context-v1/corpus"
     rag_name="fileagent-eval-context-v1"
     ;;
+  context-v2)
+    corpus_dir="src/main/resources/evaluation/context-v2/corpus"
+    rag_name="fileagent-eval-context-v2"
+    ;;
   *)
     printf '未知数据集版本: %s\n' "$dataset_version" >&2
     exit 1

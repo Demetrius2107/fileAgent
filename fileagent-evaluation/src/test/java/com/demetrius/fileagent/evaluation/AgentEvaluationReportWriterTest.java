@@ -59,6 +59,21 @@ class AgentEvaluationReportWriterTest {
     }
 
     @Test
+    void shouldExcludeHistoryCasesFromDocumentCitationScope() {
+        AgentEvaluationReport report = report(new AgentEvaluationReport.CaseResult(
+                "history-001", "HISTORY", "之前约定了什么？", "历史记录为 500 元",
+                List.of(), List.of(), AgentRunStatus.SUCCEEDED, null,
+                AgentEvaluationReport.CitationStatus.NOT_APPLICABLE,
+                new AgentEvaluationReport.AnswerMetrics(1, 1, 1.0, 1),
+                new AgentEvaluationReport.AgentMetrics(1, 1, 1, 0, 1, 1, 1, 10), null));
+
+        String markdown = AgentEvaluationReportWriter.toMarkdown(report.withGate(
+                new AgentEvaluationReport.GateResult(true, List.of())));
+
+        assertThat(markdown).contains("非历史的 `KNOWLEDGE_BASED` 题");
+    }
+
+    @Test
     void shouldRenderContextBudgetSectionAndInterpretation() {
         AgentEvaluationReport report = new AgentEvaluationReport(
                 "1.0", "context-v1", "now", 1, 1, 0,
@@ -106,6 +121,7 @@ class AgentEvaluationReportWriterTest {
         assertThat(markdown).contains("## 自适应检索");
         assertThat(markdown).contains("查询类型准确率");
         assertThat(markdown).contains("子查询数量合规率");
+        assertThat(markdown).contains("超限检索尝试率");
         assertThat(markdown).contains("## 典型失败题");
         assertThat(markdown).contains("case-bad");
         assertThat(markdown).doesNotContain("case-good");

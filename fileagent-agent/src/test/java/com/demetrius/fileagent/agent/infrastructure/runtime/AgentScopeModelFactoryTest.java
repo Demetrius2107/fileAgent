@@ -3,6 +3,7 @@ package com.demetrius.fileagent.agent.infrastructure.runtime;
 import com.demetrius.fileagent.api.dto.AgentModelConfig;
 import com.demetrius.fileagent.api.enums.ModelProvider;
 import com.demetrius.fileagent.api.port.AgentModelConfigPort;
+import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import io.agentscope.core.model.Model;
 import io.agentscope.extensions.model.openai.OpenAIChatModel;
 import org.junit.jupiter.api.Test;
@@ -15,7 +16,7 @@ class AgentScopeModelFactoryTest {
     void shouldBuildOpenAiCompatibleModelForDeepSeekConfig() {
         AgentModelConfigPort port = () -> new AgentModelConfig(
                 ModelProvider.DEEPSEEK, "https://api.deepseek.com/v1", "sk-test", "deepseek-chat", 0.2);
-        AgentScopeModelFactory factory = new AgentScopeModelFactory(port);
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(port, new AgentProperties());
 
         Model model = factory.create();
 
@@ -27,7 +28,7 @@ class AgentScopeModelFactoryTest {
     void shouldBuildModelForCustomOpenAiCompatibleEndpoint() {
         AgentModelConfigPort port = () -> new AgentModelConfig(
                 ModelProvider.CUSTOM, "https://crs.example.pub/v1", "sk-custom", "gpt-5.5", 0.1);
-        AgentScopeModelFactory factory = new AgentScopeModelFactory(port);
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(port, new AgentProperties());
 
         Model model = factory.create();
 

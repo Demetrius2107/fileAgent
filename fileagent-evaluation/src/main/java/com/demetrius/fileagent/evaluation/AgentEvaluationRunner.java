@@ -285,7 +285,7 @@ public final class AgentEvaluationRunner {
                 continue;
             }
             EvaluationCase c = cases.get(i);
-            if (c.expected().groundingMode() == AnswerGroundingMode.KNOWLEDGE_BASED) {
+            if (requiresRetrievedCitation(c)) {
                 citationCoverageSum += hasRetrievedCitation(o) ? 1.0 : 0.0;
                 citationCoverageCount++;
                 if (!o.citedFilenames().isEmpty()) {
@@ -361,6 +361,7 @@ public final class AgentEvaluationRunner {
         double countSum = 0, countCount = 0;
         double strategySum = 0, strategyCount = 0;
         double subQuestionSum = 0, subQuestionCount = 0;
+        double excessAttemptSum = 0, excessAttemptCount = 0;
         for (int i = 0; i < observations.size(); i++) {
             AgentEvaluationObservation o = observations.get(i);
             EvaluationCase c = cases.get(i);
@@ -378,6 +379,8 @@ public final class AgentEvaluationRunner {
             }
             countSum += queryCountCompliant(o) ? 1.0 : 0.0;
             countCount++;
+            excessAttemptSum += hasExcessSearchAttempt(o) ? 1.0 : 0.0;
+            excessAttemptCount++;
             strategySum += o.retrievals().stream().allMatch(AgentEvaluationRunner::strategyCompliant)
                     ? 1.0 : 0.0;
             strategyCount++;
@@ -392,7 +395,8 @@ public final class AgentEvaluationRunner {
                 ratio(unnecessarySum, unnecessaryCount),
                 ratio(countSum, countCount),
                 ratio(strategySum, strategyCount),
-                ratio(subQuestionSum, subQuestionCount));
+                ratio(subQuestionSum, subQuestionCount),
+                ratio(excessAttemptSum, excessAttemptCount));
     }
 
     /** 单题自适应指标：仅在 Run 实际执行了结构化检索时生成，否则不参与。 */
@@ -408,7 +412,8 @@ public final class AgentEvaluationRunner {
                 "NONE".equals(expectedType) && calledKnowledgeTool(o) ? 1.0 : 0.0,
                 queryCountCompliant(o) ? 1.0 : 0.0,
                 o.retrievals().stream().allMatch(AgentEvaluationRunner::strategyCompliant) ? 1.0 : 0.0,
-                expectedSubQuestions.isEmpty() ? 0.0 : subQuestionCoverage(c, o));
+                expectedSubQuestions.isEmpty() ? 0.0 : subQuestionCoverage(c, o),
+                hasExcessSearchAttempt(o) ? 1.0 : 0.0);
     }
 
     private static double subQuestionCoverage(EvaluationCase c, AgentEvaluationObservation o) {
@@ -441,13 +446,17 @@ public final class AgentEvaluationRunner {
      */
     private static boolean queryCountCompliant(AgentEvaluationObservation o) {
         if ("AGENT_RETRIEVAL_PLAN_INVALID".equals(o.failureCode())
-                || searchDocsCalls(o) > MAX_RETRIEVAL_ROUNDS
                 || o.retrievals().size() > MAX_RETRIEVAL_ROUNDS) {
             return false;
         }
         return !o.retrievals().isEmpty() && o.retrievals().stream().allMatch(r ->
                 r.plannedQueryCount() >= 1 && r.plannedQueryCount() <= MAX_SUB_QUERIES
                         && r.executedQueryCount() <= r.plannedQueryCount());
+    }
+
+    /** 仅诊断模型是否尝试绕过服务端检索轮次上限，不影响实际检索执行合规性。 */
+    private static boolean hasExcessSearchAttempt(AgentEvaluationObservation o) {
+        return searchDocsCalls(o) > MAX_RETRIEVAL_ROUNDS;
     }
 
     /** 实际参数是否来自允许的服务端策略：策略 id 必须等于声明的查询类型名。 */
@@ -487,9 +496,9 @@ public final class AgentEvaluationRunner {
                 1.0,
                 budgetCompliant(o) ? 1.0 : 0.0,
                 toolWhitelistPass(o) ? 1.0 : 0.0,
-                c.expected().groundingMode() == AnswerGroundingMode.KNOWLEDGE_BASED
+                requiresRetrievedCitation(c)
                         && hasRetrievedCitation(o) ? 1.0 : 0.0,
-                c.expected().groundingMode() == AnswerGroundingMode.KNOWLEDGE_BASED
+                requiresRetrievedCitation(c)
                         && (o.citedFilenames().isEmpty() || citationsOnlyFromRetrieved(o)) ? 1.0 : 0.0,
                 o.judgeSucceeded() && (o.judgeDecision() == RagAnswerJudgePort.Decision.REFUSED)
                         == !c.expected().shouldAnswer() ? 1.0 : 0.0,
@@ -516,10 +525,15 @@ public final class AgentEvaluationRunner {
         return observation.citedFilenames().stream().anyMatch(retrieved::contains);
     }
 
+    private static boolean requiresRetrievedCitation(EvaluationCase evaluationCase) {
+        return evaluationCase.expected().groundingMode() == AnswerGroundingMode.KNOWLEDGE_BASED
+                && !isHistoryCase(evaluationCase);
+    }
+
     private static AgentEvaluationReport.CitationStatus citationStatus(
             EvaluationCase evaluationCase, AgentEvaluationObservation observation) {
         if (!observation.agentSucceeded()
-                || evaluationCase.expected().groundingMode() != AnswerGroundingMode.KNOWLEDGE_BASED) {
+                || !requiresRetrievedCitation(evaluationCase)) {
             return AgentEvaluationReport.CitationStatus.NOT_APPLICABLE;
         }
         if (observation.citedFilenames().isEmpty()) {
@@ -545,15 +559,28 @@ public final class AgentEvaluationRunner {
 
     private static RagAnswerJudgePort.Request toJudgeRequest(EvaluationCase evaluationCase,
                                                              AgentAnswerEvaluationPort.Result result) {
-        List<RagAnswerJudgePort.Evidence> evidence = result.retrieved().stream()
+        List<RagAnswerJudgePort.Evidence> evidence = new ArrayList<>(result.retrieved().stream()
                 .map(hit -> new RagAnswerJudgePort.Evidence(hit.filename(), hit.content()))
-                .toList();
+                .toList());
+        evidence.addAll(historyEvidence(evaluationCase.history()));
         return new RagAnswerJudgePort.Request(evaluationCase.question(),
                 evaluationCase.expected().shouldAnswer(),
                 evaluationCase.expected().groundingMode(),
                 evaluationCase.expected().requiredFacts(),
                 evaluationCase.expected().forbiddenFacts(),
                 result.answer(), evidence);
+    }
+
+    private static List<RagAnswerJudgePort.Evidence> historyEvidence(
+            List<EvaluationCase.HistoryMessage> history) {
+        List<RagAnswerJudgePort.Evidence> evidence = new ArrayList<>(history.size());
+        for (int i = 0; i < history.size(); i++) {
+            EvaluationCase.HistoryMessage message = history.get(i);
+            evidence.add(new RagAnswerJudgePort.Evidence(
+                    "history-" + message.role().toLowerCase(Locale.ROOT) + "-" + (i + 1),
+                    message.content()));
+        }
+        return evidence;
     }
 
     private static List<AgentAnswerEvaluationPort.HistoryMessage> toHistory(

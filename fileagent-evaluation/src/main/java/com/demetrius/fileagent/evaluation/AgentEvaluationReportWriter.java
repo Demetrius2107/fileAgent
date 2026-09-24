@@ -55,6 +55,7 @@ public final class AgentEvaluationReportWriter {
             sb.append(row("子查询数量合规率", adaptive.queryCountComplianceRate()));
             sb.append(row("策略合规率", adaptive.strategyComplianceRate()));
             sb.append(row("子问题覆盖率", adaptive.subQuestionCoverage()));
+            sb.append(row("超限检索尝试率（诊断）", adaptive.excessSearchAttemptRate()));
         }
 
         if (report.contextMetrics() != null) {
@@ -91,12 +92,12 @@ public final class AgentEvaluationReportWriter {
                         || c.citationStatus() == AgentEvaluationReport.CitationStatus.INVALID)
                 .count();
         sb.append("\n> 运行成功率只统计终态为 `SUCCEEDED` 且无评测错误的题；引用覆盖率分母是成功的"
-                + " `KNOWLEDGE_BASED` 题（").append(coverageDenominator).append(" 道），"
+                + "非历史的 `KNOWLEDGE_BASED` 题（").append(coverageDenominator).append(" 道），"
                 + "引用有效性分母是其中实际标注了来源的题（").append(validityDenominator).append(" 道").append('）');
         if (validityDenominator == 0) {
             sb.append("，无已标注引用样本");
         }
-        sb.append("。`GENERAL_KNOWLEDGE`、`REFUSE` 和失败 Run 的引用状态为不适用。\n");
+        sb.append("。`HISTORY`、`GENERAL_KNOWLEDGE`、`REFUSE` 和失败 Run 的引用状态为不适用。\n");
         if (report.adaptiveMetrics() != null) {
             long adaptiveDenominator = report.cases().stream()
                     .filter(c -> c.adaptive() != null)
@@ -105,7 +106,8 @@ public final class AgentEvaluationReportWriter {
                     .append(adaptiveDenominator).append(" 道；类型准确率统计全部标注了预期类型的题（未检索视为 NONE），"
                     + "不必要检索率只统计预期 NONE 的题，越低越好；计划数量与策略合规率只统计实际检索的题。"
                     + "查询类型按首轮计划计算，轮数与策略检查所有轮次；"
-                    + "子问题覆盖率仅为数量代理，多跳累计各轮计划数，其余只看首轮，不代表语义覆盖。\n");
+                    + "子问题覆盖率仅为数量代理，多跳累计各轮计划数，其余只看首轮，不代表语义覆盖；"
+                    + "超限检索尝试率只作诊断，不影响默认质量门禁。\n");
         }
     }
 
@@ -188,6 +190,8 @@ public final class AgentEvaluationReportWriter {
                     ? 1.0 : result.adaptive().strategyComplianceRate();
             case "adaptive.subQuestionCoverage" -> result.adaptive() == null
                     ? 1.0 : result.adaptive().subQuestionCoverage();
+            case "adaptive.excessSearchAttemptRate" -> result.adaptive() == null
+                    ? 0.0 : result.adaptive().excessSearchAttemptRate();
             case "context.promptPreservationRate" -> contextValue(result, c -> c.promptPreservationRate());
             case "context.toolBudgetComplianceRate" -> contextValue(result, c -> c.toolBudgetComplianceRate());
             case "context.budgetExhaustionCompletionRate" -> contextValue(result, c -> c.budgetExhaustionCompletionRate());

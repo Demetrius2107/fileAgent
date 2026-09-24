@@ -72,6 +72,7 @@ public final class AgentQualityGateEvaluator {
             scores.put("adaptive.queryCountComplianceRate", adaptive.queryCountComplianceRate());
             scores.put("adaptive.strategyComplianceRate", adaptive.strategyComplianceRate());
             scores.put("adaptive.subQuestionCoverage", adaptive.subQuestionCoverage());
+            scores.put("adaptive.excessSearchAttemptRate", adaptive.excessSearchAttemptRate());
         }
         AgentEvaluationReport.ContextMetrics context = report.contextMetrics();
         if (context != null) {

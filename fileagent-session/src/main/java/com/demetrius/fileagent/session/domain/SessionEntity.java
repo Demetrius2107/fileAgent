@@ -40,7 +40,7 @@ public class SessionEntity {
     private LocalDateTime summaryUpdatedAt;
 
     /** 摘要并发更新版本。 */
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "BIGINT DEFAULT 0")
     private long summaryVersion = 0L;
 
     /** 摘要来源消息的稳定哈希。 */

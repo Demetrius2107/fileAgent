@@ -53,6 +53,41 @@ class AgentEvaluationRunnerTest {
     }
 
     @Test
+    void historyEvidenceShouldReachJudgeWithoutRequiringDocumentCitation() {
+        AtomicReference<RagAnswerJudgePort.Request> judgeRequest = new AtomicReference<>();
+        RagAnswerJudgePort judgePort = request -> {
+            judgeRequest.set(request);
+            return new RagAnswerJudgePort.Result(RagAnswerJudgePort.Decision.ANSWERED,
+                    "回答准确复述了历史记录", false, null,
+                    List.of(new RagAnswerJudgePort.FactAssessment("历史中约定额度为 500 元", true, "历史消息明确出现")),
+                    List.of(), "{}", 1L);
+        };
+        AgentAnswerEvaluationPort agentPort = query -> new AgentAnswerEvaluationPort.Result(
+                "根据之前的对话，记录的额度为 500 元。", false,
+                List.of(), List.of(), 0, 1, List.of(), 50L,
+                AgentRunStatus.SUCCEEDED, null, null);
+        EvaluationCase evaluationCase = new EvaluationCase("1.0", "history-001", "HISTORY",
+                List.of("context", "history"), "之前约定的额度是多少？",
+                List.of(new EvaluationCase.HistoryMessage("user", "我们约定额度为 500 元。")),
+                new EvaluationCase.Filters(null, null, null),
+                new EvaluationCase.Expected(true, List.of(),
+                        List.of("历史中约定额度为 500 元"), List.of(),
+                        AnswerGroundingMode.KNOWLEDGE_BASED));
+
+        AgentEvaluationRunner runner = new AgentEvaluationRunner(judgePort);
+        AgentEvaluationReport report = runner.evaluate("context-v2", List.of(evaluationCase),
+                runner.collect(List.of(evaluationCase), agentPort));
+
+        assertThat(judgeRequest.get().evidence()).singleElement().satisfies(evidence -> {
+            assertThat(evidence.filename()).isEqualTo("history-user-1");
+            assertThat(evidence.content()).isEqualTo("我们约定额度为 500 元。");
+        });
+        assertThat(report.cases()).singleElement()
+                .extracting(AgentEvaluationReport.CaseResult::citationStatus)
+                .isEqualTo(AgentEvaluationReport.CitationStatus.NOT_APPLICABLE);
+    }
+
+    @Test
     void reportShouldSeparateAnswerQualityFromAgentBehavior() {
         RagAnswerJudgePort judgePort = request -> new RagAnswerJudgePort.Result(
                 request.shouldAnswer() ? RagAnswerJudgePort.Decision.ANSWERED : RagAnswerJudgePort.Decision.REFUSED,
@@ -359,6 +394,26 @@ class AgentEvaluationRunnerTest {
         assertThat(report.adaptiveMetrics().queryTypeAccuracy()).isEqualTo(1.0);
         assertThat(report.adaptiveMetrics().subQuestionCoverage()).isEqualTo(1.0);
         assertThat(report.cases().getFirst().adaptive().queryTypeAccuracy()).isEqualTo(1.0);
+    }
+
+    @Test
+    void queryCountComplianceShouldUseExecutedRetrievalRoundsAndExposeExcessAttemptsSeparately() {
+        AgentAnswerEvaluationPort.RetrievalObservation first =
+                retrievalObservation(RetrievalQueryType.SINGLE_HOP, 1, 1);
+        AgentAnswerEvaluationPort.RetrievalObservation second =
+                retrievalObservation(RetrievalQueryType.SINGLE_HOP, 1, 1);
+        AgentEvaluationObservation observation = new AgentEvaluationObservation(
+                "duplicate-001", "ADAPTIVE", "研发部有多少人？", "40 人", false,
+                List.of("department-standards-2026.md"), List.of("department-standards-2026.md"),
+                3, 4, List.of("search_docs", "search_docs", "search_docs"), 10L,
+                AgentRunStatus.SUCCEEDED, null, RagAnswerJudgePort.Decision.ANSWERED, false,
+                List.of(), List.of(), null, second, List.of(first, second));
+        AgentEvaluationReport report = new AgentEvaluationRunner(request -> null).evaluate("adaptive-v2",
+                List.of(adaptiveCase("duplicate-001", "SINGLE_HOP", List.of())), List.of(observation));
+
+        assertThat(report.adaptiveMetrics().queryCountComplianceRate()).isEqualTo(1.0);
+        assertThat(AgentQualityGateEvaluator.flatten(report))
+                .containsEntry("adaptive.excessSearchAttemptRate", 1.0);
     }
 
     @Test

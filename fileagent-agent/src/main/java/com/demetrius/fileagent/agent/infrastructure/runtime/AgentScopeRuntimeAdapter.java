@@ -411,7 +411,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             return List.of();
         }
         LinkedHashSet<String> files = new LinkedHashSet<>();
-        Matcher matcher = CITATION.matcher(text);
+        Matcher matcher = CITATION.matcher(visibleMarkdownText(text));
         while (matcher.find()) {
             for (String source : matcher.group(1).split("[；;]")) {
                 String name = source.trim();
@@ -421,6 +421,27 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             }
         }
         return List.copyOf(files);
+    }
+
+    private String visibleMarkdownText(String text) {
+        StringBuilder visible = new StringBuilder(text.length());
+        boolean inFence = false;
+        boolean inInlineCode = false;
+        for (int index = 0; index < text.length(); index++) {
+            if (text.startsWith("```", index)) {
+                inFence = !inFence;
+                index += 2;
+                continue;
+            }
+            if (!inFence && text.charAt(index) == '`') {
+                inInlineCode = !inInlineCode;
+                continue;
+            }
+            if (!inFence && !inInlineCode) {
+                visible.append(text.charAt(index));
+            }
+        }
+        return visible.toString();
     }
 
     private long durationMs(Long startNanos) {

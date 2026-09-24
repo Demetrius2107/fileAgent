@@ -110,26 +110,29 @@ FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v1 ./fileagent-evaluation/scripts/
 
 - `adaptive.queryTypeAccuracy`：实际查询类型与标注一致的比例；分母是标注了预期类型的题，失败 Run 也参与（规划是运行时受控行为）。
 - `adaptive.unnecessaryRetrievalRate`：**越低越好**；无需检索题实际执行结构化检索或调用知识工具的比例。
-- `adaptive.queryCountComplianceRate`：计划子查询数 ∈ [1,3]、单次 Run 的 `search_docs` ≤2 轮、执行数 ≤ 计划数且未因非法计划终止的 Run 比例。
+- `adaptive.queryCountComplianceRate`：实际执行的结构化检索中，计划子查询数 ∈ [1,3]、执行轮数 ≤2、执行数 ≤ 计划数且未因非法计划终止的 Run 比例。
 - `adaptive.strategyComplianceRate`：实际策略档位来自服务端允许值且与查询类型一致的 Run 比例。
 - `adaptive.subQuestionCoverage`：标注必要子问题被计划覆盖的比例（现阶段为数量代理，语义覆盖需人工核验）。
+- `adaptive.excessSearchAttemptRate`：**仅诊断，越低越好**；模型发起的 `search_docs` 尝试超过两次的比例。服务端会拦截超限尝试，因此该指标不等同于实际检索超限，也不在默认门禁中。
 
-未执行结构化检索的 Run 不参与自适应指标；Markdown 报告会展示自适应指标与分母口径。`gate.json` 当前只强制 `adaptive.queryCountComplianceRate=1.0`、`adaptive.strategyComplianceRate=1.0`、`agent.toolWhitelistPassRate=1.0`、`agent.budgetComplianceRate=1.0`；`queryTypeAccuracy`、`subQuestionCoverage` 与多跳/比较收益阈值须在首份真实 baseline 经人工确认后填入，在此之前只展示、不断言。
+未执行结构化检索的 Run 不参与自适应指标；Markdown 报告会展示自适应指标与分母口径。`gate.json` 当前只强制 `adaptive.queryCountComplianceRate=1.0`、`adaptive.strategyComplianceRate=1.0`、`agent.toolWhitelistPassRate=1.0`、`agent.budgetComplianceRate=1.0`；`queryTypeAccuracy`、`subQuestionCoverage`、`excessSearchAttemptRate` 与多跳/比较收益阈值须在首份真实 baseline 经人工确认后填入，在此之前只展示、不断言。
 
 校准后的 `adaptive-v2` 独立保留 13 题与同内容语料，不覆盖 v1 的题库和历史报告。先上传 `./fileagent-evaluation/scripts/upload-corpus.sh adaptive-v2`，部署新代码后运行 `FILEAGENT_EVALUATION_DATASET_VERSION=adaptive-v2 ./fileagent-evaluation/scripts/run-agent-evaluation.sh`；不要用 v1 报告作为 v2 baseline。v2 区分并列独立事实的 `MULTI_QUERY`（首轮至少 2 条）和真正依赖中间结果的 `MULTI_HOP`（允许首轮 1 条、最多两轮）；历史年份对比归 `COMPARISON`，不伪装成“当前最新”的 `TIME_SENSITIVE` 样本。`observations.jsonl` 的 `retrievals` 列出全部成功检索轮次，`retrieval` 为兼容字段，仍指最后一轮。类型准确率看首轮，计划/策略合规检查每轮；子问题覆盖率仍为数量代理，多跳累计轮次，其他只看首轮。
 
-## 上下文预算评测（context-v1）
+## 上下文预算评测（context-v1 / context-v2）
 
-`context-v1` 验证 Phase 2B 的历史上下文、滚动摘要、目录与原文读取、工具预算收口和通用知识边界。先上传独立语料，再调用已部署服务：
+`context-v1` 保留首次 Phase 2B 评测结果；当前使用 `context-v2` 验证历史上下文、滚动摘要、目录与原文读取、工具预算收口、通用知识边界，以及历史记录与正式知识库核验的区分。先上传独立语料，再调用已部署服务：
 
 ```bash
-./fileagent-evaluation/scripts/upload-corpus.sh context-v1
-FILEAGENT_EVALUATION_DATASET_VERSION=context-v1 \
-FILEAGENT_EVALUATION_RUN_ID=phase2b-context-$(date -u +%Y%m%dT%H%M%SZ) \
+./fileagent-evaluation/scripts/upload-corpus.sh context-v2
+FILEAGENT_EVALUATION_DATASET_VERSION=context-v2 \
+FILEAGENT_EVALUATION_RUN_ID=phase2b-context-v2-$(date -u +%Y%m%dT%H%M%SZ) \
 ./fileagent-evaluation/scripts/run-agent-evaluation.sh
 ```
 
 报告新增 `context.*` 指标：当前问题保留率、工具预算合规率、预算耗尽后完成率、历史必答事实覆盖率、历史摘要无依据主张率和通用知识假引用率。前四项配置最低值，后两项通过 `maximumScores` 配置最高值。`observations.jsonl` 的 `details` 记录字符数、Token、预算原因、受控布尔状态，以及受 `maxSummaryCharacters` 限制的摘要和覆盖消息 ID；不包含完整 Prompt、思维链或工具正文。真实模型评测需要服务端已有的 Chat、Embedding、reranker、Elasticsearch 和 Judge 配置，脚本不接收额外模型 API Key。
+
+`context-v2` 还要求回答决策、拒答决策和 `answer.forbiddenFactSafety` 均达到 `1.0`；安全题必须拒绝泄露请求，且不能在拒绝后复述或等价解释受保护的内部信息。
 
 普通 RAG 的 `v1` 每次运行会真实生成 30 个回答，并逐题调用 `deepseek-v4-pro` 评判，因此会产生 30 次回答调用和 30 次 Judge 调用。Judge 复用部署已有的 `FILEAGENT_CHAT_API_KEY` 与 DeepSeek 端点，不需要新增 API Key。评测接口是同步批量执行，反向代理的请求超时时间应覆盖整批运行耗时。
 

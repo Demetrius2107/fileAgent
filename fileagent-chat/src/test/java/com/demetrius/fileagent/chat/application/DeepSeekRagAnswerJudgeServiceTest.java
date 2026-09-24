@@ -50,6 +50,68 @@ class DeepSeekRagAnswerJudgeServiceTest {
     }
 
     @Test
+    void shouldTreatHistoryEvidenceAsConversationRecordInsteadOfCurrentPolicyProof() {
+        DeepSeekJudgeClient client = mock(DeepSeekJudgeClient.class);
+        when(client.call(anyList())).thenReturn("""
+                {
+                  "decision": "ANSWERED",
+                  "decisionReason": "回答准确说明了历史记录",
+                  "hasUnsupportedClaims": false,
+                  "requiredFacts": [
+                    {"fact": "历史中约定额度为 500 元", "matched": true, "reason": "历史消息明确出现"}
+                  ],
+                  "forbiddenFacts": []
+                }
+                """);
+        DeepSeekRagAnswerJudgeService service = new DeepSeekRagAnswerJudgeService(client, new ObjectMapper());
+        RagAnswerJudgePort.Request request = new RagAnswerJudgePort.Request(
+                "之前约定的额度是多少？", true, AnswerGroundingMode.KNOWLEDGE_BASED,
+                List.of("历史中约定额度为 500 元"), List.of(),
+                "根据之前的对话，记录的额度为 500 元。",
+                List.of(new RagAnswerJudgePort.Evidence("history-user-1", "约定额度为 500 元。")));
+
+        service.judge(request);
+
+        ArgumentCaptor<List<Message>> messages = ArgumentCaptor.forClass(List.class);
+        verify(client).call(messages.capture());
+        assertThat(messages.getValue().getFirst().getText())
+                .contains("history-*")
+                .contains("当前正式企业制度");
+    }
+
+    @Test
+    void shouldTreatInsufficientEvidenceAsAnsweredWhenItCompletesTheVerificationRequest() {
+        DeepSeekJudgeClient client = mock(DeepSeekJudgeClient.class);
+        when(client.call(anyList())).thenReturn("""
+                {
+                  "decision": "ANSWERED",
+                  "decisionReason": "回答区分了历史记录与当前制度核验结果",
+                  "hasUnsupportedClaims": false,
+                  "requiredFacts": [
+                    {"fact": "历史记录为 500 元", "matched": true, "reason": "回答明确说明历史记录"},
+                    {"fact": "知识库无法确认当前正式标准", "matched": true, "reason": "回答明确说明无法核实"}
+                  ],
+                  "forbiddenFacts": []
+                }
+                """);
+        DeepSeekRagAnswerJudgeService service = new DeepSeekRagAnswerJudgeService(client, new ObjectMapper());
+        RagAnswerJudgePort.Request request = new RagAnswerJudgePort.Request(
+                "之前的对话记录报销额度为 500 元。请检索知识库核实它是否仍是当前正式标准。",
+                true, AnswerGroundingMode.KNOWLEDGE_BASED,
+                List.of("历史记录为 500 元", "知识库无法确认当前正式标准"), List.of(),
+                "历史记录为 500 元；知识库未找到现行制度，无法核实。",
+                List.of(new RagAnswerJudgePort.Evidence("history-assistant-1", "报销额度为 500 元。")));
+
+        service.judge(request);
+
+        ArgumentCaptor<List<Message>> messages = ArgumentCaptor.forClass(List.class);
+        verify(client).call(messages.capture());
+        assertThat(messages.getValue().getFirst().getText())
+                .contains("无法核实/资料不足")
+                .contains("不是拒答，应判 ANSWERED");
+    }
+
+    @Test
     void shouldReturnSemanticFactAndRefusalAssessment() {
         DeepSeekJudgeClient client = mock(DeepSeekJudgeClient.class);
         when(client.call(anyList())).thenReturn("""

@@ -221,6 +221,9 @@ session_id
 active_slot UNIQUE NULLABLE
 input_message_id
 assistant_message_id
+request_schema_version
+request_ciphertext CLOB
+request_hmac
 actor_id
 status
 failure_code
@@ -247,6 +250,8 @@ updated_at
 ```
 
 `active_slot` 在 `PENDING/RUNNING/WAITING_APPROVAL` 时非空，进入终态时清空。
+
+`request_ciphertext` 保存版本化 `AgentRunCommand` 的加密信封，`request_hmac` 校验规范化请求；否则 Run 在创建事务提交后、Coordinator 入队前崩溃时，只剩 PENDING 状态而没有可恢复的执行输入。请求明文不写数据库和日志。
 
 ### 7.2 `agent_step`
 
@@ -656,6 +661,7 @@ Python 无网络、无宿主持久化副作用，因此从 ASKING 检查点恢�
 ```text
 POST /api/sessions/{sessionId}/agent-runs
 GET  /api/agent-runs/{runId}
+GET  /api/agent-runs/{runId}/events
 POST /api/agent-runs/{runId}/cancel
 ```
 
@@ -667,6 +673,8 @@ POST /api/agent-runs/{runId}/approvals/{approvalId}
 ```
 
 `/active` 返回 `ApiResult<AgentRunSnapshot>`；当前会话没有非终态 Run 时返回 HTTP 200 且 `data=null`，避免刷新恢复把“无活动任务”误判成异常。
+
+`/events` 返回 `text/event-stream`，通过 `Last-Event-ID` 增量重放当前进程内仍保留的事件；游标缺失、过期或应用已重启时先返回当前 `run.status` 快照，不伪造已丢失的 `message.delta`。创建接口只创建新 Run，前端恢复已有 Run 必须调用该订阅接口，不能重复提交创建请求。
 
 审批请求：
 

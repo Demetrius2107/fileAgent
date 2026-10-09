@@ -30,5 +30,6 @@ public record AgentRunSnapshot(
         long outputTokens,
         long totalTokens,
         boolean historyCompressed,
-        List<String> budgetReasons) {
+        List<String> budgetReasons,
+        Long runVersion) {
 }

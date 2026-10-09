@@ -487,7 +487,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
                 run.outputTokens(),
                 run.totalTokens(),
                 run.historyCompressed(),
-                run.budgetReasons());
+                run.budgetReasons(),
+                null);
     }
 
     private AgentRunBudget currentBudget() {

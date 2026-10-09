@@ -25,46 +25,63 @@ public record AgentRunEvent(
         String code,
         String message,
         Long messageId,
-        String traceId) {
+        String traceId,
+        String eventId,
+        Long runVersion) {
 
     public static AgentRunEvent runStarted(String runId, String traceId) {
         return new AgentRunEvent("run.started", runId, AgentRunStatus.RUNNING,
-                null, null, null, null, null, null, null, null, null, null, traceId);
+                null, null, null, null, null, null, null, null, null, null, traceId, null, null);
+    }
+
+    public static AgentRunEvent pending(String runId) {
+        return status(runId, AgentRunStatus.PENDING, null);
     }
 
     public static AgentRunEvent status(String runId, AgentRunStatus status, String summary) {
         return new AgentRunEvent("run.status", runId, status,
-                summary, null, null, null, null, null, null, null, null, null, null);
+                summary, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent toolStarted(String runId, String tool, int step) {
         return new AgentRunEvent("tool.started", runId, null,
-                null, step, tool, null, null, null, null, null, null, null, null);
+                null, step, tool,
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent toolCompleted(String runId, String tool, int step,
                                               int resultCount, long durationMs) {
         return new AgentRunEvent("tool.completed", runId, null,
-                null, step, tool, resultCount, durationMs, null, null, null, null, null, null);
+                null, step, tool, resultCount, durationMs,
+                null, null, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent delta(String runId, String content) {
         return new AgentRunEvent("message.delta", runId, null,
-                null, null, null, null, null, content, null, null, null, null, null);
+                null, null, null, null, null, content, null, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent sources(String runId, List<String> files) {
         return new AgentRunEvent("sources", runId, null,
-                null, null, null, null, null, null, files, null, null, null, null);
+                null, null, null, null, null, null, files, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent completed(String runId, Long messageId) {
         return new AgentRunEvent("run.completed", runId, AgentRunStatus.SUCCEEDED,
-                null, null, null, null, null, null, null, null, null, messageId, null);
+                null, null, null, null, null, null, null, null, null,
+                messageId, null, null, null);
     }
 
     public static AgentRunEvent failed(String runId, String code, String message, String traceId) {
         return new AgentRunEvent("run.failed", runId, AgentRunStatus.FAILED,
-                null, null, null, null, null, null, null, code, message, null, traceId);
+                null, null, null, null, null, null, null, code, message, null, traceId, null, null);
+    }
+
+    /**
+     * 由运行事件通道在发布时写入不可预测事件 ID 与对应 Run 版本。
+     */
+    public AgentRunEvent withMetadata(String eventId, long runVersion) {
+        return new AgentRunEvent(type, runId, status, summary, step, tool, resultCount, durationMs,
+                content, files, code, message, messageId, traceId, eventId, runVersion);
     }
 }

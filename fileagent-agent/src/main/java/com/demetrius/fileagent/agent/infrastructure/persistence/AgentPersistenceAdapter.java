@@ -10,8 +10,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Agent 三类持久化事实的领域仓储适配器，集中隔离 Spring Data API。
@@ -71,5 +73,15 @@ public class AgentPersistenceAdapter implements AgentRunRepository, AgentStepRep
     @Override
     public Optional<AgentCheckpointEntity> findCheckpointByRunId(String runId) {
         return agentCheckpointJpaRepository.findById(runId);
+    }
+
+    @Override
+    public void deleteByRunId(String runId) {
+        agentCheckpointJpaRepository.deleteById(runId);
+    }
+
+    @Override
+    public Set<String> findRunIds() {
+        return new LinkedHashSet<>(agentCheckpointJpaRepository.findAllRunIds());
     }
 }

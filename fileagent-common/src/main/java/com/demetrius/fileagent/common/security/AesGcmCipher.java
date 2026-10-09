@@ -34,11 +34,23 @@ public class AesGcmCipher {
      * @throws IllegalStateException 加密失败时
      */
     public String encrypt(String plainText) {
+        return encrypt(plainText, null);
+    }
+
+    /**
+     * 加密明文并将其绑定到附加认证数据；AAD 不会写入密文，但解密时必须完全一致。
+     *
+     * @param plainText 明文（不允许为空）
+     * @param aad 附加认证数据；为空时保持历史调用的兼容行为
+     * @return Base64 编码的密文
+     */
+    public String encrypt(String plainText, String aad) {
         try {
             byte[] iv = new byte[IV_LENGTH];
             secureRandom.nextBytes(iv);
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             cipher.init(Cipher.ENCRYPT_MODE, masterKeyProvider.masterKey(), new GCMParameterSpec(TAG_BITS, iv));
+            applyAad(cipher, aad);
             byte[] encrypted = cipher.doFinal(plainText.getBytes(java.nio.charset.StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(ByteBuffer.allocate(iv.length + encrypted.length)
                     .put(iv).put(encrypted).array());
@@ -55,6 +67,18 @@ public class AesGcmCipher {
      * @throws IllegalStateException 密文非法或主密钥不匹配时
      */
     public String decrypt(String cipherText) {
+        return decrypt(cipherText, null);
+    }
+
+    /**
+     * 解密并校验附加认证数据；AAD 与加密时不一致会被 GCM 认证标签拒绝。
+     *
+     * @param cipherText Base64(IV + 密文)
+     * @param aad 加密时绑定的附加认证数据；为空时保持历史调用的兼容行为
+     * @return 明文
+     * @throws IllegalStateException 密文、AAD 或主密钥不匹配时
+     */
+    public String decrypt(String cipherText, String aad) {
         try {
             ByteBuffer buffer = ByteBuffer.wrap(Base64.getDecoder().decode(cipherText));
             byte[] iv = new byte[IV_LENGTH];
@@ -63,9 +87,16 @@ public class AesGcmCipher {
             buffer.get(encrypted);
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
             cipher.init(Cipher.DECRYPT_MODE, masterKeyProvider.masterKey(), new GCMParameterSpec(TAG_BITS, iv));
+            applyAad(cipher, aad);
             return new String(cipher.doFinal(encrypted), java.nio.charset.StandardCharsets.UTF_8);
         } catch (Exception e) {
             throw new IllegalStateException("敏感信息解密失败（密文损坏或主密钥不匹配）", e);
+        }
+    }
+
+    private void applyAad(Cipher cipher, String aad) {
+        if (aad != null) {
+            cipher.updateAAD(aad.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
     }
 }

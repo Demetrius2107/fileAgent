@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.domain.checkpoint;
 
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 每个 Agent Run 最新恢复检查点的领域仓储契约。
@@ -14,4 +15,8 @@ public interface AgentCheckpointRepository {
     AgentCheckpointEntity save(AgentCheckpointEntity checkpoint);
 
     Optional<AgentCheckpointEntity> findCheckpointByRunId(String runId);
+
+    void deleteByRunId(String runId);
+
+    Set<String> findRunIds();
 }

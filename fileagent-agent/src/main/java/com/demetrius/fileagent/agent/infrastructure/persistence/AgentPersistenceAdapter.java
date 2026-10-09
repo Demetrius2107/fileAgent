@@ -56,6 +56,11 @@ public class AgentPersistenceAdapter implements AgentRunRepository, AgentStepRep
     }
 
     @Override
+    public boolean renewLease(String runId, String owner, Instant now, Instant until) {
+        return agentRunJpaRepository.renewLease(runId, owner, now, until) == 1;
+    }
+
+    @Override
     public AgentStepEntity save(AgentStepEntity step) {
         return agentStepJpaRepository.save(step);
     }

@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.agent.application.runtime;
 
+import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import org.springframework.stereotype.Component;
@@ -28,11 +29,16 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class AgentRunEventHub {
 
-    private static final int MAX_REPLAY_EVENTS = 100;
-    private static final int MAX_REPLAY_BYTES = 256 * 1024;
     private static final String DELTA_EVENT_TYPE = "message.delta";
 
     private final Map<String, RunChannel> channels = new ConcurrentHashMap<>();
+    private final int maxReplayEvents;
+    private final int maxReplayBytes;
+
+    public AgentRunEventHub(AgentProperties properties) {
+        this.maxReplayEvents = properties.getReplayMaxEvents();
+        this.maxReplayBytes = properties.getReplayMaxBytes();
+    }
 
     /**
      * 为原始运行事件补全传输元数据，并广播给该 Run 的当前订阅者。
@@ -49,7 +55,8 @@ public class AgentRunEventHub {
             throw new IllegalArgumentException("runVersion 不能小于 0");
         }
         AgentRunEvent published = event.withMetadata(UUID.randomUUID().toString(), runVersion);
-        channels.computeIfAbsent(event.runId(), ignored -> new RunChannel()).publish(published);
+        channels.computeIfAbsent(event.runId(), ignored -> new RunChannel(maxReplayEvents, maxReplayBytes))
+                .publish(published);
         return published;
     }
 
@@ -73,7 +80,7 @@ public class AgentRunEventHub {
         if (currentRunVersion < 0) {
             throw new IllegalArgumentException("currentRunVersion 不能小于 0");
         }
-        RunChannel channel = channels.computeIfAbsent(runId, ignored -> new RunChannel());
+        RunChannel channel = channels.computeIfAbsent(runId, ignored -> new RunChannel(maxReplayEvents, maxReplayBytes));
         return channel.subscribe(runId, lastEventId, currentStatus, currentRunVersion);
     }
 
@@ -109,8 +116,15 @@ public class AgentRunEventHub {
         private final Object monitor = new Object();
         private final Deque<RetainedEvent> replayEvents = new ArrayDeque<>();
         private final Sinks.Many<AgentRunEvent> sink = Sinks.many().multicast().directBestEffort();
+        private final int maxReplayEvents;
+        private final int maxReplayBytes;
         private int retainedBytes;
         private boolean terminal;
+
+        private RunChannel(int maxReplayEvents, int maxReplayBytes) {
+            this.maxReplayEvents = maxReplayEvents;
+            this.maxReplayBytes = maxReplayBytes;
+        }
 
         void publish(AgentRunEvent event) {
             synchronized (monitor) {
@@ -162,7 +176,7 @@ public class AgentRunEventHub {
 
         private void retain(AgentRunEvent event) {
             int eventBytes = estimateBytes(event);
-            if (DELTA_EVENT_TYPE.equals(event.type()) && eventBytes > MAX_REPLAY_BYTES) {
+            if (DELTA_EVENT_TYPE.equals(event.type()) && eventBytes > maxReplayBytes) {
                 return;
             }
             while (wouldOverflow(eventBytes)) {
@@ -179,7 +193,7 @@ public class AgentRunEventHub {
         }
 
         private boolean wouldOverflow(int eventBytes) {
-            return replayEvents.size() >= MAX_REPLAY_EVENTS || retainedBytes + eventBytes > MAX_REPLAY_BYTES;
+            return replayEvents.size() >= maxReplayEvents || retainedBytes + eventBytes > maxReplayBytes;
         }
 
         private RetainedEvent removeOldestDelta() {

@@ -33,6 +33,13 @@ public class AgentProperties {
     private int singleToolResultCharacters = 4000;
     private int maxToolResultCharacters = 12000;
     private Duration completedRunTtl = Duration.ofMinutes(15);
+    private int maxConcurrentRuns = 4;
+    private int maxQueuedRuns = 32;
+    private Duration pendingStartTimeout = Duration.ofMinutes(2);
+    private Duration leaseDuration = Duration.ofSeconds(30);
+    private Duration recoveryScanInterval = Duration.ofSeconds(15);
+    private int replayMaxEvents = 100;
+    private int replayMaxBytes = 256 * 1024;
 
     private int maxPromptCharacters = 8000;
     private int maxHistoryCharacters = 8000;
@@ -50,7 +57,8 @@ public class AgentProperties {
                 || maxPromptCharacters < 1 || maxHistoryCharacters < 1
                 || maxSummaryCharacters < 1 || maxRecentHistoryCharacters < 1
                 || searchSnippetCharacters < 1 || outlineMaxEntries < 1
-                || readMaxChunks < 1 || maxTotalTokens < 1) {
+                || readMaxChunks < 1 || maxTotalTokens < 1 || maxConcurrentRuns < 1
+                || maxQueuedRuns < 0 || replayMaxEvents < 1 || replayMaxBytes < 1) {
             throw new BizException("fileagent.agent 上下文预算必须为正数");
         }
         if (maxSummaryCharacters + maxRecentHistoryCharacters > maxHistoryCharacters) {
@@ -58,6 +66,11 @@ public class AgentProperties {
         }
         if (singleToolResultCharacters > maxToolResultCharacters) {
             throw new BizException("fileagent.agent 单次工具结果预算不能超过累计工具结果预算");
+        }
+        if (pendingStartTimeout.isNegative() || pendingStartTimeout.isZero()
+                || leaseDuration.isNegative() || leaseDuration.isZero()
+                || recoveryScanInterval.isNegative() || recoveryScanInterval.isZero()) {
+            throw new BizException("fileagent.agent 运行时长配置必须大于 0");
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.agent.application.runtime;
 
+import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import org.junit.jupiter.api.Test;
@@ -19,7 +20,7 @@ class AgentRunEventHubTest {
 
     @Test
     void shouldReplayOnlyEventsAfterLastEventIdWithStableEventId() {
-        AgentRunEventHub eventHub = new AgentRunEventHub();
+        AgentRunEventHub eventHub = eventHub();
         AgentRunEvent started = eventHub.publish(AgentRunEvent.runStarted("run-1", "trace-1"), 1L);
         AgentRunEvent delta = eventHub.publish(AgentRunEvent.delta("run-1", "第一段回答"), 2L);
 
@@ -42,7 +43,7 @@ class AgentRunEventHubTest {
 
     @Test
     void shouldKeepTerminalEventWhenDeltaReplayBufferOverflows() {
-        AgentRunEventHub eventHub = new AgentRunEventHub();
+        AgentRunEventHub eventHub = eventHub();
         AgentRunEvent cursor = eventHub.publish(AgentRunEvent.status("run-2", AgentRunStatus.RUNNING, null), 1L);
         for (int index = 0; index < 101; index++) {
             eventHub.publish(AgentRunEvent.delta("run-2", "delta-" + index), index + 2L);
@@ -61,7 +62,7 @@ class AgentRunEventHubTest {
 
     @Test
     void shouldReturnCurrentStatusOnlyWhenLastEventIdIsUnknown() {
-        AgentRunEventHub eventHub = new AgentRunEventHub();
+        AgentRunEventHub eventHub = eventHub();
         eventHub.publish(AgentRunEvent.delta("run-3", "不会重放的增量"), 2L);
 
         List<AgentRunEvent> events = eventHub.subscribe("run-3", "expired-event-id",
@@ -80,7 +81,7 @@ class AgentRunEventHubTest {
 
     @Test
     void shouldExcludeOversizedDeltaFromReplayWithoutLosingTerminalEvent() {
-        AgentRunEventHub eventHub = new AgentRunEventHub();
+        AgentRunEventHub eventHub = eventHub();
         AgentRunEvent cursor = eventHub.publish(AgentRunEvent.status("run-4", AgentRunStatus.RUNNING, null), 1L);
         eventHub.publish(AgentRunEvent.delta("run-4", "x".repeat(256 * 1024)), 2L);
         AgentRunEvent completed = eventHub.publish(AgentRunEvent.completed("run-4", 400L), 3L);
@@ -91,5 +92,9 @@ class AgentRunEventHubTest {
                 .block();
 
         assertThat(replay).containsExactly(completed);
+    }
+
+    private AgentRunEventHub eventHub() {
+        return new AgentRunEventHub(new AgentProperties());
     }
 }

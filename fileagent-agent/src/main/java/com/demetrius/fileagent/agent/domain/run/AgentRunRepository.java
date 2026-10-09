@@ -22,4 +22,6 @@ public interface AgentRunRepository {
     List<AgentRunEntity> findRecoverable(Instant now);
 
     boolean acquireLease(String runId, long expectedVersion, String owner, Instant now, Instant until);
+
+    boolean renewLease(String runId, String owner, Instant now, Instant until);
 }

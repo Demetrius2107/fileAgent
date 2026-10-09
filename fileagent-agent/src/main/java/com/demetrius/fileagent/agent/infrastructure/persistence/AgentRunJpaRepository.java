@@ -34,4 +34,11 @@ public interface AgentRunJpaRepository extends JpaRepository<AgentRunEntity, Str
     int acquireLease(@Param("runId") String runId, @Param("version") long version,
                      @Param("owner") String owner, @Param("now") Instant now,
                      @Param("until") Instant until);
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update AgentRunEntity r set r.leaseExpiresAt = :until, r.version = r.version + 1 "
+            + "where r.runId = :runId and r.executionOwner = :owner and r.leaseExpiresAt > :now")
+    int renewLease(@Param("runId") String runId, @Param("owner") String owner,
+                   @Param("now") Instant now, @Param("until") Instant until);
 }

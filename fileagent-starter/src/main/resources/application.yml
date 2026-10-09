@@ -72,6 +72,13 @@ fileagent:
     outline-max-entries: ${FILEAGENT_AGENT_OUTLINE_MAX_ENTRIES:50}
     read-max-chunks: ${FILEAGENT_AGENT_READ_MAX_CHUNKS:3}
     max-total-tokens: ${FILEAGENT_AGENT_MAX_TOTAL_TOKENS:60000}
+    max-concurrent-runs: ${FILEAGENT_AGENT_MAX_CONCURRENT_RUNS:4}
+    max-queued-runs: ${FILEAGENT_AGENT_MAX_QUEUED_RUNS:32}
+    pending-start-timeout: ${FILEAGENT_AGENT_PENDING_START_TIMEOUT:2m}
+    lease-duration: ${FILEAGENT_AGENT_LEASE_DURATION:30s}
+    recovery-scan-interval: ${FILEAGENT_AGENT_RECOVERY_SCAN_INTERVAL:15s}
+    replay-max-events: ${FILEAGENT_AGENT_REPLAY_MAX_EVENTS:100}
+    replay-max-bytes: ${FILEAGENT_AGENT_REPLAY_MAX_BYTES:262144}
   chunk-size: 800
   chunk-overlap: 120
   elasticsearch:

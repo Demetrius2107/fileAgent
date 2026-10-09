@@ -54,6 +54,19 @@ class AgentPersistenceJpaTest {
     }
 
     @Test
+    void shouldRenewLeaseOnlyForCurrentOwner() {
+        AgentRunEntity run = agentRunJpaRepository.saveAndFlush(pending("run-renew", 21L));
+        Instant now = Instant.parse("2026-10-09T08:00:00Z");
+
+        assertThat(agentRunJpaRepository.acquireLease(
+                run.getRunId(), run.getVersion(), "node-a", now, now.plusSeconds(30))).isEqualTo(1);
+        assertThat(agentRunJpaRepository.renewLease(
+                run.getRunId(), "node-a", now.plusSeconds(10), now.plusSeconds(40))).isEqualTo(1);
+        assertThat(agentRunJpaRepository.renewLease(
+                run.getRunId(), "node-b", now.plusSeconds(10), now.plusSeconds(40))).isZero();
+    }
+
+    @Test
     void shouldFindPendingAndStaleRunningRunsForRecovery() {
         AgentRunEntity pending = agentRunJpaRepository.saveAndFlush(pending("run-pending", 30L));
         AgentRunEntity running = agentRunJpaRepository.saveAndFlush(pending("run-running", 31L));

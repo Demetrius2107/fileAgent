@@ -99,4 +99,24 @@ class AdaptiveRetrievalPropertiesTest {
         assertThatThrownBy(properties::validate)
                 .isInstanceOf(BizException.class);
     }
+
+    @Test
+    void runtimeCapacityDefaultsShouldBeValidated() {
+        AgentProperties properties = new AgentProperties();
+
+        assertThat(properties.getMaxConcurrentRuns()).isEqualTo(4);
+        assertThat(properties.getMaxQueuedRuns()).isEqualTo(32);
+        assertThat(properties.getReplayMaxEvents()).isEqualTo(100);
+        assertThat(properties.getReplayMaxBytes()).isEqualTo(256 * 1024);
+        assertThatCode(properties::validate).doesNotThrowAnyException();
+    }
+
+    @Test
+    void invalidRuntimeCapacityShouldFailStartupValidation() {
+        AgentProperties properties = new AgentProperties();
+        properties.setMaxConcurrentRuns(0);
+
+        assertThatThrownBy(properties::validate)
+                .isInstanceOf(BizException.class);
+    }
 }

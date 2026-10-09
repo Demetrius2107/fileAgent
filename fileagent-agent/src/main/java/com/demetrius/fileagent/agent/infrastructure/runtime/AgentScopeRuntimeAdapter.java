@@ -2,6 +2,7 @@ package com.demetrius.fileagent.agent.infrastructure.runtime;
 
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
 import com.demetrius.fileagent.agent.application.AgentHistoryService;
+import com.demetrius.fileagent.agent.application.runtime.AgentExecutionEngine;
 import com.demetrius.fileagent.agent.application.tool.AgentToolContext;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.agent.domain.run.AgentRunBudget;
@@ -66,7 +67,7 @@ import java.util.regex.Pattern;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
+public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutionEngine {
 
     private static final String CODE_RUN_TIMEOUT = "AGENT_RUN_TIMEOUT";
     private static final String CODE_BUDGET_EXCEEDED = "AGENT_BUDGET_EXCEEDED";
@@ -142,6 +143,11 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort {
             return Flux.just(eventMapper.failed(run.runId(), CODE_RUNTIME_UNAVAILABLE,
                     "Agent 运行时不可用", run.traceId()));
         }
+    }
+
+    @Override
+    public Flux<AgentRunEvent> execute(AgentRunCommand command) {
+        return run(command);
     }
 
     /** 生效的 Run 超时：结构化检索模式用独立预算（启动时已校验大于 toolTimeout 的 3 倍）。 */

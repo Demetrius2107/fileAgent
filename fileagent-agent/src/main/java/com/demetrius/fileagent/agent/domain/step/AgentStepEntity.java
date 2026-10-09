@@ -34,89 +34,116 @@ import java.util.Arrays;
 })
 public class AgentStepEntity {
 
+    /** 数据库技术主键，不作为跨服务或对外暴露的步骤标识。 */
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /** 所属 Agent Run 的业务主键，用于按一次运行聚合全部步骤审计事实。 */
     @Column(name = "run_id", nullable = false, updatable = false)
     private String runId;
 
+    /** Run 内从 1 开始的步骤序号；同一 Run 中不可重复且不可在创建后修改。 */
     @Column(name = "sequence_no", nullable = false, updatable = false)
     private int sequenceNo;
 
+    /** 步骤类别，区分模型调用、工具调用和最终化事务，创建后不可变。 */
     @Enumerated(EnumType.STRING)
     @Column(name = "step_type", nullable = false, updatable = false)
     private AgentStepType stepType;
 
+    /** 步骤生命周期状态，控制是否可等待审批、完成、失败或过期。 */
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     private AgentStepStatus status;
 
+    /** 模型为本次工具调用分配的标识，用于在同一 Run 内去重工具请求。 */
     @Column(name = "tool_call_id")
     private String toolCallId;
 
+    /** 执行的受控工具名称，只记录服务端工具白名单中的稳定名称。 */
     @Column(name = "tool_name")
     private String toolName;
 
+    /** 工具实现版本，供审计时还原当时实际运行的工具逻辑。 */
     @Column(name = "tool_version")
     private String toolVersion;
 
+    /** 工具定义和 JSON Schema 版本，区分实现相同但参数契约不同的调用。 */
     @Column(name = "tool_definition_version")
     private String toolDefinitionVersion;
 
+    /** 外部端点配置修订号，供后续接入外部工具时审计目标配置。 */
     @Column(name = "endpoint_revision")
     private String endpointRevision;
 
+    /** 外部端点非敏感配置的摘要，记录配置变化而不落库认证信息。 */
     @Column(name = "endpoint_config_hash")
     private String endpointConfigHash;
 
+    /** 本步骤操作的风险等级，作为自动执行与人工审批的决策依据。 */
     @Column(name = "risk_level")
     private String riskLevel;
 
+    /** 策略引擎对本步骤给出的决策结果，例如允许、拒绝或要求审批。 */
     @Column(name = "policy_decision")
     private String policyDecision;
 
+    /** 产生 policyDecision 的策略版本，避免审计时用新规则解释旧决策。 */
     @Column(name = "policy_version")
     private String policyVersion;
 
+    /** 可对外展示的安全摘要，禁止包含工具原始参数、文档正文或模型思维链。 */
     @Column(name = "safe_summary")
     private String safeSummary;
 
+    /** 规范化工具输入的 HMAC，用于校验和幂等比对，不能反推出原始参数。 */
     @Column(name = "canonical_input_hmac")
     private String canonicalInputHmac;
 
+    /** 加密后的工具原始输入，仅供受控恢复和审计路径读取，严禁写入日志。 */
     @Lob
     @Column(name = "input_ciphertext", columnDefinition = "CLOB")
     private String inputCiphertext;
 
+    /** 由规范化操作语义生成的幂等指纹，防止恢复后重复执行同一外部操作。 */
     @Column(name = "operation_fingerprint")
     private String operationFingerprint;
 
+    /** 外部系统或本地操作的业务标识，用于关联可查询的操作结果。 */
     @Column(name = "operation_id")
     private String operationId;
 
+    /** 外部供应商返回的执行标识，便于追踪异步或长耗时操作。 */
     @Column(name = "execution_id")
     private String executionId;
 
+    /** 步骤最终结果的稳定代码，供恢复逻辑、接口和评测识别结果类型。 */
     @Column(name = "result_code")
     private String resultCode;
 
+    /** 步骤最终结果的安全摘要，不能包含供应商异常堆栈或敏感原文。 */
     @Column(name = "result_summary")
     private String resultSummary;
 
+    /** 从开始到终态的实际耗时毫秒数；未开始即结束的步骤记为 0。 */
     @Column(name = "duration_ms")
     private Long durationMs;
 
+    /** JPA 乐观锁版本，防止并发恢复或审批处理覆盖步骤状态。 */
     @Version
     @Column(name = "version", nullable = false)
     private long version;
 
+    /** 步骤创建时间；创建后不可修改，用于保留 Run 内的真实审计顺序。 */
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** 步骤从 PENDING 进入 RUNNING 的时间；尚未执行时为空。 */
     @Column(name = "started_at")
     private Instant startedAt;
 
+    /** 步骤进入成功、失败、取消或过期终态的时间；非终态时为空。 */
     @Column(name = "ended_at")
     private Instant endedAt;
 

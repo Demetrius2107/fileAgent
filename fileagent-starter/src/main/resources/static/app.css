@@ -498,6 +498,27 @@ body {
     width: fit-content;
 }
 
+/* Agent Run 的持久化状态；工具轨迹与回答正文仍由各自元素呈现。 */
+.agent-run-status {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #1d4ed8;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: #dbeafe;
+    width: fit-content;
+}
+.agent-run-status[data-status="SUCCEEDED"] {
+    color: #047857;
+    background: #d1fae5;
+}
+.agent-run-status[data-status="FAILED"],
+.agent-run-status[data-status="CANCELLED"],
+.agent-run-status[data-status="TIMED_OUT"] {
+    color: var(--danger);
+    background: var(--danger-light);
+}
+
 /* Agent 工具过程轨迹：每一步一行，回答完成后保留 */
 .agent-tool-status {
     margin-top: 6px;

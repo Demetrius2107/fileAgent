@@ -62,12 +62,18 @@ class StaticPageContractTest {
         String script = readResource("static/app.js");
 
         assertThat(script)
-                .as("app.js 应接入 Agent 运行端点 /agent-runs")
+                .as("app.js 应接入 Agent 运行、active 查询和可重连事件端点")
                 .contains("/agent-runs")
-                .as("app.js 应处理运行开始/完成/失败事件")
+                .contains("/agent-runs/active")
+                .contains("/agent-runs/${runId}/events")
+                .contains("Last-Event-ID")
+                .contains("X-Agent-Run-Id")
+                .as("app.js 应处理排队、开始、完成和失败事件")
+                .contains("run.status")
                 .contains("run.started")
                 .contains("run.completed")
-                .contains("run.failed");
+                .contains("run.failed")
+                .doesNotContain("window.addEventListener('beforeunload', cancelActiveRun)");
     }
 
     private String readResource(String path) throws IOException {

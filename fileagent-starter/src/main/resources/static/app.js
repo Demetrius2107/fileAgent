@@ -63,8 +63,14 @@
     let streaming = false;
     /* 当前正在编辑的模型配置 id；null 表示表单处于"新建"模式 */
     let editingConfigId = null;
-    /* Agent 模式当前运行的 runId；用于停止/卸载时尽力取消后端运行 */
+    /* 当前可见会话的 Agent Run；页面断开只影响订阅，显式停止才取消服务端 Run。 */
     let currentRunId = null;
+    let agentRunState = null;
+    let agentPollTimer = null;
+    const processedAgentEventIds = new Map();
+    const lastAgentEventIds = new Map();
+    const AGENT_EVENT_ID_LIMIT = 256;
+    const AGENT_POLL_INTERVAL_MS = 3000;
     /* 当前正在重命名的会话 id；null 表示重命名弹窗未在编辑会话 */
     let renamingSessionId = null;
 
@@ -365,14 +371,14 @@
     async function selectSession(sessionId, title) {
         if (streaming) {
             abortController && abortController.abort();
-            /* 与停止按钮同等语义：切换会话时同步取消后端仍在运行的 Agent，避免残留算力 */
-            cancelActiveRun();
         }
+        detachVisibleAgentRun();
         currentSessionId = sessionId;
         chatTitle.textContent = title;
         sendButton.disabled = false;
         await loadSessions();
         await loadMessages();
+        await restoreActiveAgentRun(sessionId);
     }
 
     async function loadMessages() {
@@ -446,22 +452,295 @@
     });
 
     stopButton.addEventListener('click', () => {
+        const state = agentRunState;
         abortController && abortController.abort();
-        cancelActiveRun();
+        if (state && state.runId && !state.terminal) {
+            state.cancelRequested = true;
+            cancelActiveRun(state);
+        }
     });
 
-    /* 页面卸载时尽力取消后端仍在运行的 Agent，避免残留算力 */
-    window.addEventListener('beforeunload', cancelActiveRun);
+    function detachVisibleAgentRun() {
+        clearAgentPolling();
+        if (agentRunState && agentRunState.recoveryTimer) {
+            clearTimeout(agentRunState.recoveryTimer);
+        }
+        agentRunState = null;
+        currentRunId = null;
+        abortController = null;
+        setStreaming(false);
+    }
 
-    function cancelActiveRun() {
-        if (currentRunId) {
-            const runId = currentRunId;
-            currentRunId = null;
-            fetch(`/api/agent-runs/${runId}/cancel`, { method: 'POST' }).catch(() => {});
+    async function cancelActiveRun(state) {
+        try {
+            const snapshot = await api(`/api/agent-runs/${state.runId}/cancel`, { method: 'POST' });
+            if (isVisibleAgentRun(state)) {
+                applyAgentStatus(state, snapshot.status, '运行已取消');
+            }
+        } catch (e) {
+            if (!isVisibleAgentRun(state)) { return; }
+            state.cancelRequested = false;
+            appendAgentError(state.assistant, `取消失败：${e.message}`);
+            recoverAgentRun(state);
+        }
+    }
+
+    function createAgentRunState(sessionId, assistant, bubble) {
+        return {
+            sessionId,
+            assistant,
+            bubble,
+            content: '',
+            controller: new AbortController(),
+            runId: null,
+            status: null,
+            terminal: false,
+            connectionOpen: false,
+            reconnecting: false,
+            cancelRequested: false,
+            recoveryTimer: null
+        };
+    }
+
+    function isVisibleAgentRun(state) {
+        return agentRunState === state && currentSessionId === state.sessionId;
+    }
+
+    function rememberAgentRun(state, runId) {
+        if (!runId || (state.runId && state.runId !== runId)) { return; }
+        state.runId = runId;
+        if (isVisibleAgentRun(state)) {
+            currentRunId = runId;
+        }
+    }
+
+    function isTerminalAgentStatus(status) {
+        return ['SUCCEEDED', 'FAILED', 'CANCELLED', 'TIMED_OUT'].includes(status);
+    }
+
+    function canReconnectAgentStatus(status) {
+        return status === 'PENDING' || status === 'RUNNING';
+    }
+
+    function appendAgentError(assistant, message) {
+        const body = assistant.querySelector('.message-body');
+        body.appendChild(el('div', 'message-error', message));
+    }
+
+    function renderAgentRunStatus(assistant, status, summary) {
+        const labels = {
+            PENDING: 'Agent 已排队',
+            RUNNING: 'Agent 正在执行',
+            WAITING_USER_INPUT: 'Agent 等待补充信息',
+            WAITING_APPROVAL: 'Agent 等待确认',
+            SUCCEEDED: 'Agent 已完成',
+            FAILED: 'Agent 执行失败',
+            CANCELLED: 'Agent 已取消',
+            TIMED_OUT: 'Agent 已超时'
+        };
+        const body = assistant.querySelector('.message-body');
+        let statusEl = body.querySelector('.agent-run-status');
+        if (!statusEl) {
+            statusEl = el('div', 'agent-run-status');
+            body.appendChild(statusEl);
+        }
+        statusEl.dataset.status = status || '';
+        statusEl.textContent = summary || labels[status] || 'Agent 状态更新中';
+    }
+
+    function shouldIgnoreAgentEvent(event) {
+        if (!event.runId || !event.eventId) { return false; }
+        let processed = processedAgentEventIds.get(event.runId);
+        if (!processed) {
+            processed = new Set();
+            processedAgentEventIds.set(event.runId, processed);
+        }
+        if (processed.has(event.eventId)) { return true; }
+        processed.add(event.eventId);
+        if (processed.size > AGENT_EVENT_ID_LIMIT) {
+            processed.delete(processed.values().next().value);
+        }
+        lastAgentEventIds.set(event.runId, event.eventId);
+        return false;
+    }
+
+    function handleAgentEvent(state, event) {
+        if (!isVisibleAgentRun(state)) { return; }
+        if (event.runId && state.runId && state.runId !== event.runId) { return; }
+        if (event.runId) { rememberAgentRun(state, event.runId); }
+        if (shouldIgnoreAgentEvent(event)) { return; }
+
+        if (event.type === 'message.delta') {
+            state.content += event.content || '';
+            state.bubble.innerHTML = renderMarkdown(state.content);
+            messageList.scrollTop = messageList.scrollHeight;
+        } else if (event.type === 'sources') {
+            renderSources(state.assistant, event);
+        } else if (event.type === 'tool.started' || event.type === 'tool.completed') {
+            renderToolStatus(state.assistant, event);
+        } else if (event.type === 'run.started') {
+            applyAgentStatus(state, event.status || 'RUNNING', event.summary);
+        } else if (event.type === 'run.status') {
+            applyAgentStatus(state, event.status, event.summary);
+        } else if (event.type === 'run.completed') {
+            state.assistant.dataset.messageId = String(event.messageId);
+            applyAgentStatus(state, event.status || 'SUCCEEDED', event.summary);
+        } else if (event.type === 'run.failed') {
+            const traceHint = event.traceId ? `（traceId：${event.traceId}）` : '';
+            appendAgentError(state.assistant, `出错了：${event.message || event.code || '未知错误'}${traceHint}`);
+            applyAgentStatus(state, event.status || 'FAILED', event.summary);
+        } else if (event.type === 'error') {
+            const traceHint = event.traceId ? `（traceId：${event.traceId}）` : '';
+            appendAgentError(state.assistant, `出错了：${event.message || event.code || '未知错误'}${traceHint}`);
+        }
+    }
+
+    function applyAgentStatus(state, status, summary) {
+        if (!isVisibleAgentRun(state) || !status) { return; }
+        state.status = status;
+        renderAgentRunStatus(state.assistant, status, summary);
+        if (isTerminalAgentStatus(status)) {
+            finishAgentRun(state, true);
+            return;
+        }
+        if (canReconnectAgentStatus(status)) {
+            setStreaming(true);
+            scheduleAgentPolling(state);
+        } else {
+            clearAgentPolling();
+            setStreaming(false);
+        }
+    }
+
+    async function finishAgentRun(state, reloadMessages) {
+        if (state.terminal) { return; }
+        state.terminal = true;
+        clearAgentPolling();
+        if (state.recoveryTimer) {
+            clearTimeout(state.recoveryTimer);
+            state.recoveryTimer = null;
+        }
+        if (!isVisibleAgentRun(state)) { return; }
+        agentRunState = null;
+        currentRunId = null;
+        if (abortController === state.controller) {
+            abortController = null;
+        }
+        setStreaming(false);
+        if (reloadMessages && currentSessionId === state.sessionId) {
+            try {
+                await loadMessages();
+            } catch (e) {
+                showToast(`刷新 Agent 消息失败：${e.message}`, false);
+            }
+        }
+    }
+
+    function clearAgentPolling() {
+        if (agentPollTimer) {
+            clearTimeout(agentPollTimer);
+            agentPollTimer = null;
+        }
+    }
+
+    function scheduleAgentPolling(state) {
+        clearAgentPolling();
+        if (!isVisibleAgentRun(state) || state.terminal || !canReconnectAgentStatus(state.status)) { return; }
+        agentPollTimer = setTimeout(async () => {
+            agentPollTimer = null;
+            try {
+                await refreshAgentRun(state);
+            } catch (e) {
+                if (isVisibleAgentRun(state) && !state.terminal) {
+                    scheduleAgentPolling(state);
+                }
+            }
+        }, AGENT_POLL_INTERVAL_MS);
+    }
+
+    function scheduleAgentRecovery(state, delayMs) {
+        if (!isVisibleAgentRun(state) || state.terminal || state.cancelRequested || state.recoveryTimer) { return; }
+        state.recoveryTimer = setTimeout(() => {
+            state.recoveryTimer = null;
+            recoverAgentRun(state);
+        }, delayMs);
+    }
+
+    async function recoverAgentRun(state) {
+        if (!isVisibleAgentRun(state) || state.terminal || state.cancelRequested || !state.runId) { return; }
+        try {
+            await refreshAgentRun(state);
+        } catch (e) {
+            scheduleAgentRecovery(state, 1000);
+        }
+    }
+
+    async function refreshAgentRun(state) {
+        const active = await api(`/api/sessions/${state.sessionId}/agent-runs/active`);
+        if (!isVisibleAgentRun(state) || state.terminal) { return; }
+        if (!active) {
+            await finishAgentRun(state, true);
+            return;
+        }
+        if (active.runId !== state.runId) { return; }
+        applyAgentStatus(state, active.status);
+        if (!state.terminal && canReconnectAgentStatus(state.status)) {
+            if (!state.connectionOpen && !state.reconnecting) {
+                connectAgentEvents(state);
+            }
+            scheduleAgentPolling(state);
+        }
+    }
+
+    function connectAgentEvents(state) {
+        if (!isVisibleAgentRun(state) || state.terminal || state.reconnecting || !state.runId) { return; }
+        state.reconnecting = true;
+        const runId = state.runId;
+        const lastEventId = lastAgentEventIds.get(runId);
+        const headers = lastEventId ? { 'Last-Event-ID': lastEventId } : {};
+        streamSse(`/api/agent-runs/${runId}/events`, null,
+            (event) => handleAgentEvent(state, event), {
+                method: 'GET',
+                headers,
+                signal: state.controller.signal
+            })
+            .catch((e) => {
+                if (e.name !== 'AbortError' && isVisibleAgentRun(state) && !state.terminal) {
+                    scheduleAgentRecovery(state, 1000);
+                }
+            })
+            .finally(() => {
+                state.reconnecting = false;
+                if (isVisibleAgentRun(state) && !state.terminal && !state.cancelRequested) {
+                    scheduleAgentRecovery(state, 0);
+                }
+            });
+    }
+
+    async function restoreActiveAgentRun(sessionId) {
+        try {
+            const active = await api(`/api/sessions/${sessionId}/agent-runs/active`);
+            if (!active || currentSessionId !== sessionId) { return; }
+            const assistant = appendMessage('ASSISTANT', '');
+            const bubble = assistant.querySelector('.message-bubble');
+            bubble.innerHTML = '<div class="thinking" aria-label="正在恢复 Agent 运行"><span></span><span></span><span></span></div>';
+            const state = createAgentRunState(sessionId, assistant, bubble);
+            agentRunState = state;
+            abortController = state.controller;
+            rememberAgentRun(state, active.runId);
+            applyAgentStatus(state, active.status);
+            if (!state.terminal && canReconnectAgentStatus(state.status)) {
+                connectAgentEvents(state);
+            }
+        } catch (e) {
+            if (currentSessionId === sessionId) {
+                showToast(`恢复 Agent 运行状态失败：${e.message}`, false);
+            }
         }
     }
 
     async function sendMessage(prompt) {
+        const sessionId = currentSessionId;
         promptInput.value = '';
         appendMessage('USER', prompt, localIsoNow());
         const assistant = appendMessage('ASSISTANT', '');
@@ -469,10 +748,13 @@
         /* 首个 delta 到达前展示思考动画；到达后 innerHTML 被渲染内容整体覆盖 */
         bubble.innerHTML = '<div class="thinking" aria-label="正在思考"><span></span><span></span><span></span></div>';
 
-        abortController = new AbortController();
+        const useAgent = agentModeToggle.checked;
+        const state = useAgent ? createAgentRunState(sessionId, assistant, bubble) : null;
+        const controller = state ? state.controller : new AbortController();
+        if (state) { agentRunState = state; }
+        abortController = controller;
         setStreaming(true);
         let content = '';
-        const useAgent = agentModeToggle.checked;
         try {
             const onEvent = (event) => {
                 if (event.type === 'message' || event.type === 'message.delta') {
@@ -485,33 +767,47 @@
                     assistant.dataset.messageId = String(event.messageId);
                 } else if (event.type === 'error' || event.type === 'run.failed') {
                     const traceHint = event.traceId ? `（traceId：${event.traceId}）` : '';
-                    assistant.querySelector('.message-body')
-                        .appendChild(el('div', 'message-error',
-                            `出错了：${event.message || event.code || '未知错误'}${traceHint}`));
-                } else if (event.type === 'run.started') {
-                    currentRunId = event.runId;
+                    appendAgentError(assistant, `出错了：${event.message || event.code || '未知错误'}${traceHint}`);
                 } else if (event.type === 'tool.started' || event.type === 'tool.completed') {
                     renderToolStatus(assistant, event);
                 }
             };
-            if (useAgent) {
-                await streamAgentRun(prompt, onEvent);
+            if (state) {
+                await streamAgentRun(prompt, state);
             } else {
-                await streamChat(prompt, onEvent);
+                await streamChat(prompt, onEvent, sessionId, controller.signal);
             }
         } catch (e) {
-            const body = assistant.querySelector('.message-body');
-            if (e.name === 'AbortError') {
-                body.appendChild(el('div', 'message-error', '已停止生成。'));
-            } else {
-                body.appendChild(el('div', 'message-error', `出错了：${e.message}`));
+            if (state && state.runId && !state.terminal && !state.cancelRequested && isVisibleAgentRun(state)) {
+                recoverAgentRun(state);
+            } else if (state && state.cancelRequested) {
+                // 取消请求正在独立提交，等待其返回的终态快照即可。
+            } else if (currentSessionId === sessionId) {
+                if (e.name === 'AbortError') {
+                    appendAgentError(assistant, '已停止生成。');
+                } else {
+                    appendAgentError(assistant, `出错了：${e.message}`);
+                }
             }
         } finally {
-            setStreaming(false);
-            abortController = null;
-            currentRunId = null;
+            if (state) {
+                state.connectionOpen = false;
+                if (!state.terminal && state.runId && !state.cancelRequested && isVisibleAgentRun(state)) {
+                    recoverAgentRun(state);
+                } else if (!state.runId && isVisibleAgentRun(state)) {
+                    agentRunState = null;
+                    currentRunId = null;
+                    setStreaming(false);
+                    if (!state.cancelRequested) { state.bubble.innerHTML = ''; }
+                }
+            } else if (currentSessionId === sessionId) {
+                setStreaming(false);
+            }
+            if (abortController === controller && (!state || state.terminal || !isVisibleAgentRun(state))) {
+                abortController = null;
+            }
             /* 无任何内容返回时清掉思考动画，避免空泡里残留三个点 */
-            if (!content) { bubble.innerHTML = ''; }
+            if (!state && !content && currentSessionId === sessionId) { bubble.innerHTML = ''; }
             if (!assistant.querySelector('.message-time')) {
                 assistant.querySelector('.message-body').appendChild(el('div', 'message-time', formatTime(localIsoNow())));
             }
@@ -519,12 +815,16 @@
         }
     }
 
-    async function streamSse(url, body, onEvent) {
+    async function streamSse(url, body, onEvent, options = {}) {
+        const headers = { Accept: 'text/event-stream', ...(options.headers || {}) };
+        if (body !== null && body !== undefined) {
+            headers['Content-Type'] = 'application/json';
+        }
         const response = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-            body: JSON.stringify(body),
-            signal: abortController.signal
+            method: options.method || 'POST',
+            headers,
+            ...(body !== null && body !== undefined ? { body: JSON.stringify(body) } : {}),
+            signal: options.signal || (abortController && abortController.signal)
         });
         if (!response.ok || !response.body) {
             let message = `HTTP ${response.status}`;
@@ -541,6 +841,8 @@
             if (traceId) { message += `（traceId：${traceId}）`; }
             throw new Error(message);
         }
+
+        if (options.onResponse) { options.onResponse(response); }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -561,27 +863,40 @@
         if (rest) { onEvent(rest); }
     }
 
-    function streamChat(prompt, onEvent) {
-        return streamSse(`/api/sessions/${currentSessionId}/chat`, { prompt }, onEvent);
+    function streamChat(prompt, onEvent, sessionId, signal) {
+        return streamSse(`/api/sessions/${sessionId}/chat`, { prompt }, onEvent, { signal });
     }
 
-    function streamAgentRun(prompt, onEvent) {
-        return streamSse(`/api/sessions/${currentSessionId}/agent-runs`, { prompt }, onEvent);
+    function streamAgentRun(prompt, state) {
+        return streamSse(`/api/sessions/${state.sessionId}/agent-runs`, { prompt },
+            (event) => handleAgentEvent(state, event), {
+                signal: state.controller.signal,
+                onResponse: (response) => {
+                    state.connectionOpen = true;
+                    rememberAgentRun(state, response.headers.get('X-Agent-Run-Id'));
+                    applyAgentStatus(state, 'PENDING');
+                }
+            });
     }
 
     function parseSseBlock(block) {
         let eventName = null;
+        let eventId = null;
         let data = '';
         for (const line of block.split(/\r?\n/)) {
             if (line.startsWith('event:')) { eventName = line.slice(6).trim(); }
+            else if (line.startsWith('id:')) { eventId = line.slice(3).trim(); }
             else if (line.startsWith('data:')) { data += line.slice(5).trim(); }
         }
         if (!data) { return null; }
         try {
             const payload = JSON.parse(data);
-            return payload && payload.type ? payload : { type: eventName, ...payload };
+            if (!payload || typeof payload !== 'object') {
+                return eventName ? { type: eventName, content: data, eventId } : null;
+            }
+            return { ...payload, type: payload.type || eventName, eventId: payload.eventId || eventId };
         } catch (e) {
-            return eventName ? { type: eventName, content: data } : null;
+            return eventName ? { type: eventName, content: data, eventId } : null;
         }
     }
 

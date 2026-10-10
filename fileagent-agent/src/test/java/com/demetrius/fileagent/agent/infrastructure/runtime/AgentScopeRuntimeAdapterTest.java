@@ -5,7 +5,8 @@ import com.demetrius.fileagent.agent.application.AgentHistoryService;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
-import com.demetrius.fileagent.agent.infrastructure.run.InMemoryAgentRunRegistry;
+import com.demetrius.fileagent.agent.infrastructure.run.AgentExecutionHandleRegistry;
+import com.demetrius.fileagent.agent.infrastructure.state.DatabaseAgentStateStore;
 import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
@@ -41,7 +42,8 @@ class AgentScopeRuntimeAdapterTest {
         adapter = new AgentScopeRuntimeAdapter(
                 properties,
                 new AdaptiveRetrievalProperties(),
-                new InMemoryAgentRunRegistry(properties, CLOCK),
+                new AgentExecutionHandleRegistry(),
+                mock(DatabaseAgentStateStore.class),
                 mock(AgentScopeModelFactory.class),
                 mock(AgentPromptFactory.class),
                 mock(KnowledgeSearchPort.class),

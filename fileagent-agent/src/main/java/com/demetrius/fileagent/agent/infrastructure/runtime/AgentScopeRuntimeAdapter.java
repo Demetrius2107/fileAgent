@@ -8,23 +8,21 @@ import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.agent.domain.run.AgentRunBudget;
 import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
-import com.demetrius.fileagent.agent.infrastructure.run.InMemoryAgentRunRegistry;
+import com.demetrius.fileagent.agent.infrastructure.run.AgentExecutionHandleRegistry;
+import com.demetrius.fileagent.agent.infrastructure.state.DatabaseAgentStateStore;
 import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
-import com.demetrius.fileagent.api.dto.AgentRunSnapshot;
 import com.demetrius.fileagent.api.dto.MessageDto;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.MessageType;
 import com.demetrius.fileagent.api.port.AgentAnswerEvaluationPort;
-import com.demetrius.fileagent.api.port.AgentRuntimePort;
 import com.demetrius.fileagent.api.port.KnowledgeCatalogPort;
 import com.demetrius.fileagent.api.port.KnowledgeContextPort;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
-import com.demetrius.fileagent.common.exception.BizException;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEndEvent;
@@ -58,7 +56,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * AgentScope ReAct 运行时适配器：实现 {@link AgentRuntimePort}。
+ * AgentScope ReAct 单次执行引擎：实现 {@link AgentExecutionEngine}。
  * <p>
  * 每次 Run 创建独立的 {@link ReActAgent}、工具白名单与 {@link RuntimeContext}，
  * 使活动模型切换即时生效且 Run 间不共享状态。运行受预算、超时与取消共同约束，
@@ -67,7 +65,7 @@ import java.util.regex.Pattern;
 @Slf4j
 @Component
 @RequiredArgsConstructor
-public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutionEngine {
+public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
 
     private static final String CODE_RUN_TIMEOUT = "AGENT_RUN_TIMEOUT";
     private static final String CODE_BUDGET_EXCEEDED = "AGENT_BUDGET_EXCEEDED";
@@ -79,7 +77,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutio
 
     private final AgentProperties properties;
     private final AdaptiveRetrievalProperties adaptiveRetrievalProperties;
-    private final InMemoryAgentRunRegistry registry;
+    private final AgentExecutionHandleRegistry executionHandleRegistry;
+    private final DatabaseAgentStateStore databaseAgentStateStore;
     private final AgentScopeModelFactory modelFactory;
     private final AgentPromptFactory promptFactory;
     private final KnowledgeSearchPort knowledgeSearchPort;
@@ -93,19 +92,22 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutio
     private final AgentHistoryService historyService;
 
     @Override
-    public Flux<AgentRunEvent> run(AgentRunCommand command) {
+    public Flux<AgentRunEvent> execute(AgentRunCommand command) {
+        return Flux.defer(() -> executeInIsolatedRuntime(command));
+    }
+
+    private Flux<AgentRunEvent> executeInIsolatedRuntime(AgentRunCommand command) {
         AgentRun run = AgentRun.pending(command.runId(), command.sessionId(), command.traceId());
         run.start(Instant.now());
-        registry.save(run);
 
         try {
             AgentHistoryService.PreparedHistory preparedHistory = prepareHistory(run, command);
-            AgentAssembly assembly = assemble(command, run, preparedHistory);
+            AgentAssembly assembly = assemble(command, run, preparedHistory, true);
             ReActAgent agent = assembly.agent();
             RuntimeContext ctx = assembly.context();
             Msg userMessage = assembly.userMessage();
 
-            registry.registerCancelHandle(command.runId(), () -> {
+            executionHandleRegistry.register(command.runId(), () -> {
                 run.requestCancel();
                 try {
                     agent.interrupt(ctx);
@@ -125,16 +127,7 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutio
                                             toolStartNanos, answer, assembly.toolContext(), null)))
                     .timeout(effectiveRunTimeout())
                     .onErrorResume(e -> onError(e, run))
-                    .doOnCancel(() -> {
-                        if (run.isRunning()) {
-                            run.cancel(Instant.now());
-                            try {
-                                agent.interrupt(ctx);
-                            } catch (Exception ex) {
-                                log.warn("断开订阅中断 Agent 失败 runId={}: {}", command.runId(), ex.getMessage());
-                            }
-                        }
-                    });
+                    .doFinally(signal -> executionHandleRegistry.remove(command.runId()));
         } catch (Exception e) {
             log.warn("Agent 运行时初始化失败 runId={}: {}", command.runId(), e.getMessage());
             if (run.isRunning()) {
@@ -145,11 +138,6 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutio
         }
     }
 
-    @Override
-    public Flux<AgentRunEvent> execute(AgentRunCommand command) {
-        return run(command);
-    }
-
     /** 生效的 Run 超时：结构化检索模式用独立预算（启动时已校验大于 toolTimeout 的 3 倍）。 */
     private Duration effectiveRunTimeout() {
         return properties.isAdaptiveRetrievalEnabled()
@@ -158,7 +146,8 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutio
     }
 
     private AgentAssembly assemble(AgentRunCommand command, AgentRun run,
-                                   AgentHistoryService.PreparedHistory preparedHistory) {
+                                   AgentHistoryService.PreparedHistory preparedHistory,
+                                   boolean persistAgentScopeState) {
         Toolkit toolkit = new Toolkit();
         toolkit.registerAgentTool(searchDocsTool);
         toolkit.registerAgentTool(listKnowledgeFilesTool);
@@ -166,23 +155,26 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutio
         toolkit.registerAgentTool(getDocumentOutlineTool);
 
         Model model = modelFactory.create();
-        ReActAgent agent = ReActAgent.builder()
+        ReActAgent.Builder builder = ReActAgent.builder()
                 .name("fileagent-knowledge-agent")
                 .description("文件知识助手")
                 .sysPrompt(promptFactory.systemInstruction(properties.isAdaptiveRetrievalEnabled()))
                 .model(model)
                 .toolkit(toolkit)
                 .middleware(new AgentBudgetMiddleware())
-                .maxIters(properties.getMaxSteps())
-                .build();
+                .maxIters(properties.getMaxSteps());
+        if (persistAgentScopeState) {
+            builder.stateStore(databaseAgentStateStore);
+        }
+        ReActAgent agent = builder.build();
 
         AgentToolContext toolContext = new AgentToolContext(
                 run, currentBudget(), knowledgeSearchPort, knowledgeCatalogPort, knowledgeContextPort,
                 command.knowledgeScope());
 
         RuntimeContext ctx = RuntimeContext.builder()
-                .sessionId(String.valueOf(command.sessionId()))
-                .userId("server")
+                .sessionId(command.runId())
+                .userId("local-operator")
                 .put(AgentToolContext.class, toolContext)
                 .build();
 
@@ -196,11 +188,10 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutio
     public AgentAnswerEvaluationPort.Result evaluate(AgentRunCommand command) {
         AgentRun run = AgentRun.pending(command.runId(), command.sessionId(), command.traceId());
         run.start(Instant.now());
-        registry.save(run);
         long startedAt = System.nanoTime();
         try {
             AgentHistoryService.PreparedHistory preparedHistory = prepareHistory(run, command);
-            AgentAssembly assembly = assemble(command, run, preparedHistory);
+            AgentAssembly assembly = assemble(command, run, preparedHistory, false);
             List<String> toolCalls = new CopyOnWriteArrayList<>();
             StringBuilder answer = new StringBuilder();
             AtomicInteger step = new AtomicInteger(0);
@@ -452,49 +443,6 @@ public class AgentScopeRuntimeAdapter implements AgentRuntimePort, AgentExecutio
 
     private long durationMs(Long startNanos) {
         return startNanos == null ? 0L : (System.nanoTime() - startNanos) / 1_000_000;
-    }
-
-    @Override
-    public AgentRunSnapshot snapshot(String runId) {
-        AgentRun run = registry.find(runId)
-                .orElseThrow(() -> new BizException(404, "Agent Run 不存在: " + runId));
-        return toSnapshot(run);
-    }
-
-    @Override
-    public AgentRunSnapshot cancel(String runId) {
-        AgentRun run = registry.find(runId)
-                .orElseThrow(() -> new BizException(404, "Agent Run 不存在: " + runId));
-        if (run.isRunning()) {
-            run.cancel(Instant.now());
-            registry.cancelHandle(runId).ifPresent(Runnable::run);
-        }
-        return toSnapshot(run);
-    }
-
-    private AgentRunSnapshot toSnapshot(AgentRun run) {
-        return new AgentRunSnapshot(
-                run.runId(),
-                run.sessionId(),
-                run.status(),
-                run.startedAt(),
-                run.endedAt(),
-                run.stepCount(),
-                run.modelCallCount(),
-                run.assistantMessageId(),
-                run.failureCode(),
-                run.traceId(),
-                run.historyCharacters(),
-                run.summaryCharacters(),
-                run.searchSnippetCharacters(),
-                run.documentReadCharacters(),
-                run.toolResultCharacters(),
-                run.inputTokens(),
-                run.outputTokens(),
-                run.totalTokens(),
-                run.historyCompressed(),
-                run.budgetReasons(),
-                null);
     }
 
     private AgentRunBudget currentBudget() {

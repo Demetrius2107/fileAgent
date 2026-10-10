@@ -467,8 +467,9 @@ data:{"type":"error","code":"404","message":"会话不存在","traceId":"0123456
 ### 4.2 Agent 模式流式运行
 `POST /api/sessions/{id}/agent-runs`
 
-- 请求头 `Accept: text/event-stream`，响应 `Content-Type: text/event-stream`；响应头 `X-Trace-Id` 返回本次运行的 `traceId`
-- 流程：会话校验 → 读取最近 `fileagent.agent-history-limit` 条历史 → 保存 USER → 创建 Agent Run → ReAct 循环（只读知识工具检索）→ 事件下发 → 完整 ASSISTANT 落库
+- 请求头 `Accept: text/event-stream`，响应 `Content-Type: text/event-stream`；响应头 `X-Trace-Id` 返回本次运行的 `traceId`，`X-Agent-Run-Id` 返回已经持久化的 `runId`
+- 服务端先同步完成 prepare：校验会话与请求、读取历史、保存 USER 消息和 `PENDING` Run；事务提交后才由后台受限线程池入队执行。SSE 连接只是事件订阅，浏览器刷新或断连不会取消 Run。
+- 流程：`PENDING` → ReAct 循环（只读知识工具检索）→ 完整 ASSISTANT、FINALIZATION Step 与 `SUCCEEDED` 状态在一个事务中落库
 - Agent 只能调用服务端固定的只读知识工具（检索文档 / 列知识文件 / 读文档上下文），禁止任意文件路径、URL 或写操作
 - 敏感配置（模型 apiKey/baseUrl）绝不进入任何事件；工具正文、思维链不外发
 
@@ -479,6 +480,7 @@ Request:
 - `knowledgeScope` 可省略（默认全局知识范围）；两个字段均为 null 表示全局范围
 
 事件类型（`event` 名即 `type`，`data` 为 `AgentRunEvent` JSON）：
+- `run.status`：`PENDING`、`CANCELLED` 等状态快照；新建 Run 的第一个事件为 `PENDING`，前端应显示“Agent 已排队”
 - `run.started`：运行开始，`status=RUNNING`
 - `tool.started`：`{ "step": 1, "tool": "search_docs" }`
 - `tool.completed`：`{ "step": 1, "tool": "search_docs", "resultCount": 3, "durationMs": 42 }`（只带结果数量与耗时，不带正文）
@@ -487,6 +489,8 @@ Request:
 - `run.completed`：`{ "status": "SUCCEEDED", "messageId": 21 }`
 - `run.failed`：`{ "status": "FAILED", "code": "...", "message": "...", "traceId": "..." }`
 
+每个 SSE 帧均带 `id: <eventId>`，`data` 也包含 `eventId` 与对应的 `runVersion`。客户端保存最后成功处理的 `eventId`，用于断线恢复和去重。
+
 错误码（`run.failed` 事件的 `code`）：
 | code | 含义 |
 |---|---|
@@ -494,21 +498,34 @@ Request:
 | `AGENT_BUDGET_EXCEEDED` | 超出步骤/模型调用/最大迭代预算 |
 | `AGENT_RUN_CANCELLED` | 运行已取消 |
 | `AGENT_MODEL_UNAVAILABLE` | 模型调用失败 |
-| `AGENT_PERSIST_FAILED` | 回答落库失败 |
+| `AGENT_RUN_INTERRUPTED` | 进程中断、后台执行异常或无法安全恢复 |
+| `AGENT_RECOVERY_FAILED` | PENDING Run 的命令解密、校验或重新入队失败 |
 
-流建立前校验失败（会话不存在 / prompt 空白）返回对应 HTTP 状态 + 一条 `run.failed` 事件。
+流建立前校验失败（会话不存在、prompt 空白、队列已满、功能未开启）保留对应 HTTP 状态，并返回一条 `event:error` SSE 事件；此时没有已创建的 Run。
 
 ### 4.3 Agent Run 快照查询
 `GET /api/agent-runs/{runId}`
 
 返回 `ApiResult<AgentRunSnapshot>`，含 `runId`/`status`/`stepCount`/`modelCallCount`/`assistantMessageId`/`failureCode`/`traceId`，以及 `historyCharacters`、`summaryCharacters`、`searchSnippetCharacters`、`documentReadCharacters`、`toolResultCharacters`、`inputTokens`、`outputTokens`、`totalTokens`、`historyCompressed`、`budgetReasons`；不含思维链、Prompt、摘要正文与工具正文。Run 不存在返回 HTTP 404 + `code=404`。
 
-> Run 快照保存在进程内存，进程重启后不可查询。
+Run/Step/Checkpoint 保存在 H2；进程重启后 Run 快照仍可查询。事件增量仅保留有限内存窗口，重启后不能伪造已经丢失的模型增量。
 
-### 4.4 Agent Run 取消
+### 4.4 当前活动 Run 查询
+`GET /api/sessions/{sessionId}/agent-runs/active`
+
+返回该会话中尚未进入终态的 `ApiResult<AgentRunSnapshot>`；没有活动 Run 时 `data=null`。前端在页面刷新、切回会话或 SSE EOF/网络错误后应调用此接口：`PENDING`/`RUNNING` 保持输入禁用并恢复订阅，终态则重新读取会话消息。
+
+### 4.5 Agent Run 事件恢复
+`GET /api/agent-runs/{runId}/events`
+
+- 请求头可带 `Last-Event-ID: <eventId>`，服务端回放该游标之后仍在内存窗口中的事件，再继续订阅新事件。
+- 缺失、过期或进程重启后的游标不会补造旧增量，服务端先下发当前 `run.status` 快照；客户端据此继续轮询 `active` 接口。
+- 客户端需要按 `eventId` 做有限去重，重复的 `message.delta` 不应重复拼接。
+
+### 4.6 Agent Run 取消
 `POST /api/agent-runs/{runId}/cancel`
 
-结束运行中的 Run（状态转 `CANCELLED` 并中断模型调用），返回最新快照；对已结束 Run 幂等。
+显式结束 `PENDING` 或 `RUNNING` Run：先持久化 `CANCELLED`，再中断本进程的模型调用句柄，返回最新快照；对已结束 Run 幂等。浏览器切换会话、关闭标签或 SSE 断连不得调用该接口。
 
 ---
 

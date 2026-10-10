@@ -359,9 +359,33 @@ flowchart LR
 
 **预计**：3～4 周。
 
-#### 开发任务
+**当前进度**：Phase 3A「持久化 Agent Runtime」已完成；3B（HITL）、3C（工具权限与安全边界）、3D（受控写操作）尚未开始。
 
-- 将 `AgentRun` 和每个 `AgentStep` 持久化，支持进程重启后恢复。
+#### 3A：持久化 Agent Runtime（已完成）
+
+- `AgentRun`、`AgentStep`、`AgentCheckpoint` 已落 H2，Run 以唯一状态机和 active slot 保证同一会话只有一个活动运行。
+- 创建接口先同步完成 `PENDING` Run 与 USER 消息落库，事务提交后再放入有界后台执行池；SSE 订阅不再拥有执行生命周期。
+- `AgentRunExecutionCoordinator` 负责容量、租约、重启扫描：PENDING Run 解密校验后重新入队；普通陈旧 RUNNING Run 安全失败并释放 active slot。
+- `AgentRunEventHub` 提供有限事件回放和 `Last-Event-ID` 游标；快照以数据库为准，重启后不伪造已丢失的 delta。
+- 前端可用 `X-Agent-Run-Id`、active 查询和事件重连恢复可见运行；只有用户显式点击停止才取消后端 Run。
+
+#### 3B：HITL（未完成）
+
+- 将 `WAITING_USER_INPUT`、`WAITING_APPROVAL` 接入检查点与恢复状态机。
+- 新增补充信息、审批、拒绝和恢复 API，并完成相应前端交互与审计记录。
+
+#### 3C：工具权限与安全边界（未完成）
+
+- 实现 `ALLOW / DENY / ASK` 权限策略、Schema 校验、业务授权和资源级权限检查。
+- 增加外部 HTTP 白名单、DNS/IP 校验、重定向与响应大小限制，并对错误回流做脱敏。
+
+#### 3D：受控写操作（未完成）
+
+- 为每个 Tool Call 增加唯一幂等键和副作用审计，防止重试导致重复写入。
+- 将代码执行移入隔离沙箱，默认无网络、只读文件系统，并设置 CPU、内存和时间上限。
+
+#### 后续开发任务（3B～3D）
+
 - 每个 Tool Call 使用唯一幂等键，防止重试导致重复发送、重复写库。
 - 工具风险等级：
   - `READ_ONLY`：可自动执行；

@@ -50,11 +50,11 @@ fileAgent/
 │   ├── domain/                       待建（Action / 意图模型）
 │   └── infrastructure/               StreamingChatClient（模型流适配）/ DocumentParsedEventListener（索引订阅）
 
-├── fileagent-agent/               ✅ Agent 运行域（Phase 1 最小 Agentic RAG）
-│   ├── interfaces/                   AgentRunController（SSE / 状态查询 / 取消）
-│   ├── application/                  AgentRunAppService（编排落库）/ AgentPromptFactory / AgentToolContext
-│   ├── domain/                       AgentRun / AgentRunBudget（状态机、字符预算、Token 用量与截断原因）
-│   └── infrastructure/               AgentScopeRuntimeAdapter / AgentScopeModelFactory / 三个只读工具 / 内存 Run Registry
+├── fileagent-agent/               ✅ Agent 运行域（Phase 1 + Phase 3A 持久化运行）
+│   ├── interfaces/                   AgentRunController / AgentRunQueryController（SSE、快照、active、取消）
+│   ├── application/                  AgentRunAppService（同步 prepare）/ AgentRunFinalizationService / AgentPromptFactory / AgentToolContext
+│   ├── domain/                       AgentRunEntity / AgentStepEntity / AgentCheckpointEntity / AgentRunBudget
+│   └── infrastructure/               AgentScopeRuntimeAdapter（单次执行）/ AgentPersistenceAdapter / DatabaseAgentStateStore / AgentRunExecutionCoordinator / AgentRunEventHub / 只读工具
 
 ├── fileagent-action/              ✅ 动作执行域
 │   ├── interfaces/                   待建（风险确认接口）
@@ -125,7 +125,7 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | session | api + web + data-jpa + h2(runtime) + spring-boot-data-jpa-test(test) |
 | document | api + web + data-jpa + spring-ai-starter-model-openai（Embedding）+ spring-boot-starter-elasticsearch（知识索引与检索）+ pdfbox + poi-ooxml + h2(runtime) + testcontainers-elasticsearch / testcontainers-junit-jupiter / spring-boot-data-jpa-test(test) |
 | chat | api + web + webflux（流式调用）+ spring-ai-starter-model-deepseek + spring-ai-starter-model-openai（多 Provider 动态构建）+ data-jpa（模型配置实体）+ micrometer-tracing + reactor-test(test) |
-| agent | api + web + webflux（SSE）+ agentscope-core + agentscope-extensions-model-openai + swagger-annotations-jakarta + micrometer-tracing + reactor-test(test) |
+| agent | api + web + webflux（SSE）+ data-jpa + h2(runtime) + agentscope-core + agentscope-extensions-model-openai + swagger-annotations-jakarta + micrometer-tracing + reactor-test / spring-boot-data-jpa-test(test) |
 | action | api + web（M2+ 加 poi / graalvm polyglot） |
 | evaluation | api + web + Jackson 3（内部接口默认关闭，通过 API Port 执行正式 RAG 并接收 DeepSeek Judge 结果） |
 | starter | 全部业务域 + evaluation + h2(runtime) + springdoc + spring-boot-starter-opentelemetry |
@@ -152,6 +152,10 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | `spring.elasticsearch.*` | Elasticsearch 地址与凭证（环境变量注入） | ❌ 凭证严禁提交 |
 | `fileagent.elasticsearch.*` | 索引别名、BM25/KNN/RRF 与结果数量 | ✅ |
 | `fileagent.chat-history-limit` | 对话注入的历史条数（取最后 N 条） | ✅ |
+| `fileagent.agent.enabled` | Agent 入口开关，默认关闭 | ✅ |
+| `fileagent.agent.max-concurrent-runs` / `max-queued-runs` | 后台执行并发与排队上限 | ✅ |
+| `fileagent.agent.pending-start-timeout` / `lease-duration` / `recovery-scan-interval` | PENDING 超时、执行租约与重启恢复扫描 | ✅ |
+| `fileagent.agent.replay-max-events` / `replay-max-bytes` | 单个 Run 的内存事件回放上限 | ✅ |
 | `fileagent.evaluation.endpoint.enabled` | 是否开启内部评测接口，默认 false | ✅ |
 | `fileagent.evaluation.endpoint.token` | `${FILEAGENT_EVALUATION_TOKEN}` | ❌ 严禁提交 |
 | RAG Judge 模型 | 固定使用 `deepseek-v4-pro`，复用 `FILEAGENT_CHAT_API_KEY` | ❌ API Key 严禁提交 |

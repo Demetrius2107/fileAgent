@@ -157,6 +157,7 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
         Model model = modelFactory.create();
         ReActAgent.Builder builder = ReActAgent.builder()
                 .name("fileagent-knowledge-agent")
+                .defaultSessionId(command.runId())
                 .description("文件知识助手")
                 .sysPrompt(promptFactory.systemInstruction(properties.isAdaptiveRetrievalEnabled()))
                 .model(model)

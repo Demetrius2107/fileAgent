@@ -3,6 +3,7 @@ package com.demetrius.fileagent.agent.application.runtime;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
@@ -27,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * @date 2026-10-09
  */
 @Component
+@Slf4j
 public class AgentRunEventHub {
 
     private static final String DELTA_EVENT_TYPE = "message.delta";
@@ -55,7 +57,7 @@ public class AgentRunEventHub {
             throw new IllegalArgumentException("runVersion 不能小于 0");
         }
         AgentRunEvent published = event.withMetadata(UUID.randomUUID().toString(), runVersion);
-        channels.computeIfAbsent(event.runId(), ignored -> new RunChannel(maxReplayEvents, maxReplayBytes))
+        channels.computeIfAbsent(event.runId(), runId -> new RunChannel(runId, maxReplayEvents, maxReplayBytes))
                 .publish(published);
         return published;
     }
@@ -80,7 +82,8 @@ public class AgentRunEventHub {
         if (currentRunVersion < 0) {
             throw new IllegalArgumentException("currentRunVersion 不能小于 0");
         }
-        RunChannel channel = channels.computeIfAbsent(runId, ignored -> new RunChannel(maxReplayEvents, maxReplayBytes));
+        RunChannel channel = channels.computeIfAbsent(runId,
+                id -> new RunChannel(id, maxReplayEvents, maxReplayBytes));
         return channel.subscribe(runId, lastEventId, currentStatus, currentRunVersion);
     }
 
@@ -116,6 +119,7 @@ public class AgentRunEventHub {
 
     private static final class RunChannel {
 
+        private final String runId;
         private final Object monitor = new Object();
         private final Deque<RetainedEvent> replayEvents = new ArrayDeque<>();
         private final Sinks.Many<AgentRunEvent> sink = Sinks.many().multicast().directBestEffort();
@@ -123,8 +127,10 @@ public class AgentRunEventHub {
         private final int maxReplayBytes;
         private int retainedBytes;
         private boolean terminal;
+        private boolean liveDeliveryDegraded;
 
-        private RunChannel(int maxReplayEvents, int maxReplayBytes) {
+        private RunChannel(String runId, int maxReplayEvents, int maxReplayBytes) {
+            this.runId = runId;
             this.maxReplayEvents = maxReplayEvents;
             this.maxReplayBytes = maxReplayBytes;
         }
@@ -136,7 +142,9 @@ public class AgentRunEventHub {
                 }
                 retain(event);
                 Sinks.EmitResult result = sink.tryEmitNext(event);
-                if (result != Sinks.EmitResult.OK && result != Sinks.EmitResult.FAIL_ZERO_SUBSCRIBER) {
+                if (result == Sinks.EmitResult.FAIL_OVERFLOW) {
+                    reportLiveDeliveryDegraded(result);
+                } else if (result != Sinks.EmitResult.OK && result != Sinks.EmitResult.FAIL_ZERO_SUBSCRIBER) {
                     throw new IllegalStateException("Agent 事件发布失败: " + result);
                 }
                 if (isTerminal(event)) {
@@ -146,24 +154,40 @@ public class AgentRunEventHub {
             }
         }
 
+        private void reportLiveDeliveryDegraded(Sinks.EmitResult result) {
+            if (!liveDeliveryDegraded) {
+                liveDeliveryDegraded = true;
+                log.warn("Agent SSE 实时事件投递降级，客户端可通过重连回放或读取持久化结果恢复: runId={}, result={}",
+                        runId, result);
+            }
+        }
+
         Flux<AgentRunEvent> subscribe(String runId, String lastEventId,
                                       AgentRunStatus currentStatus, long currentRunVersion) {
             return Flux.defer(() -> {
                 List<AgentRunEvent> initialEvents;
                 synchronized (monitor) {
                     initialEvents = replayAfter(lastEventId);
-                    if (initialEvents == null) {
+                    boolean initialSubscription = lastEventId == null || lastEventId.isBlank();
+                    if (initialEvents == null || (initialSubscription && initialEvents.isEmpty())) {
                         initialEvents = List.of(AgentRunEvent.status(runId, currentStatus, null)
                                 .withMetadata(UUID.randomUUID().toString(), currentRunVersion));
                     }
                 }
-                return Flux.concat(Flux.fromIterable(initialEvents), sink.asFlux());
+                return Flux.mergeSequential(Flux.fromIterable(initialEvents), liveEvents());
             });
+        }
+
+        private Flux<AgentRunEvent> liveEvents() {
+            return sink.asFlux()
+                    // 每个 SSE 连接单独缓冲，避免 MVC 逐帧请求时直接丢失 Agent 的突发事件。
+                    .onBackpressureBuffer(maxReplayEvents)
+                    .doOnError(error -> log.warn("Agent SSE 客户端事件缓冲已满，将等待浏览器按游标重连: runId={}", runId));
         }
 
         private List<AgentRunEvent> replayAfter(String lastEventId) {
             if (lastEventId == null || lastEventId.isBlank()) {
-                return null;
+                return replayEvents.stream().map(RetainedEvent::event).toList();
             }
             boolean found = false;
             List<AgentRunEvent> replay = new ArrayList<>();

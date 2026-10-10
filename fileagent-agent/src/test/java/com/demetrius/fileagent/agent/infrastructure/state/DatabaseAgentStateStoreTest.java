@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -77,6 +78,22 @@ class DatabaseAgentStateStoreTest {
         assertThatThrownBy(() -> loader.loadVerified("broken"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("检查点");
+    }
+
+    @Test
+    void shouldKeepAnonymousAgentScopeBootstrapSlotOutsidePersistentState() {
+        AgentCheckpointRepository repository = mock(AgentCheckpointRepository.class);
+        DatabaseAgentStateStore store = new DatabaseAgentStateStore(repository, crypto());
+
+        assertThat(store.get(null, "run-bootstrap", "agent_state", AgentState.class)).isEmpty();
+        assertThat(store.getList(null, "run-bootstrap", "legacy_messages", AgentState.class)).isEmpty();
+        assertThat(store.exists(null, "run-bootstrap")).isFalse();
+        assertThat(store.listSessionIds(null)).isEmpty();
+        store.save(null, "run-bootstrap", "agent_state", AgentState.builder().build());
+        store.delete(null, "run-bootstrap");
+        store.delete(null, "run-bootstrap", "agent_state");
+
+        verifyNoInteractions(repository);
     }
 
     private EnvelopeCrypto crypto() {

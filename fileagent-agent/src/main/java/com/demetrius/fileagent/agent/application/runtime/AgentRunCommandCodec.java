@@ -3,10 +3,10 @@ package com.demetrius.fileagent.agent.application.runtime;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.common.security.EnvelopeCrypto;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.security.MessageDigest;
 import java.nio.charset.StandardCharsets;
@@ -54,7 +54,7 @@ public class AgentRunCommandCodec {
                 throw new IllegalStateException("Agent Run 请求归属不匹配");
             }
             return command;
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("Agent Run 请求无法反序列化", e);
         }
     }
@@ -62,7 +62,7 @@ public class AgentRunCommandCodec {
     private String serialize(AgentRunCommand command) {
         try {
             return objectMapper.writeValueAsString(command);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalStateException("Agent Run 请求无法序列化", e);
         }
     }

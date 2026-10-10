@@ -6,15 +6,19 @@ import com.demetrius.fileagent.api.dto.KnowledgeScope;
 import com.demetrius.fileagent.common.security.AesGcmCipher;
 import com.demetrius.fileagent.common.security.EnvelopeCrypto;
 import com.demetrius.fileagent.common.security.LocalMasterKeyProvider;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 /**
  * 持久化 Run 请求的密封编解码与完整性校验测试。
@@ -24,6 +28,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * @date 2026-10-09
  */
 class AgentRunCommandCodecTest {
+
+    private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class))
+            .withBean(EnvelopeCrypto.class, () -> mock(EnvelopeCrypto.class))
+            .withBean(AgentRunCommandCodec.class);
 
     @TempDir
     Path tempDir;
@@ -51,6 +60,13 @@ class AgentRunCommandCodecTest {
         assertThatThrownBy(() -> codec.decrypt(run))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("完整性校验失败");
+    }
+
+    @Test
+    void shouldWireCodecWithBootManagedObjectMapper() {
+        contextRunner.run(context -> assertThat(context)
+                .hasSingleBean(ObjectMapper.class)
+                .hasSingleBean(AgentRunCommandCodec.class));
     }
 
     private AgentRunCommandCodec codec() {

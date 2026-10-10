@@ -41,6 +41,9 @@ public class DatabaseAgentStateStore implements AgentStateStore {
 
     @Override
     public void save(String userId, String sessionId, String key, State value) {
+        if (isAnonymousBootstrapSlot(userId)) {
+            return;
+        }
         validateScope(userId, sessionId);
         if (value == null) {
             throw new IllegalArgumentException("state 不能为空");
@@ -54,6 +57,9 @@ public class DatabaseAgentStateStore implements AgentStateStore {
 
     @Override
     public void save(String userId, String sessionId, String key, List<? extends State> values) {
+        if (isAnonymousBootstrapSlot(userId)) {
+            return;
+        }
         validateScope(userId, sessionId);
         if (values == null || values.stream().anyMatch(value -> value == null)) {
             throw new IllegalArgumentException("state 列表不能为空且不能包含 null");
@@ -65,6 +71,9 @@ public class DatabaseAgentStateStore implements AgentStateStore {
 
     @Override
     public <T extends State> Optional<T> get(String userId, String sessionId, String key, Class<T> type) {
+        if (isAnonymousBootstrapSlot(userId)) {
+            return Optional.empty();
+        }
         validateScope(userId, sessionId);
         requireValue(type, "type");
         return loadSnapshot(sessionId)
@@ -75,6 +84,9 @@ public class DatabaseAgentStateStore implements AgentStateStore {
 
     @Override
     public <T extends State> List<T> getList(String userId, String sessionId, String key, Class<T> itemType) {
+        if (isAnonymousBootstrapSlot(userId)) {
+            return List.of();
+        }
         validateScope(userId, sessionId);
         requireValue(itemType, "itemType");
         return loadSnapshot(sessionId)
@@ -85,24 +97,36 @@ public class DatabaseAgentStateStore implements AgentStateStore {
 
     @Override
     public boolean exists(String userId, String sessionId) {
+        if (isAnonymousBootstrapSlot(userId)) {
+            return false;
+        }
         validateScope(userId, sessionId);
         return checkpointRepository.findCheckpointByRunId(sessionId).isPresent();
     }
 
     @Override
     public void delete(String userId, String sessionId) {
+        if (isAnonymousBootstrapSlot(userId)) {
+            return;
+        }
         validateScope(userId, sessionId);
         checkpointRepository.deleteByRunId(sessionId);
     }
 
     @Override
     public void delete(String userId, String sessionId, String key) {
+        if (isAnonymousBootstrapSlot(userId)) {
+            return;
+        }
         validateScope(userId, sessionId);
         loadSnapshot(sessionId).ifPresent(snapshot -> persist(sessionId, snapshot.without(requireText(key, "key"))));
     }
 
     @Override
     public Set<String> listSessionIds(String userId) {
+        if (isAnonymousBootstrapSlot(userId)) {
+            return Set.of();
+        }
         if (!LOCAL_OPERATOR.equals(userId)) {
             throw new IllegalArgumentException("AgentScope 状态只允许 local-operator 访问");
         }
@@ -212,6 +236,14 @@ public class DatabaseAgentStateStore implements AgentStateStore {
             throw new IllegalArgumentException("AgentScope 状态只允许 local-operator 访问");
         }
         requireText(runId, "runId");
+    }
+
+    /**
+     * AgentScope 在绑定请求 RuntimeContext 前会探测匿名默认槽位；该槽位只能获得空状态，
+     * 不能读取或写入任何真实 Run 的检查点。
+     */
+    private static boolean isAnonymousBootstrapSlot(String userId) {
+        return userId == null || userId.isBlank();
     }
 
     private void validateAgentStateIdentity(AgentState state, String runId) {

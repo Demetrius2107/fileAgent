@@ -1,51 +1,60 @@
 package com.demetrius.fileagent.agent.application;
 
+import com.demetrius.fileagent.agent.application.runtime.AgentRunCommandCodec;
+import com.demetrius.fileagent.agent.application.runtime.AgentRunEventHub;
+import com.demetrius.fileagent.agent.application.runtime.AgentRunExecutionCoordinator;
+import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
+import com.demetrius.fileagent.agent.domain.run.AgentRunRepository;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.interfaces.dto.StartAgentRunRequest;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
-import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.dto.KnowledgeScope;
 import com.demetrius.fileagent.api.dto.MessageDto;
 import com.demetrius.fileagent.api.enums.MessageType;
-import com.demetrius.fileagent.api.port.AgentRuntimePort;
 import com.demetrius.fileagent.api.port.SessionMessagePort;
 import com.demetrius.fileagent.api.port.SessionQueryPort;
 import com.demetrius.fileagent.common.exception.BizException;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Flux;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Agent 运行编排：会话校验 -> 历史加载 -> 保存 USER -> 启动 Runtime -> 落库 ASSISTANT。
+ * Agent Run 准备编排：会话校验 -> 历史加载 -> 保存 USER/PENDING Run -> 提交后入队。
  * <p>
- * 落库只在 run.completed 时发生，失败/取消不落空回答。历史消息仅作文本上下文。
+ * 本类在返回 SSE Flux 前已经保存业务事实；浏览器订阅只消费事件，不再拥有后台执行生命周期。
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AgentRunAppServiceImpl implements AgentRunAppService {
 
-    private static final String CODE_PERSIST_FAILED = "AGENT_PERSIST_FAILED";
     private static final String CODE_FEATURE_DISABLED = "AGENT_FEATURE_DISABLED";
+    private static final String CODE_CAPACITY_EXCEEDED = "AGENT_CAPACITY_EXCEEDED";
+    private static final String LOCAL_OPERATOR = "local-operator";
 
     private final SessionQueryPort sessionQueryPort;
     private final SessionMessagePort sessionMessagePort;
-    private final AgentRuntimePort agentRuntimePort;
+    private final AgentRunRepository runRepository;
+    private final AgentRunCommandCodec commandCodec;
+    private final AgentRunExecutionCoordinator executionCoordinator;
+    private final AgentRunEventHub eventHub;
     private final AgentProperties properties;
+    private final Clock clock;
 
     @Value("${fileagent.agent-history-limit:10}")
     private int historyLimit;
 
     @Override
-    public Flux<AgentRunEvent> run(Long sessionId, StartAgentRunRequest request, String traceId) {
+    @Transactional
+    public AgentRunPreparation prepare(Long sessionId, StartAgentRunRequest request, String traceId) {
         if (!properties.isEnabled()) {
-            return Flux.just(AgentRunEvent.failed(null, CODE_FEATURE_DISABLED,
-                    "Agent 模式未启用，请先在配置中开启", traceId));
+            throw new BizException(403, CODE_FEATURE_DISABLED + ": Agent 模式未启用");
         }
         if (sessionId == null) {
             throw new BizException("sessionId 不能为空");
@@ -64,8 +73,13 @@ public class AgentRunAppServiceImpl implements AgentRunAppService {
             throw new BizException("AGENT_PROMPT_TOO_LARGE: prompt 超过 " + maxPromptCharacters + " 个字符");
         }
 
-        return Flux.defer(() -> {
+        String runId = UUID.randomUUID().toString();
+        if (!executionCoordinator.tryReserveCapacity(runId)) {
+            throw new BizException(429, CODE_CAPACITY_EXCEEDED + ": Agent 运行队列已满");
+        }
+        try {
             // 读取历史须在保存当前 USER 之前，避免当前问题在上下文中出现两次
+            String effectiveTraceId = traceId == null || traceId.isBlank() ? "agent-" + runId : traceId;
             AgentRunCommand command;
             if (properties.isAdaptiveRetrievalEnabled()) {
                 SessionQueryPort.SessionSummary summary = sessionQueryPort.getSummary(sessionId);
@@ -73,35 +87,46 @@ public class AgentRunAppServiceImpl implements AgentRunAppService {
                         ? sessionQueryPort.listMessages(sessionId)
                         : sessionQueryPort.listMessagesAfter(sessionId, summary.throughMessageId());
                 command = new AgentRunCommand(
-                        UUID.randomUUID().toString(), sessionId, traceId, prompt,
+                        runId, sessionId, effectiveTraceId, prompt,
                         summary.content(), summary.throughMessageId(), summary.version(),
                         summary.sourceHash(), history, scope);
             } else {
                 List<MessageDto> history = tail(sessionQueryPort.listMessages(sessionId), historyLimit);
-                command = new AgentRunCommand(UUID.randomUUID().toString(), sessionId, traceId,
+                command = new AgentRunCommand(runId, sessionId, effectiveTraceId,
                         prompt, history, scope);
             }
-            sessionMessagePort.append(sessionId, MessageType.USER, prompt);
-            String runId = command.runId();
+            AgentRunCommandCodec.EncodedCommand encoded = commandCodec.encrypt(command);
+            Long inputMessageId = sessionMessagePort.append(sessionId, MessageType.USER, prompt);
+            AgentRunEntity run = AgentRunEntity.pending(runId, sessionId, effectiveTraceId, LOCAL_OPERATOR,
+                    encoded.ciphertext(), encoded.hmac());
+            run.recordInputMessage(inputMessageId, clock.instant());
+            AgentRunEntity saved = runRepository.save(run);
+            registerEnqueueAfterCommit(command);
+            return new AgentRunPreparation(runId, eventHub.subscribe(runId, null,
+                    saved.getStatus(), Math.max(0L, saved.getVersion())));
+        } catch (RuntimeException e) {
+            executionCoordinator.releaseCapacity(runId);
+            throw e;
+        }
+    }
 
-            StringBuilder answer = new StringBuilder();
-            return agentRuntimePort.run(command)
-                    .concatMap(event -> {
-                        if ("message.delta".equals(event.type())) {
-                            answer.append(event.content());
-                            return Flux.just(event);
-                        }
-                        if ("run.completed".equals(event.type())) {
-                            Long messageId = sessionMessagePort.append(sessionId, MessageType.ASSISTANT, answer.toString());
-                            return Flux.just(AgentRunEvent.completed(runId, messageId));
-                        }
-                        return Flux.just(event);
-                    })
-                    .onErrorResume(e -> {
-                        log.warn("Agent 回答落库失败 runId={}: {}", runId, e.getMessage());
-                        return Flux.just(AgentRunEvent.failed(runId, CODE_PERSIST_FAILED,
-                                "回答保存失败，请稍后重试", traceId));
-                    });
+    private void registerEnqueueAfterCommit(AgentRunCommand command) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            executionCoordinator.enqueue(command);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                executionCoordinator.enqueue(command);
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                if (status != TransactionSynchronization.STATUS_COMMITTED) {
+                    executionCoordinator.releaseCapacity(command.runId());
+                }
+            }
         });
     }
 

@@ -85,7 +85,10 @@ public class AgentRunEventHub {
     }
 
     private static boolean isTerminal(AgentRunEvent event) {
-        return "run.completed".equals(event.type()) || "run.failed".equals(event.type());
+        return event.status() == AgentRunStatus.SUCCEEDED
+                || event.status() == AgentRunStatus.FAILED
+                || event.status() == AgentRunStatus.CANCELLED
+                || event.status() == AgentRunStatus.TIMED_OUT;
     }
 
     private static int estimateBytes(AgentRunEvent event) {

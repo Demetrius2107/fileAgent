@@ -192,6 +192,15 @@ public class AgentRunEntity {
                 Instant.now());
     }
 
+    /**
+     * 绑定与本次请求同事务创建的用户消息，恢复时可据此审计 PENDING Run 的输入来源。
+     */
+    public void recordInputMessage(Long messageId, Instant now) {
+        requireStatus(AgentRunStatus.PENDING);
+        this.inputMessageId = requireValue(messageId, "messageId");
+        touch(now);
+    }
+
     public void start(Instant now) {
         requireStatus(AgentRunStatus.PENDING);
         this.status = AgentRunStatus.RUNNING;

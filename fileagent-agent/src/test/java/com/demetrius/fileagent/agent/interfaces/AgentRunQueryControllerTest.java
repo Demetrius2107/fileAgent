@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.interfaces;
 
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
+import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.dto.AgentRunSnapshot;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.port.AgentRuntimePort;
@@ -13,6 +14,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import reactor.core.publisher.Flux;
 
 import java.time.Instant;
 import java.util.List;
@@ -22,6 +24,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
@@ -77,6 +80,28 @@ class AgentRunQueryControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
                 .andExpect(jsonPath("$.data.status").value("CANCELLED"));
+    }
+
+    @Test
+    void activeShouldReturnNullDataWhenSessionHasNoActiveRun() throws Exception {
+        when(agentRuntimePort.active(1L)).thenReturn(null);
+
+        mockMvc.perform(get("/api/sessions/1/agent-runs/active"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data").doesNotExist());
+    }
+
+    @Test
+    void eventsShouldForwardLastEventIdAndSseMetadata() throws Exception {
+        when(agentRuntimePort.events("run-1", "event-0")).thenReturn(Flux.just(
+                AgentRunEvent.pending("run-1").withMetadata("event-1", 1L)));
+
+        mockMvc.perform(get("/api/agent-runs/run-1/events")
+                        .header("Last-Event-ID", "event-0"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id:event-1")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("event:run.status")));
     }
 
     @Test

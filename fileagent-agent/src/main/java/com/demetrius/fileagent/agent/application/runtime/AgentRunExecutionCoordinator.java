@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.agent.application.runtime;
 
+import com.demetrius.fileagent.agent.application.AgentRunFinalizationService;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRunRepository;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
@@ -15,6 +16,9 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
@@ -42,6 +46,7 @@ public class AgentRunExecutionCoordinator {
     private final AgentExecutionEngine executionEngine;
     private final AgentRunCommandCodec commandCodec;
     private final AgentRunEventHub eventHub;
+    private final AgentRunFinalizationService finalizationService;
     private final AgentProperties properties;
     private final Clock clock;
     private final ThreadPoolTaskExecutor executor;
@@ -55,6 +60,7 @@ public class AgentRunExecutionCoordinator {
                                         AgentExecutionEngine executionEngine,
                                         AgentRunCommandCodec commandCodec,
                                         AgentRunEventHub eventHub,
+                                        AgentRunFinalizationService finalizationService,
                                         AgentProperties properties,
                                         Clock clock,
                                         @Qualifier("agentRunTaskExecutor") ThreadPoolTaskExecutor executor) {
@@ -62,6 +68,7 @@ public class AgentRunExecutionCoordinator {
         this.executionEngine = executionEngine;
         this.commandCodec = commandCodec;
         this.eventHub = eventHub;
+        this.finalizationService = finalizationService;
         this.properties = properties;
         this.clock = clock;
         this.executor = executor;
@@ -139,6 +146,8 @@ public class AgentRunExecutionCoordinator {
         try {
             executor.execute(() -> executeInWorker(command));
         } catch (RuntimeException e) {
+            scheduledRunIds.remove(runId);
+            failExecution(runId, e);
             releaseCapacity(runId);
             throw e;
         }
@@ -185,8 +194,10 @@ public class AgentRunExecutionCoordinator {
             AgentRunEntity runningRun = runRepository.save(leasedRun);
             leasedRunIds.add(runId);
             Flux<AgentRunEvent> execution = executionEngine.execute(command);
+            StringBuilder answer = new StringBuilder();
+            LinkedHashSet<String> sourceFiles = new LinkedHashSet<>();
             execution
-                    .doOnNext(event -> eventHub.publish(event, Math.max(0L, runningRun.getVersion())))
+                    .doOnNext(event -> handleExecutionEvent(runId, event, answer, sourceFiles))
                     .doOnError(error -> failExecution(runId, error))
                     .doFinally(signal -> releaseCapacity(runId))
                     .subscribe();
@@ -205,6 +216,40 @@ public class AgentRunExecutionCoordinator {
         }
     }
 
+    private void handleExecutionEvent(String runId, AgentRunEvent event, StringBuilder answer,
+                                      LinkedHashSet<String> sourceFiles) {
+        AgentRunEntity run = runRepository.findByRunId(runId).orElse(null);
+        if (run == null || isTerminal(run.getStatus())) {
+            return;
+        }
+        if ("message.delta".equals(event.type())) {
+            answer.append(event.content() == null ? "" : event.content());
+        }
+        if ("sources".equals(event.type()) && event.files() != null) {
+            sourceFiles.addAll(event.files());
+        }
+        if ("run.completed".equals(event.type())) {
+            AgentRunEntity finalized = finalizationService.finalizeSuccess(runId, answer.toString(),
+                    List.copyOf(sourceFiles));
+            if (finalized.getStatus() == AgentRunStatus.SUCCEEDED) {
+                eventHub.publish(AgentRunEvent.completed(runId, finalized.getAssistantMessageId()),
+                        Math.max(0L, finalized.getVersion()));
+            }
+            return;
+        }
+        if ("run.failed".equals(event.type())) {
+            String code = event.code() == null || event.code().isBlank()
+                    ? CODE_RUN_INTERRUPTED : event.code();
+            run.fail(code, clock.instant());
+            AgentRunEntity failed = runRepository.save(run);
+            eventHub.publish(AgentRunEvent.failed(runId, code,
+                    event.message() == null ? "Agent 运行中断" : event.message(), run.getTraceId()),
+                    Math.max(0L, failed.getVersion()));
+            return;
+        }
+        eventHub.publish(event, Math.max(0L, run.getVersion()));
+    }
+
     private void failExecution(String runId, Throwable error) {
         log.warn("Agent Run 后台执行失败 runId={}: {}", runId, error.getMessage());
         runRepository.findByRunId(runId).ifPresent(run -> {
@@ -215,6 +260,13 @@ public class AgentRunExecutionCoordinator {
                         "Agent 运行中断", run.getTraceId()), Math.max(0L, failed.getVersion()));
             }
         });
+    }
+
+    private static boolean isTerminal(AgentRunStatus status) {
+        return status == AgentRunStatus.SUCCEEDED
+                || status == AgentRunStatus.FAILED
+                || status == AgentRunStatus.CANCELLED
+                || status == AgentRunStatus.TIMED_OUT;
     }
 
     private void failRecovery(AgentRunEntity run, String code, Instant now) {

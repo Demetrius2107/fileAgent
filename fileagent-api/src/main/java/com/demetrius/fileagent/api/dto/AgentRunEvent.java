@@ -77,6 +77,12 @@ public record AgentRunEvent(
                 null, null, null, null, null, null, null, code, message, null, traceId, null, null);
     }
 
+    /** SSE 尚未建立前的业务错误事件，不对应任何已创建的 Run。 */
+    public static AgentRunEvent error(String code, String message, String traceId) {
+        return new AgentRunEvent("error", null, null,
+                null, null, null, null, null, null, null, code, message, null, traceId, null, null);
+    }
+
     /**
      * 由运行事件通道在发布时写入不可预测事件 ID 与对应 Run 版本。
      */

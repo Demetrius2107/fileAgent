@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.agent.application.runtime;
 
+import com.demetrius.fileagent.agent.application.AgentRunFinalizationService;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRunRepository;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
@@ -72,7 +73,7 @@ class AgentRunExecutionCoordinatorTest {
         AgentExecutionEngine engine = command -> Flux.defer(() -> {
             executedCommand.set(command);
             executed.countDown();
-            return Flux.just(com.demetrius.fileagent.api.dto.AgentRunEvent.completed(command.runId(), 10L));
+            return Flux.never();
         });
         AgentRunExecutionCoordinator coordinator = coordinator(repository, engine, commandCodec, 1, 1);
         AgentRunEntity pending = pending("run-pending", 1L);
@@ -167,7 +168,7 @@ class AgentRunExecutionCoordinatorTest {
         executor.initialize();
         executors.add(executor);
         return new AgentRunExecutionCoordinator(repository, engine, commandCodec,
-                new AgentRunEventHub(properties), properties, CLOCK, executor);
+                new AgentRunEventHub(properties), mock(AgentRunFinalizationService.class), properties, CLOCK, executor);
     }
 
     private ThreadPoolTaskExecutor executor() {

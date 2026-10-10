@@ -1,13 +1,14 @@
 package com.demetrius.fileagent.agent.application;
 
 import com.demetrius.fileagent.agent.interfaces.dto.StartAgentRunRequest;
-import com.demetrius.fileagent.api.dto.AgentRunEvent;
-import reactor.core.publisher.Flux;
 
 /**
- * Agent 运行编排：校验会话、加载历史、保存用户消息、启动 Runtime、落库助手回答。
+ * Agent Run 准备编排：同步持久化请求事实，再交由后台协调器执行。
  */
 public interface AgentRunAppService {
 
-    Flux<AgentRunEvent> run(Long sessionId, StartAgentRunRequest request, String traceId);
+    /**
+     * 校验请求、保存 USER 和 PENDING Run，并在事务提交后放入后台执行队列。
+     */
+    AgentRunPreparation prepare(Long sessionId, StartAgentRunRequest request, String traceId);
 }

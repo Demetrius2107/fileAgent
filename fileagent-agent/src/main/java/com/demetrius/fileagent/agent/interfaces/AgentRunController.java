@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.interfaces;
 
 import com.demetrius.fileagent.agent.application.AgentRunAppService;
+import com.demetrius.fileagent.agent.application.AgentRunPreparation;
 import com.demetrius.fileagent.agent.interfaces.dto.StartAgentRunRequest;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.common.exception.BizException;
@@ -29,7 +30,7 @@ import java.nio.charset.StandardCharsets;
  * Agent 模式 SSE 运行接口。只转发受控事件；敏感配置（apiKey/baseUrl）绝不进入响应。
  * <p>
  * 查询/取消接口见 {@link AgentRunQueryController}，其错误走全局 JSON 处理器，
- * 与 SSE 的 {@code run.failed} 事件契约分离。
+ * 与流建立前的 {@code error} 事件契约分离。
  */
 @RestController
 @RequiredArgsConstructor
@@ -52,8 +53,11 @@ public class AgentRunController {
         if (StringUtils.hasText(traceId)) {
             response.setHeader(TRACE_ID_HEADER, traceId);
         }
-        return agentRunAppService.run(sessionId, request, traceId)
+        AgentRunPreparation preparation = agentRunAppService.prepare(sessionId, request, traceId);
+        response.setHeader("X-Agent-Run-Id", preparation.runId());
+        return preparation.events()
                 .map(event -> ServerSentEvent.<AgentRunEvent>builder()
+                        .id(event.eventId())
                         .event(event.type())
                         .data(event)
                         .build());
@@ -63,8 +67,9 @@ public class AgentRunController {
     public void handleBizException(BizException e, HttpServletResponse response) throws IOException {
         log.warn("Agent 业务异常: {}", e.getMessage());
         String traceId = currentTraceId();
-        HttpStatus status = e.getCode() == 404 ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
-        AgentRunEvent errorEvent = AgentRunEvent.failed(null, String.valueOf(e.getCode()), e.getMessage(), traceId);
+        HttpStatus resolved = HttpStatus.resolve(e.getCode());
+        HttpStatus status = resolved != null && resolved.is4xxClientError() ? resolved : HttpStatus.BAD_REQUEST;
+        AgentRunEvent errorEvent = AgentRunEvent.error(String.valueOf(e.getCode()), e.getMessage(), traceId);
 
         response.setStatus(status.value());
         response.setContentType(MediaType.TEXT_EVENT_STREAM_VALUE);

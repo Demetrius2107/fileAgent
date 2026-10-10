@@ -381,8 +381,9 @@
         await restoreActiveAgentRun(sessionId);
     }
 
-    async function loadMessages() {
-        const messages = await api(`/api/sessions/${currentSessionId}/messages`);
+    async function loadMessages(sessionId = currentSessionId) {
+        const messages = await api(`/api/sessions/${sessionId}/messages`);
+        if (sessionId !== currentSessionId) { return; }
         messageList.replaceChildren();
         if (!messages || messages.length === 0) {
             renderEmptyChat();
@@ -581,10 +582,10 @@
         } else if (event.type === 'run.started') {
             applyAgentStatus(state, event.status || 'RUNNING', event.summary);
         } else if (event.type === 'run.status') {
-            applyAgentStatus(state, event.status, event.summary);
+            applyAgentStatus(state, event.status, event.summary, event.status === 'SUCCEEDED');
         } else if (event.type === 'run.completed') {
             state.assistant.dataset.messageId = String(event.messageId);
-            applyAgentStatus(state, event.status || 'SUCCEEDED', event.summary);
+            applyAgentStatus(state, event.status || 'SUCCEEDED', event.summary, true);
         } else if (event.type === 'run.failed') {
             const traceHint = event.traceId ? `（traceId：${event.traceId}）` : '';
             appendAgentError(state.assistant, `出错了：${event.message || event.code || '未知错误'}${traceHint}`);
@@ -595,12 +596,12 @@
         }
     }
 
-    function applyAgentStatus(state, status, summary) {
+    function applyAgentStatus(state, status, summary, reloadMessages = false) {
         if (!isVisibleAgentRun(state) || !status) { return; }
         state.status = status;
         renderAgentRunStatus(state.assistant, status, summary);
         if (isTerminalAgentStatus(status)) {
-            finishAgentRun(state, true);
+            finishAgentRun(state, reloadMessages);
             return;
         }
         if (canReconnectAgentStatus(status)) {
@@ -612,7 +613,7 @@
         }
     }
 
-    async function finishAgentRun(state, reloadMessages) {
+    async function finishAgentRun(state, reloadMessages, forceReload = false) {
         if (state.terminal) { return; }
         state.terminal = true;
         clearAgentPolling();
@@ -621,19 +622,20 @@
             state.recoveryTimer = null;
         }
         if (!isVisibleAgentRun(state)) { return; }
+        if (reloadMessages && (forceReload || !state.content)) {
+            try {
+                await loadMessages(state.sessionId);
+            } catch (e) {
+                showToast(`刷新 Agent 消息失败：${e.message}`, false);
+            }
+        }
+        if (!isVisibleAgentRun(state)) { return; }
         agentRunState = null;
         currentRunId = null;
         if (abortController === state.controller) {
             abortController = null;
         }
         setStreaming(false);
-        if (reloadMessages && currentSessionId === state.sessionId) {
-            try {
-                await loadMessages();
-            } catch (e) {
-                showToast(`刷新 Agent 消息失败：${e.message}`, false);
-            }
-        }
     }
 
     function clearAgentPolling() {
@@ -679,7 +681,7 @@
         const active = await api(`/api/sessions/${state.sessionId}/agent-runs/active`);
         if (!isVisibleAgentRun(state) || state.terminal) { return; }
         if (!active) {
-            await finishAgentRun(state, true);
+            await finishAgentRun(state, true, true);
             return;
         }
         if (active.runId !== state.runId) { return; }

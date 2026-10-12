@@ -31,5 +31,6 @@ public record AgentRunSnapshot(
         long totalTokens,
         boolean historyCompressed,
         List<String> budgetReasons,
-        Long runVersion) {
+        Long runVersion,
+        AgentApprovalView approval) {
 }

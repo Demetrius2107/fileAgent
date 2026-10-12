@@ -50,11 +50,11 @@ fileAgent/
 │   ├── domain/                       待建（Action / 意图模型）
 │   └── infrastructure/               StreamingChatClient（模型流适配）/ DocumentParsedEventListener（索引订阅）
 
-├── fileagent-agent/               ✅ Agent 运行域（Phase 1 + Phase 3A 持久化运行）
-│   ├── interfaces/                   AgentRunController / AgentRunQueryController（SSE、快照、active、取消）
-│   ├── application/                  AgentRunAppService（同步 prepare）/ AgentRunFinalizationService / AgentPromptFactory / AgentToolContext
-│   ├── domain/                       AgentRunEntity / AgentStepEntity / AgentCheckpointEntity / AgentRunBudget
-│   └── infrastructure/               AgentScopeRuntimeAdapter（单次执行）/ AgentPersistenceAdapter / DatabaseAgentStateStore / AgentRunExecutionCoordinator / AgentRunEventHub / 只读工具
+├── fileagent-agent/               ✅ Agent 运行域（Phase 1 + Phase 3A/3B）
+│   ├── interfaces/                   AgentRunController / AgentRunQueryController / AgentApprovalController（SSE、快照、active、取消、单次审批）
+│   ├── application/                  AgentRunAppService（同步 prepare）/ AgentRunFinalizationService / AgentApprovalService / AgentApprovalWorkflowService / AgentApprovalExpiryScheduler / AgentPromptFactory / AgentToolContext
+│   ├── domain/                       AgentRunEntity / AgentStepEntity / AgentCheckpointEntity / AgentApprovalEntity / AgentRunBudget / AgentActionPolicy
+│   └── infrastructure/               AgentScopeRuntimeAdapter（暂停/ConfirmResult 恢复）/ AgentPersistenceAdapter / DatabaseAgentStateStore / AgentRunExecutionCoordinator / AgentRunEventHub / 只读工具 / RunScopedActionTool
 
 ├── fileagent-action/              ✅ 动作执行域
 │   ├── interfaces/                   待建（风险确认接口）
@@ -156,6 +156,8 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | `fileagent.agent.max-concurrent-runs` / `max-queued-runs` | 后台执行并发与排队上限 | ✅ |
 | `fileagent.agent.pending-start-timeout` / `lease-duration` / `recovery-scan-interval` | PENDING 超时、执行租约与重启恢复扫描 | ✅ |
 | `fileagent.agent.replay-max-events` / `replay-max-bytes` | 单个 Run 的内存事件回放上限 | ✅ |
+| `fileagent.agent.actions-enabled` | 是否向 Agent 注册受控副作用工具，默认关闭 | ✅ |
+| `fileagent.agent.approval-timeout` / `approval-expiry-scan-interval` | 单次审批有效期与过期扫描周期 | ✅ |
 | `fileagent.evaluation.endpoint.enabled` | 是否开启内部评测接口，默认 false | ✅ |
 | `fileagent.evaluation.endpoint.token` | `${FILEAGENT_EVALUATION_TOKEN}` | ❌ 严禁提交 |
 | RAG Judge 模型 | 固定使用 `deepseek-v4-pro`，复用 `FILEAGENT_CHAT_API_KEY` | ❌ API Key 严禁提交 |

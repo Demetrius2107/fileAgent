@@ -15,7 +15,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * Agent Run 聚合根：单机内存运行态与状态机。
  * <p>
- * 状态转移：{@code PENDING -> RUNNING -> SUCCEEDED/FAILED/CANCELLED/TIMED_OUT}。
+ * 状态转移：{@code PENDING -> RUNNING -> WAITING_APPROVAL -> ...}。
  * 终态不可再转移。进程重启后状态自然丢失（Phase 1 显式限制，不伪装持久化）。
  */
 public class AgentRun {
@@ -77,6 +77,12 @@ public class AgentRun {
         requireStatus(AgentRunStatus.RUNNING);
         this.status = AgentRunStatus.SUCCEEDED;
         this.endedAt = now;
+    }
+
+    /** AgentScope 已写入 ASKING 检查点后，结束当前执行片段并等待用户决定。 */
+    public void waitForApproval() {
+        requireStatus(AgentRunStatus.RUNNING);
+        this.status = AgentRunStatus.WAITING_APPROVAL;
     }
 
     public void fail(String code, Instant now) {
@@ -238,6 +244,10 @@ public class AgentRun {
 
     public boolean isRunning() {
         return this.status == AgentRunStatus.RUNNING;
+    }
+
+    public boolean isWaitingApproval() {
+        return this.status == AgentRunStatus.WAITING_APPROVAL;
     }
 
     public boolean isTerminal() {

@@ -2,10 +2,12 @@ package com.demetrius.fileagent.agent.infrastructure.tool;
 
 import com.demetrius.fileagent.agent.domain.policy.AgentActionCandidate;
 import com.demetrius.fileagent.agent.domain.policy.AgentActionPolicy;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalEntity;
 import com.demetrius.fileagent.api.enums.PolicyDecision;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.ToolCallState;
 import io.agentscope.core.message.ToolResultBlock;
+import io.agentscope.core.message.ToolUseBlock;
 import io.agentscope.core.permission.PermissionContextState;
 import io.agentscope.core.permission.PermissionDecision;
 import io.agentscope.core.tool.ToolBase;
@@ -83,6 +85,64 @@ public abstract class RunScopedActionTool extends ToolBase {
         return runId;
     }
 
+    /**
+     * 从 AgentScope 确认事件的原始 ToolCall 导出已完成预检的动作候选，供持久化审批快照使用。
+     * 该事件保留模型响应时的 PENDING 状态；保存后的检查点再由应用服务验证为 ASKING。
+     * 浏览器请求不会参与此过程，因此不能替换工具名、参数或调用标识。
+     */
+    public final AgentActionCandidate approvalCandidate(ToolUseBlock toolCall) {
+        if (toolCall == null || toolCall.getId() == null || toolCall.getId().isBlank()
+                || !getName().equals(toolCall.getName())) {
+            throw new IllegalArgumentException("审批工具调用不合法");
+        }
+        AgentActionCandidate candidate = buildCheckedCandidate(toolCall.getInput(), toolCall.getId());
+        if (actionPolicy.decide(candidate) != PolicyDecision.ASK) {
+            throw new IllegalStateException("当前动作不需要审批");
+        }
+        ActionBinding expected = checkedBindings.get(candidate.canonicalInputHmac());
+        if (expected == null || !expected.matches(candidate)) {
+            throw new IllegalStateException("审批动作绑定已变化");
+        }
+        if (!checkedBindings.replace(candidate.canonicalInputHmac(), expected, ActionBinding.from(candidate))) {
+            throw new IllegalStateException("审批动作绑定已变化");
+        }
+        return candidate;
+    }
+
+    /**
+     * 进程在 Approval 落库前中断时，从经过校验的 ASKING ToolCall 重建同一候选，不执行副作用。
+     */
+    public final AgentActionCandidate rebuildApprovalCandidate(ToolUseBlock toolCall) {
+        if (toolCall == null || toolCall.getId() == null || toolCall.getId().isBlank()
+                || !getName().equals(toolCall.getName()) || toolCall.getState() != ToolCallState.ASKING) {
+            throw new IllegalArgumentException("审批工具调用不合法");
+        }
+        AgentActionCandidate candidate = buildCheckedCandidate(toolCall.getInput(), toolCall.getId());
+        if (actionPolicy.decide(candidate) != PolicyDecision.ASK) {
+            throw new IllegalStateException("当前动作不需要审批");
+        }
+        return candidate;
+    }
+
+    /**
+     * 重启后用数据库里的原始 ASKING ToolCall 重建内存绑定；批准记录与当前可信配置不一致时禁止恢复。
+     */
+    public final void restoreApprovedBinding(AgentApprovalEntity approval, ToolUseBlock storedToolCall) {
+        if (approval == null || storedToolCall == null || !runId.equals(approval.getRunId())
+                || !getName().equals(approval.getToolName())
+                || !approval.getToolCallId().equals(storedToolCall.getId())
+                || !getName().equals(storedToolCall.getName())
+                || storedToolCall.getState() != ToolCallState.ASKING) {
+            throw new AgentApprovalBindingChangedException("审批动作绑定已变化");
+        }
+        AgentActionCandidate candidate = buildCheckedCandidate(storedToolCall.getInput(), storedToolCall.getId());
+        if (actionPolicy.decide(candidate) != PolicyDecision.ASK
+                || !ActionBinding.from(candidate).matches(approval)) {
+            throw new AgentApprovalBindingChangedException("审批动作绑定已变化");
+        }
+        checkedBindings.put(candidate.canonicalInputHmac(), ActionBinding.from(candidate));
+    }
+
     private ToolResultBlock executeAfterRecheck(ToolCallParam param) {
         if (param == null || param.getToolUseBlock() == null) {
             throw new IllegalArgumentException("动作工具缺少原始 ToolCall");
@@ -136,7 +196,7 @@ public abstract class RunScopedActionTool extends ToolBase {
         };
     }
 
-    private record ActionBinding(String toolVersion, String toolDefinitionVersion,
+    private record ActionBinding(String toolCallId, String toolVersion, String toolDefinitionVersion,
                                  String endpointRevision, String endpointConfigHash,
                                  String policyVersion, String resourceScope,
                                  String canonicalInputHmac, String operationId,
@@ -144,14 +204,15 @@ public abstract class RunScopedActionTool extends ToolBase {
                                  String parameterPreview) {
 
         private static ActionBinding from(AgentActionCandidate candidate) {
-            return new ActionBinding(candidate.toolVersion(), candidate.toolDefinitionVersion(),
+            return new ActionBinding(candidate.toolCallId(), candidate.toolVersion(), candidate.toolDefinitionVersion(),
                     candidate.endpointRevision(), candidate.endpointConfigHash(), candidate.policyVersion(),
                     candidate.resourceScope(), candidate.canonicalInputHmac(), candidate.operationId(),
                     candidate.safeSummary(), candidate.expectedImpact(), candidate.parameterPreview());
         }
 
         private boolean matches(AgentActionCandidate candidate) {
-            return toolVersion.equals(candidate.toolVersion())
+            return (toolCallId == null || toolCallId.equals(candidate.toolCallId()))
+                    && toolVersion.equals(candidate.toolVersion())
                     && toolDefinitionVersion.equals(candidate.toolDefinitionVersion())
                     && endpointRevision.equals(candidate.endpointRevision())
                     && endpointConfigHash.equals(candidate.endpointConfigHash())
@@ -162,6 +223,20 @@ public abstract class RunScopedActionTool extends ToolBase {
                     && safeSummary.equals(candidate.safeSummary())
                     && expectedImpact.equals(candidate.expectedImpact())
                     && parameterPreview.equals(candidate.parameterPreview());
+        }
+
+        private boolean matches(AgentApprovalEntity approval) {
+            return toolVersion.equals(approval.getToolVersion())
+                    && toolDefinitionVersion.equals(approval.getToolDefinitionVersion())
+                    && endpointRevision.equals(approval.getEndpointRevision())
+                    && endpointConfigHash.equals(approval.getEndpointConfigHash())
+                    && policyVersion.equals(approval.getPolicyVersion())
+                    && resourceScope.equals(approval.getResourceScope())
+                    && canonicalInputHmac.equals(approval.getCanonicalInputHmac())
+                    && operationId.equals(approval.getOperationId())
+                    && safeSummary.equals(approval.getActionSummary())
+                    && expectedImpact.equals(approval.getExpectedImpact())
+                    && parameterPreview.equals(approval.getParameterPreview());
         }
     }
 }

@@ -261,7 +261,7 @@ git commit -m "feat(agent): 持久化 AgentScope 审批暂停"
 
 - [ ] **步骤 1：写审批 prepare 时序测试**
 
-覆盖：先预留 permit；严格加载 ASKING 检查点；同一事务复核定义版本/HMAC/资源后才 CAS APPROVED/DENIED + Run RUNNING + lease；绑定变化把 Approval/Step CANCELLED、Run FAILED/APPROVAL_BINDING_CHANGED；同决定重复提交不二次恢复；相反决定 409。
+覆盖：严格加载 ASKING 检查点；同一事务复核定义版本/HMAC/资源后才 CAS APPROVED/DENIED + Run PENDING；首次 CAS 成功后再预留 permit，容量不足时回滚该事务；绑定变化把 Approval/Step CANCELLED、Run FAILED/APPROVAL_BINDING_CHANGED；同决定重复提交不二次恢复；相反决定 409。
 
 - [ ] **步骤 2：写 Spring Context 重启测试**
 
@@ -371,30 +371,31 @@ git commit -m "feat(web): 增加 Agent 操作审批交互"
 - 修改：`docs/API.md`
 - 修改：`docs/SKELETON.md`
 - 修改：`docs/AGENTIC-RAG-ENTERPRISE-ROADMAP.md`
-- 测试：`fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/runtime/AgentScopeHitlIntegrationTest.java`
+- 测试：`fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/runtime/AgentScopeApprovalPauseTest.java`
+- 测试：`fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/runtime/AgentScopeApprovalResumeTest.java`
 
-- [ ] **步骤 1：实现真实 AgentScope HITL 集成测试**
+- [x] **步骤 1：实现真实 AgentScope HITL 集成测试**
 
 用固定模型桩产生一个 ASKING ToolCall，验证 ASK -> 保存检查点 -> 新 ReActAgent -> APPROVE/DENY -> 恢复；再验证多个 ASKING 直接失败且无副作用。
 
-- [ ] **步骤 2：运行 Agent 模块测试**
+- [x] **步骤 2：运行 Agent 模块测试**
 
 运行：`mvn -pl fileagent-agent,fileagent-starter -am test`
 
 预期：PASS。
 
-- [ ] **步骤 3：更新 API 与 Roadmap**
+- [x] **步骤 3：更新 API 与 Roadmap**
 
 记录 Approval API、事件字段、同源头、过期、409 和恢复语义；只把 3B 标为完成。
 
-- [ ] **步骤 4：运行全量测试并提交**
+- [x] **步骤 4：运行全量测试并提交**
 
 运行：`mvn test`
 
 预期：PASS。
 
 ```bash
-git add docs/API.md docs/SKELETON.md docs/AGENTIC-RAG-ENTERPRISE-ROADMAP.md fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/runtime/AgentScopeHitlIntegrationTest.java
+git add docs/API.md docs/SKELETON.md docs/AGENTIC-RAG-ENTERPRISE-ROADMAP.md fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/runtime/AgentScopeApprovalPauseTest.java fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/runtime/AgentScopeApprovalResumeTest.java
 git commit -m "docs(agent): 完成 Phase 3B 验收"
 ```
 

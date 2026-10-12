@@ -1,5 +1,7 @@
 package com.demetrius.fileagent.agent.application.runtime;
 
+import com.demetrius.fileagent.agent.application.AgentApprovalService;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalRepository;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRunRepository;
 import com.demetrius.fileagent.agent.infrastructure.run.AgentExecutionHandleRegistry;
@@ -33,6 +35,8 @@ import java.util.List;
 public class PersistentAgentRuntimeService implements AgentRuntimePort {
 
     private final AgentRunRepository runRepository;
+    private final AgentApprovalRepository approvalRepository;
+    private final AgentApprovalService approvalService;
     private final AgentRunEventHub eventHub;
     private final AgentExecutionHandleRegistry executionHandleRegistry;
     private final AgentRunExecutionCoordinator executionCoordinator;
@@ -63,11 +67,15 @@ public class PersistentAgentRuntimeService implements AgentRuntimePort {
     @Transactional
     public AgentRunSnapshot cancel(String runId) {
         AgentRunEntity run = requireRun(runId);
-        if (run.getStatus() != AgentRunStatus.PENDING && run.getStatus() != AgentRunStatus.RUNNING) {
+        if (run.getStatus() != AgentRunStatus.PENDING && run.getStatus() != AgentRunStatus.RUNNING
+                && run.getStatus() != AgentRunStatus.WAITING_APPROVAL) {
             return toSnapshot(run);
         }
 
         AgentRunStatus previousStatus = run.getStatus();
+        if (previousStatus == AgentRunStatus.WAITING_APPROVAL) {
+            approvalService.cancelPendingForRun(runId, "RUN_CANCELLED");
+        }
         run.cancel(clock.instant());
         AgentRunEntity cancelled = runRepository.save(run);
         afterCommit(() -> {
@@ -90,6 +98,9 @@ public class PersistentAgentRuntimeService implements AgentRuntimePort {
     }
 
     private AgentRunSnapshot toSnapshot(AgentRunEntity run) {
+        var approval = run.getStatus() == AgentRunStatus.WAITING_APPROVAL
+                ? approvalRepository.findPendingByRunId(run.getRunId()).map(approvalService::toView).orElse(null)
+                : null;
         return new AgentRunSnapshot(
                 run.getRunId(),
                 run.getSessionId(),
@@ -111,7 +122,8 @@ public class PersistentAgentRuntimeService implements AgentRuntimePort {
                 run.getTotalTokens(),
                 false,
                 List.of(),
-                run.getVersion());
+                run.getVersion(),
+                approval);
     }
 
     private static void afterCommit(Runnable action) {

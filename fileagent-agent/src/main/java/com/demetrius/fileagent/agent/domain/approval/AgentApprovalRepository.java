@@ -19,7 +19,11 @@ public interface AgentApprovalRepository {
 
     Optional<AgentApprovalEntity> findByApprovalId(String approvalId);
 
+    Optional<AgentApprovalEntity> findByRunIdAndToolCallId(String runId, String toolCallId);
+
     Optional<AgentApprovalEntity> findPendingByRunId(String runId);
+
+    Optional<AgentApprovalEntity> findLatestResolvedByRunId(String runId);
 
     List<AgentApprovalEntity> findPendingExpiredAt(Instant now);
 
@@ -27,4 +31,6 @@ public interface AgentApprovalRepository {
                           String actorId, String comment, String reason, Instant now);
 
     boolean expirePending(String approvalId, long expectedVersion, Instant now, String reason);
+
+    boolean cancelPending(String approvalId, long expectedVersion, Instant now, String reason);
 }

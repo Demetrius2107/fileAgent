@@ -64,6 +64,8 @@ fileagent:
     enabled: ${FILEAGENT_AGENT_ENABLED:false}
     # 自适应检索子开关（Phase 2A）：默认关闭；不改变 Agent 总开关与固定 /chat 行为
     adaptive-retrieval-enabled: ${FILEAGENT_AGENT_ADAPTIVE_RETRIEVAL_ENABLED:false}
+    # 副作用工具默认关闭；开启后每次高风险动作仍必须经过单次人工审批
+    actions-enabled: ${FILEAGENT_AGENT_ACTIONS_ENABLED:false}
     max-prompt-characters: ${FILEAGENT_AGENT_MAX_PROMPT_CHARACTERS:8000}
     max-history-characters: ${FILEAGENT_AGENT_MAX_HISTORY_CHARACTERS:8000}
     max-summary-characters: ${FILEAGENT_AGENT_MAX_SUMMARY_CHARACTERS:2000}
@@ -79,6 +81,8 @@ fileagent:
     recovery-scan-interval: ${FILEAGENT_AGENT_RECOVERY_SCAN_INTERVAL:15s}
     replay-max-events: ${FILEAGENT_AGENT_REPLAY_MAX_EVENTS:100}
     replay-max-bytes: ${FILEAGENT_AGENT_REPLAY_MAX_BYTES:262144}
+    approval-timeout: ${FILEAGENT_AGENT_APPROVAL_TIMEOUT:5m}
+    approval-expiry-scan-interval: ${FILEAGENT_AGENT_APPROVAL_EXPIRY_SCAN_INTERVAL:30s}
   chunk-size: 800
   chunk-overlap: 120
   elasticsearch:

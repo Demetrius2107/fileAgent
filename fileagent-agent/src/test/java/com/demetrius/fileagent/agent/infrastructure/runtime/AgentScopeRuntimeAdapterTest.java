@@ -2,11 +2,13 @@ package com.demetrius.fileagent.agent.infrastructure.runtime;
 
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
 import com.demetrius.fileagent.agent.application.AgentHistoryService;
+import com.demetrius.fileagent.agent.application.AgentApprovalService;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.run.AgentExecutionHandleRegistry;
 import com.demetrius.fileagent.agent.infrastructure.state.DatabaseAgentStateStore;
+import com.demetrius.fileagent.agent.infrastructure.state.StrictAgentStateLoader;
 import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
@@ -44,6 +46,7 @@ class AgentScopeRuntimeAdapterTest {
                 new AdaptiveRetrievalProperties(),
                 new AgentExecutionHandleRegistry(),
                 mock(DatabaseAgentStateStore.class),
+                mock(StrictAgentStateLoader.class),
                 mock(AgentScopeModelFactory.class),
                 mock(AgentPromptFactory.class),
                 mock(KnowledgeSearchPort.class),
@@ -54,7 +57,9 @@ class AgentScopeRuntimeAdapterTest {
                 mock(ListKnowledgeFilesTool.class),
                 mock(ReadDocumentContextTool.class),
                 mock(GetDocumentOutlineTool.class),
-                mock(AgentHistoryService.class));
+                mock(AgentHistoryService.class),
+                mock(AgentApprovalService.class),
+                List.of());
     }
 
     @Test

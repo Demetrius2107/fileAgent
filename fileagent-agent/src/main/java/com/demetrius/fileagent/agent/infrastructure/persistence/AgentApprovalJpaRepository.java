@@ -21,8 +21,13 @@ import java.util.Optional;
  */
 public interface AgentApprovalJpaRepository extends JpaRepository<AgentApprovalEntity, String> {
 
+    Optional<AgentApprovalEntity> findByRunIdAndToolCallId(String runId, String toolCallId);
+
     Optional<AgentApprovalEntity> findFirstByRunIdAndStatusOrderByCreatedAtDesc(String runId,
                                                                                   ApprovalStatus status);
+
+    Optional<AgentApprovalEntity> findFirstByRunIdAndStatusInOrderByUpdatedAtDesc(
+            String runId, List<ApprovalStatus> statuses);
 
     List<AgentApprovalEntity> findByStatusAndExpiresAtLessThanEqual(ApprovalStatus status, Instant now);
 
@@ -46,6 +51,16 @@ public interface AgentApprovalJpaRepository extends JpaRepository<AgentApprovalE
             + "a.updatedAt = :now, a.version = a.version + 1 where a.approvalId = :approvalId "
             + "and a.status = 'PENDING' and a.version = :expectedVersion and a.expiresAt <= :now")
     int expirePending(@Param("approvalId") String approvalId,
+                      @Param("expectedVersion") long expectedVersion,
+                      @Param("now") Instant now,
+                      @Param("reason") String reason);
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update AgentApprovalEntity a set a.status = 'CANCELLED', a.resolutionReason = :reason, "
+            + "a.updatedAt = :now, a.version = a.version + 1 where a.approvalId = :approvalId "
+            + "and a.status = 'PENDING' and a.version = :expectedVersion")
+    int cancelPending(@Param("approvalId") String approvalId,
                       @Param("expectedVersion") long expectedVersion,
                       @Param("now") Instant now,
                       @Param("reason") String reason);

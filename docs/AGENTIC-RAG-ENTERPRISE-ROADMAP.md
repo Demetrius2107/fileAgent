@@ -359,7 +359,7 @@ flowchart LR
 
 **预计**：3～4 周。
 
-**当前进度**：Phase 3A「持久化 Agent Runtime」已完成；3B（HITL）、3C（工具权限与安全边界）、3D（受控写操作）尚未开始。
+**当前进度**：Phase 3A「持久化 Agent Runtime」与 3B 中的「高风险动作单次审批」已完成；补充信息型 `WAITING_USER_INPUT`、3C（外部工具安全边界）与 3D（真实受控写操作）尚未开始。
 
 #### 3A：持久化 Agent Runtime（已完成）
 
@@ -369,10 +369,14 @@ flowchart LR
 - `AgentRunEventHub` 提供有限事件回放和 `Last-Event-ID` 游标；快照以数据库为准，重启后不伪造已丢失的 delta。
 - 前端可用 `X-Agent-Run-Id`、active 查询和事件重连恢复可见运行；只有用户显式点击停止才取消后端 Run。
 
-#### 3B：HITL（未完成）
+#### 3B：HITL 高风险动作审批（已完成）
 
-- 将 `WAITING_USER_INPUT`、`WAITING_APPROVAL` 接入检查点与恢复状态机。
-- 新增补充信息、审批、拒绝和恢复 API，并完成相应前端交互与审计记录。
+- `WAITING_APPROVAL` 已接入 AgentScope `ASKING` 检查点、`AgentRun`/`AgentStep`/`AgentApproval` 状态机和重启恢复矩阵；普通中断 Run 不重放，只有已验证的唯一 ASKING ToolCall 可以恢复为等待审批。
+- 新增单次审批 SSE API 与内联前端审批区：仅允许 `APPROVE / DENY`，客户端不能回传或修改工具参数、资源、身份及永久授权规则；刷新、重连和 409 冲突由 Run 快照恢复。
+- Approval 保存工具/Schema/端点/策略/资源/参数 HMAC 等不可变绑定；恢复前再次重建并校验，配置或参数漂移会撤销旧批准，不会执行。
+- 用 Approval 版本 CAS 保证并发或重复决定只会产生一次续跑；首次 CAS 决议后、事务提交前才预留后台容量，容量不足会回滚决定，避免已批准但无法排队；过期扫描会收敛 Approval、Step、Run 并释放会话活动槽位。
+- 目前没有内置写入型业务工具，`actions-enabled` 默认关闭；`RunScopedActionTool` 是后续连接器或受控操作接入时必须使用的权限与恢复边界。
+- `WAITING_USER_INPUT`（让用户补充信息）不在本次范围，仍待单独设计其输入版本、上下文合并与恢复契约。
 
 #### 3C：工具权限与安全边界（未完成）
 

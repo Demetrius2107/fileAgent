@@ -76,6 +76,25 @@ class StaticPageContractTest {
                 .doesNotContain("window.addEventListener('beforeunload', cancelActiveRun)");
     }
 
+    @Test
+    void agentApprovalShouldBeInlineAndSingleUse() throws IOException {
+        String script = readResource("static/app.js");
+        String css = readResource("static/app.css");
+
+        assertThat(script)
+                .contains("approval.required")
+                .contains("approval.resolved")
+                .contains("APPROVE")
+                .contains("DENY")
+                .contains("expiresAt")
+                .contains("X-FileAgent-Client")
+                .contains("error.status === 409")
+                .contains("WAITING_APPROVAL 仍是同一会话的活动 Run")
+                .doesNotContain("始终允许")
+                .doesNotContain("永久授权");
+        assertThat(css).contains(".agent-approval");
+    }
+
     private String readResource(String path) throws IOException {
         try (InputStream in = getClass().getClassLoader().getResourceAsStream(path)) {
             assertThat(in).as("资源应存在: %s", path).isNotNull();

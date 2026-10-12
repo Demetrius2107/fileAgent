@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.infrastructure.runtime;
 
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
+import com.demetrius.fileagent.api.dto.AgentApprovalView;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 
 import java.util.List;
@@ -42,5 +43,9 @@ public class AgentScopeEventMapper {
 
     public AgentRunEvent failed(String runId, String code, String message, String traceId) {
         return AgentRunEvent.failed(runId, code, message, traceId);
+    }
+
+    public AgentRunEvent approvalRequired(String runId, AgentApprovalView approval) {
+        return AgentRunEvent.approvalRequired(runId, approval);
     }
 }

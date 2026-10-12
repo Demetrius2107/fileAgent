@@ -26,4 +26,17 @@ class AgentStepEntityTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("非法步骤状态转移");
     }
+
+    @Test
+    void shouldResumeWaitingApprovalStepWithoutCreatingAnotherStep() {
+        AgentStepEntity step = AgentStepEntity.pending(
+                "run-approval", 1, AgentStepType.TOOL_CALL, NOW);
+        step.start(NOW.plusSeconds(1));
+        step.waitForApproval();
+
+        step.resumeAfterApproval();
+
+        assertThat(step.getStatus()).isEqualTo(AgentStepStatus.RUNNING);
+        assertThat(step.getStartedAt()).isEqualTo(NOW.plusSeconds(1));
+    }
 }

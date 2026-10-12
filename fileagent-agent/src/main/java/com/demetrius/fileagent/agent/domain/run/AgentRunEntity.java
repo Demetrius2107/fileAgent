@@ -204,7 +204,31 @@ public class AgentRunEntity {
     public void start(Instant now) {
         requireStatus(AgentRunStatus.PENDING);
         this.status = AgentRunStatus.RUNNING;
-        this.startedAt = now;
+        if (this.startedAt == null) {
+            this.startedAt = now;
+        }
+        touch(now);
+    }
+
+    /**
+     * 在 AgentScope 已保存 ASKING 检查点后暂停 Run；保留 active slot 以阻止同会话并发新 Run。
+     */
+    public void waitForApproval(Instant now) {
+        requireStatus(AgentRunStatus.RUNNING);
+        this.status = AgentRunStatus.WAITING_APPROVAL;
+        this.executionOwner = null;
+        this.leaseExpiresAt = null;
+        touch(now);
+    }
+
+    /**
+     * 审批结论已持久化后重新进入可调度队列，实际开始仍由协调器持有租约后完成。
+     */
+    public void resumeAfterApproval(Instant now) {
+        requireStatus(AgentRunStatus.WAITING_APPROVAL);
+        this.status = AgentRunStatus.PENDING;
+        this.executionOwner = null;
+        this.leaseExpiresAt = null;
         touch(now);
     }
 

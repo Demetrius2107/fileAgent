@@ -2,7 +2,9 @@ package com.demetrius.fileagent.agent.infrastructure.tool;
 
 import com.demetrius.fileagent.agent.domain.policy.AgentActionCandidate;
 import com.demetrius.fileagent.agent.domain.policy.AgentActionPolicy;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalEntity;
 import com.demetrius.fileagent.api.enums.ActionRiskLevel;
+import com.demetrius.fileagent.api.enums.ApprovalStatus;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.message.ToolCallState;
 import io.agentscope.core.message.ToolResultBlock;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import reactor.test.StepVerifier;
 
 import java.util.ArrayList;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -78,18 +81,79 @@ class RunScopedActionToolTest {
         assertThat(tool.calls()).containsExactly("schema", "candidate", "schema", "candidate");
     }
 
+    @Test
+    void shouldExportSameCheckedCandidateFromOriginalAskingToolCall() {
+        RecordingActionTool tool = new RecordingActionTool();
+        tool.checkPermissions(input(), PermissionContextState.builder().build()).block();
+        ToolUseBlock askingCall = new ToolUseBlock(
+                "tool-call-1", "managed_http_action", input(), null, Map.of(), ToolCallState.PENDING);
+
+        AgentActionCandidate candidate = tool.approvalCandidate(askingCall);
+
+        assertThat(candidate.toolCallId()).isEqualTo("tool-call-1");
+        assertThat(candidate.canonicalInputHmac()).isEqualTo("input-hmac");
+        assertThat(tool.calls()).containsExactly("schema", "candidate", "schema", "candidate");
+    }
+
+    @Test
+    void shouldRejectAnotherToolCallWithSameArgumentsAfterApprovalBindingIsCaptured() {
+        RecordingActionTool tool = new RecordingActionTool();
+        tool.checkPermissions(input(), PermissionContextState.builder().build()).block();
+        tool.approvalCandidate(toolCall("tool-call-1", ToolCallState.PENDING));
+
+        StepVerifier.create(tool.callAsync(param("tool-call-2", ToolCallState.ALLOWED)))
+                .expectErrorSatisfies(error -> assertThat(error)
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessageContaining("动作绑定已变化"))
+                .verify();
+        assertThat(tool.calls()).containsExactly("schema", "candidate", "schema", "candidate", "schema", "candidate");
+    }
+
+    @Test
+    void shouldRestoreApprovedBindingIntoFreshRunToolBeforeExecuting() {
+        RecordingActionTool originalTool = new RecordingActionTool();
+        originalTool.checkPermissions(input(), PermissionContextState.builder().build()).block();
+        ToolUseBlock storedAskingCall = new ToolUseBlock(
+                "tool-call-1", "managed_http_action", input(), null, Map.of(), ToolCallState.ASKING);
+        AgentActionCandidate candidate = originalTool.approvalCandidate(storedAskingCall);
+        AgentApprovalEntity approval = AgentApprovalEntity.pending(
+                "approval-1", "run-1", 9L, candidate.toolCallId(), candidate.toolName(),
+                candidate.toolVersion(), candidate.toolDefinitionVersion(), candidate.endpointRevision(),
+                candidate.endpointConfigHash(), candidate.policyVersion(), candidate.riskLevel(),
+                candidate.resourceScope(), candidate.canonicalInputHmac(), candidate.operationId(),
+                candidate.safeSummary(), candidate.expectedImpact(), candidate.parameterPreview(),
+                Instant.parse("2026-10-12T08:05:00Z"), Instant.parse("2026-10-12T08:00:00Z"));
+        approval.decide(ApprovalStatus.APPROVED, "local-operator", null, "USER_APPROVED",
+                Instant.parse("2026-10-12T08:01:00Z"));
+
+        RecordingActionTool resumedTool = new RecordingActionTool();
+        resumedTool.restoreApprovedBinding(approval, storedAskingCall);
+
+        StepVerifier.create(resumedTool.callAsync(param(ToolCallState.ALLOWED)))
+                .assertNext(result -> assertThat(result.getOutput()).isNotEmpty())
+                .verifyComplete();
+        assertThat(resumedTool.calls()).containsExactly("schema", "candidate", "schema", "candidate", "execute");
+    }
+
     private static Map<String, Object> input() {
         return Map.of("payload", "demo");
     }
 
     private static ToolCallParam param(ToolCallState state) {
-        ToolUseBlock toolCall = new ToolUseBlock(
-                "tool-call-1", "managed_http_action", input(), null, Map.of(), state);
+        return param("tool-call-1", state);
+    }
+
+    private static ToolCallParam param(String toolCallId, ToolCallState state) {
+        ToolUseBlock toolCall = toolCall(toolCallId, state);
         return ToolCallParam.builder()
                 .toolUseBlock(toolCall)
                 .input(input())
                 .runtimeContext(RuntimeContext.builder().sessionId("run-1").userId("local-operator").build())
                 .build();
+    }
+
+    private static ToolUseBlock toolCall(String toolCallId, ToolCallState state) {
+        return new ToolUseBlock(toolCallId, "managed_http_action", input(), null, Map.of(), state);
     }
 
     private static final class RecordingActionTool extends RunScopedActionTool {

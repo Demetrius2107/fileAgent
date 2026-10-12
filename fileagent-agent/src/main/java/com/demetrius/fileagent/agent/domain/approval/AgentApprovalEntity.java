@@ -216,6 +216,16 @@ public class AgentApprovalEntity {
         this.updatedAt = requireValue(now, "now");
     }
 
+    /** 已批准但尚未执行的动作发现绑定漂移时撤销，不能把旧批准用于新配置。 */
+    public void invalidateApproved(String reason, Instant now) {
+        if (status != ApprovalStatus.APPROVED) {
+            throw new IllegalStateException("只有已批准审批可以因绑定变化撤销: " + status);
+        }
+        this.status = ApprovalStatus.CANCELLED;
+        this.resolutionReason = requireText(reason, "reason");
+        this.updatedAt = requireValue(now, "now");
+    }
+
     public static String sanitizeComment(String comment) {
         if (comment == null || comment.isBlank()) {
             return null;

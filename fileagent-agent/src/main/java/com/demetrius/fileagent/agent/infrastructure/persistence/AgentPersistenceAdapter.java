@@ -71,6 +71,11 @@ public class AgentPersistenceAdapter implements AgentRunRepository, AgentStepRep
     }
 
     @Override
+    public Optional<AgentStepEntity> findById(Long stepId) {
+        return agentStepJpaRepository.findById(stepId);
+    }
+
+    @Override
     public List<AgentStepEntity> findStepsByRunId(String runId) {
         return agentStepJpaRepository.findByRunIdOrderBySequenceNoAsc(runId);
     }
@@ -106,9 +111,20 @@ public class AgentPersistenceAdapter implements AgentRunRepository, AgentStepRep
     }
 
     @Override
+    public Optional<AgentApprovalEntity> findByRunIdAndToolCallId(String runId, String toolCallId) {
+        return agentApprovalJpaRepository.findByRunIdAndToolCallId(runId, toolCallId);
+    }
+
+    @Override
     public Optional<AgentApprovalEntity> findPendingByRunId(String runId) {
         return agentApprovalJpaRepository.findFirstByRunIdAndStatusOrderByCreatedAtDesc(runId,
                 ApprovalStatus.PENDING);
+    }
+
+    @Override
+    public Optional<AgentApprovalEntity> findLatestResolvedByRunId(String runId) {
+        return agentApprovalJpaRepository.findFirstByRunIdAndStatusInOrderByUpdatedAtDesc(runId,
+                List.of(ApprovalStatus.APPROVED, ApprovalStatus.DENIED));
     }
 
     @Override
@@ -126,5 +142,10 @@ public class AgentPersistenceAdapter implements AgentRunRepository, AgentStepRep
     @Override
     public boolean expirePending(String approvalId, long expectedVersion, Instant now, String reason) {
         return agentApprovalJpaRepository.expirePending(approvalId, expectedVersion, now, reason) == 1;
+    }
+
+    @Override
+    public boolean cancelPending(String approvalId, long expectedVersion, Instant now, String reason) {
+        return agentApprovalJpaRepository.cancelPending(approvalId, expectedVersion, now, reason) == 1;
     }
 }

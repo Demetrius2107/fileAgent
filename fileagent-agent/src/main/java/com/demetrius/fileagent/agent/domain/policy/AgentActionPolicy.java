@@ -48,7 +48,6 @@ public final class AgentActionPolicy {
     private static boolean hasValidTrustedBinding(AgentActionCandidate candidate) {
         return candidate != null
                 && hasText(candidate.runId())
-                && hasText(candidate.toolCallId())
                 && hasText(candidate.toolName())
                 && hasText(candidate.toolVersion())
                 && hasText(candidate.toolDefinitionVersion())

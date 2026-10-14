@@ -488,6 +488,53 @@ body {
     width: fit-content;
 }
 
+/* Phase 2C 结构化引用徽章：定位信息 + 核验状态，点击查看原文 */
+.message-sources {
+    flex-wrap: wrap;
+}
+
+.citation-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    width: 100%;
+    margin-top: 4px;
+}
+
+.citation-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-inset, #fff);
+    padding: 2px 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.citation-chip:disabled {
+    cursor: default;
+    opacity: 0.7;
+}
+
+.citation-status {
+    font-size: 11px;
+    border-radius: 8px;
+    padding: 1px 6px;
+}
+
+.citation-status-ok {
+    background: var(--accent-light);
+    color: var(--accent, #2f6fed);
+}
+
+.citation-status-warn {
+    background: var(--danger-light, #fdecec);
+    color: var(--danger, #c0392b);
+}
+
 .message-error {
     margin-top: 6px;
     font-size: 12px;

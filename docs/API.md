@@ -485,7 +485,20 @@ Request:
 - `tool.started`：`{ "step": 1, "tool": "search_docs" }`
 - `tool.completed`：`{ "step": 1, "tool": "search_docs", "resultCount": 3, "durationMs": 42 }`（只带结果数量与耗时，不带正文）
 - `message.delta`：`{ "content": "模型增量正文" }`
-- `sources`：`{ "files": ["员工手册.pdf"] }` 回答实际引用的文件名
+- `sources`：`{ "files": ["员工手册.pdf"], "citations": [...] }` 回答实际引用的文件名；Phase 2C 起 `citations` 为结构化引用数组（可能为空数组），每项：
+  ```json
+  {
+    "fileId": 33, "documentVersion": 1, "chunkId": "33:5",
+    "filename": "员工手册.pdf", "page": 5, "sheetName": null,
+    "sectionId": "document", "chunkIndex": 5,
+    "quote": "年假申请需提前 3 个工作日……", "quoteHash": "sha256-hex",
+    "status": "SUPPORTED"
+  }
+  ```
+  - `page`/`sheetName` 为定位字段，旧索引缺失时为 null（不伪造定位）；`quote` 为证据原文摘录，`quoteHash` 是其规范化摘要
+  - `status` 核验结论：`SUPPORTED`（证据支持）、`QUOTE_MISMATCH`（当前内容已变更）、`CHUNK_MISSING`（证据 chunk 已移除）、`NOT_IN_CONTEXT`（回答声明了该来源但从未进入本次上下文，即伪造/缺失引用）
+  - 最终引用只能来自实际进入模型上下文的证据；引用核验失败只标注状态，不阻断回答交付
+  - 结构化引用同时以 `citations_json` 持久化在 `agent_run` 表，历史报告按生成时的 `documentVersion` 追溯
 - `run.completed`：`{ "status": "SUCCEEDED", "messageId": 21 }`
 - `run.failed`：`{ "status": "FAILED", "code": "...", "message": "...", "traceId": "..." }`
 

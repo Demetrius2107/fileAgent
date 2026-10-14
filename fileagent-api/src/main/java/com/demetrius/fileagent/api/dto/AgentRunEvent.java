@@ -8,8 +8,9 @@ import java.util.List;
  * Agent Run 的受控事件契约（SSE 事件的数据载体）。
  * <p>
  * 只承载事件类型、runId、状态、步骤号、工具名、结果数量、耗时、增量文本、
- * 来源文件、错误码/展示信息和 traceId。工具事件不带文档正文，{@code message.delta}
- * 不带模型推理内容。
+ * 来源文件、结构化引用、错误码/展示信息和 traceId。工具事件不带文档正文，
+ * {@code message.delta} 不带模型推理内容。{@code citations} 为 Phase 2C 追加字段，
+ * 仅 {@code sources} 事件携带，其余事件保持 null。
  */
 public record AgentRunEvent(
         String type,
@@ -27,11 +28,12 @@ public record AgentRunEvent(
         Long messageId,
         String traceId,
         String eventId,
-        Long runVersion) {
+        Long runVersion,
+        List<AgentCitation> citations) {
 
     public static AgentRunEvent runStarted(String runId, String traceId) {
         return new AgentRunEvent("run.started", runId, AgentRunStatus.RUNNING,
-                null, null, null, null, null, null, null, null, null, null, traceId, null, null);
+                null, null, null, null, null, null, null, null, null, null, traceId, null, null, null);
     }
 
     public static AgentRunEvent pending(String runId) {
@@ -40,47 +42,52 @@ public record AgentRunEvent(
 
     public static AgentRunEvent status(String runId, AgentRunStatus status, String summary) {
         return new AgentRunEvent("run.status", runId, status,
-                summary, null, null, null, null, null, null, null, null, null, null, null, null);
+                summary, null, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent toolStarted(String runId, String tool, int step) {
         return new AgentRunEvent("tool.started", runId, null,
                 null, step, tool,
-                null, null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent toolCompleted(String runId, String tool, int step,
                                               int resultCount, long durationMs) {
         return new AgentRunEvent("tool.completed", runId, null,
                 null, step, tool, resultCount, durationMs,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent delta(String runId, String content) {
         return new AgentRunEvent("message.delta", runId, null,
-                null, null, null, null, null, content, null, null, null, null, null, null, null);
+                null, null, null, null, null, content, null, null, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent sources(String runId, List<String> files) {
+        return sources(runId, files, null);
+    }
+
+    /** Phase 2C：sources 事件同时携带结构化引用与核验结论。 */
+    public static AgentRunEvent sources(String runId, List<String> files, List<AgentCitation> citations) {
         return new AgentRunEvent("sources", runId, null,
-                null, null, null, null, null, null, files, null, null, null, null, null, null);
+                null, null, null, null, null, null, files, null, null, null, null, null, null, citations);
     }
 
     public static AgentRunEvent completed(String runId, Long messageId) {
         return new AgentRunEvent("run.completed", runId, AgentRunStatus.SUCCEEDED,
                 null, null, null, null, null, null, null, null, null,
-                messageId, null, null, null);
+                messageId, null, null, null, null);
     }
 
     public static AgentRunEvent failed(String runId, String code, String message, String traceId) {
         return new AgentRunEvent("run.failed", runId, AgentRunStatus.FAILED,
-                null, null, null, null, null, null, null, code, message, null, traceId, null, null);
+                null, null, null, null, null, null, null, code, message, null, traceId, null, null, null);
     }
 
     /** SSE 尚未建立前的业务错误事件，不对应任何已创建的 Run。 */
     public static AgentRunEvent error(String code, String message, String traceId) {
         return new AgentRunEvent("error", null, null,
-                null, null, null, null, null, null, null, code, message, null, traceId, null, null);
+                null, null, null, null, null, null, null, code, message, null, traceId, null, null, null);
     }
 
     /**
@@ -88,6 +95,6 @@ public record AgentRunEvent(
      */
     public AgentRunEvent withMetadata(String eventId, long runVersion) {
         return new AgentRunEvent(type, runId, status, summary, step, tool, resultCount, durationMs,
-                content, files, code, message, messageId, traceId, eventId, runVersion);
+                content, files, code, message, messageId, traceId, eventId, runVersion, citations);
     }
 }

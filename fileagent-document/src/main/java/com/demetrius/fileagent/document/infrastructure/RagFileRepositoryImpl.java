@@ -45,6 +45,12 @@ public class RagFileRepositoryImpl implements RagFileRepository {
     }
 
     @Override
+    public List<RagFileEntity> findByRagNameAndKnowledgeTagAndFilename(String ragName, String knowledgeTag,
+                                                                       String filename) {
+        return jpaRepository.findByRagNameAndKnowledgeTagAndFilename(ragName, knowledgeTag, filename);
+    }
+
+    @Override
     public void delete(RagFileEntity ragFile) {
         jpaRepository.delete(ragFile);
     }

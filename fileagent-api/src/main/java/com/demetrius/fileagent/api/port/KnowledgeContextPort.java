@@ -28,7 +28,10 @@ public interface KnowledgeContextPort {
      */
     DocumentOutlinePage outline(Long fileId, int afterChunkIndex, int limit);
 
-    /** 片段上下文（含正文与可引用来源元数据）。 */
+    /**
+     * 片段上下文（含正文与可引用来源元数据）。
+     * {@code page} 与 {@code documentVersion} 为 Phase 2C 定位字段，旧索引缺失时为 null。
+     */
     record KnowledgeChunkContext(
             String chunkId,
             Long fileId,
@@ -36,7 +39,15 @@ public interface KnowledgeContextPort {
             String content,
             String sheetName,
             String sectionId,
-            int chunkIndex) {
+            int chunkIndex,
+            Integer page,
+            Integer documentVersion) {
+
+        /** 兼容 Phase 2B 前调用方的七参构造：定位字段视为缺失。 */
+        public KnowledgeChunkContext(String chunkId, Long fileId, String filename, String content,
+                                     String sheetName, String sectionId, int chunkIndex) {
+            this(chunkId, fileId, filename, content, sheetName, sectionId, chunkIndex, null, null);
+        }
     }
 
     /** 文档目录分页结果。 */

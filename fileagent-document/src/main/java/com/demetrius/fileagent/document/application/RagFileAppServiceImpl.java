@@ -138,6 +138,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         entity.setKnowledgeTag(tag);
         entity.setFilename(filename);
         entity.setFileSize(file.getSize());
+        entity.setDocumentVersion(nextDocumentVersion(name, tag, filename));
         entity.setStatus(ParseStatus.PARSING);
         entity = ragFileRepository.save(entity);
 
@@ -178,6 +179,17 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         }
     }
 
+    /**
+     * 同一知识库+标签+文件名的替换性上传递增文档版本；被删除的旧版本不再参与计数，
+     * 历史引用仍按其生成时记录的版本号追溯（版本号只前进不回收）。
+     */
+    private int nextDocumentVersion(String name, String tag, String filename) {
+        return ragFileRepository.findByRagNameAndKnowledgeTagAndFilename(name, tag, filename).stream()
+                .mapToInt(existing -> existing.getDocumentVersion() == null ? 1 : existing.getDocumentVersion())
+                .max()
+                .orElse(0) + 1;
+    }
+
     private List<KnowledgeChunk> toKnowledgeChunks(List<ParsedChunk> chunks, RagFileEntity entity) {
         Map<String, List<Integer>> parentGroups = new LinkedHashMap<>();
         for (int i = 0; i < chunks.size(); i++) {
@@ -199,6 +211,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             ParsedChunk chunk = chunks.get(i);
             Map<String, Object> metadata = new LinkedHashMap<>(chunk.metadata());
             metadata.put("chunkType", "CHILD");
+            metadata.put("documentVersion", entity.getDocumentVersion());
             Object logicalParentId = metadata.get("parentId");
             if (logicalParentId != null) {
                 String physicalParentId = physicalParentIds.get(String.valueOf(logicalParentId));
@@ -224,6 +237,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             Map<String, Object> metadata = new LinkedHashMap<>(firstChild.metadata());
             metadata.remove("parentId");
             metadata.put("chunkType", "PARENT");
+            metadata.put("documentVersion", entity.getDocumentVersion());
             String parentContent = group.getValue().stream()
                     .map(chunks::get)
                     .map(ParsedChunk::content)

@@ -79,7 +79,10 @@ public interface KnowledgeSearchPort {
         }
     }
 
-    /** 知识命中，不暴露 Elasticsearch SDK 类型。 */
+    /**
+     * 知识命中，不暴露 Elasticsearch SDK 类型。
+     * {@code page} 与 {@code documentVersion} 为 Phase 2C 定位字段，旧索引缺失时为 null。
+     */
     record KnowledgeHit(
             String chunkId,
             Long fileId,
@@ -89,6 +92,16 @@ public interface KnowledgeSearchPort {
             String sectionId,
             String parentId,
             int chunkIndex,
-            double score) {
+            double score,
+            Integer page,
+            Integer documentVersion) {
+
+        /** 兼容 Phase 2B 前调用方的九参构造：定位字段视为缺失。 */
+        public KnowledgeHit(String chunkId, Long fileId, String content, String filename,
+                            String sheetName, String sectionId, String parentId,
+                            int chunkIndex, double score) {
+            this(chunkId, fileId, content, filename, sheetName, sectionId, parentId,
+                    chunkIndex, score, null, null);
+        }
     }
 }

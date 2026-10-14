@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.agent.infrastructure.runtime;
 
+import com.demetrius.fileagent.api.dto.AgentCitation;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 
@@ -34,6 +35,11 @@ public class AgentScopeEventMapper {
 
     public AgentRunEvent sources(String runId, List<String> files) {
         return AgentRunEvent.sources(runId, files);
+    }
+
+    /** Phase 2C：携带结构化引用与核验结论的 sources 事件。 */
+    public AgentRunEvent sources(String runId, List<String> files, List<AgentCitation> citations) {
+        return AgentRunEvent.sources(runId, files, citations);
     }
 
     public AgentRunEvent completed(String runId, Long messageId) {

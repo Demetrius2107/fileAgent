@@ -301,12 +301,15 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
                 stringValue(source, "sectionId", null),
                 stringValue(source, "parentId", null),
                 intValue(source.get("chunkIndex")),
-                score);
+                score,
+                integerValue(source.get("page")),
+                integerValue(source.get("documentVersion")));
     }
 
     private KnowledgeHit withScore(KnowledgeHit hit, double score) {
         return new KnowledgeHit(hit.chunkId(), hit.fileId(), hit.content(), hit.filename(),
-                hit.sheetName(), hit.sectionId(), hit.parentId(), hit.chunkIndex(), score);
+                hit.sheetName(), hit.sectionId(), hit.parentId(), hit.chunkIndex(), score,
+                hit.page(), hit.documentVersion());
     }
 
     private String stringValue(Map<String, Object> source, String key, String defaultValue) {
@@ -326,6 +329,21 @@ public class KnowledgeSearchPortImpl implements KnowledgeSearchPort {
             return number.intValue();
         }
         return value == null ? 0 : Integer.parseInt(String.valueOf(value));
+    }
+
+    /** Phase 2C 定位字段读取：缺失或非法时返回 null，不伪造定位信息。 */
+    private Integer integerValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     private void logHits(SearchQuery query, int bm25Count, int knnCount,

@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.infrastructure.runtime;
 
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
+import com.demetrius.fileagent.agent.application.AgentCitationService;
 import com.demetrius.fileagent.agent.application.AgentHistoryService;
 import com.demetrius.fileagent.agent.application.runtime.AgentExecutionEngine;
 import com.demetrius.fileagent.agent.application.tool.AgentToolContext;
@@ -14,6 +15,7 @@ import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
+import com.demetrius.fileagent.api.dto.AgentCitation;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.dto.MessageDto;
@@ -45,15 +47,12 @@ import reactor.core.publisher.Flux;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * AgentScope ReAct 单次执行引擎：实现 {@link AgentExecutionEngine}。
@@ -73,8 +72,6 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     private static final String CODE_MODEL_UNAVAILABLE = "AGENT_MODEL_UNAVAILABLE";
     private static final String CODE_RUNTIME_UNAVAILABLE = "AGENT_RUNTIME_UNAVAILABLE";
 
-    private static final Pattern CITATION = Pattern.compile("\\[来源：([^\\]]+)\\]");
-
     private final AgentProperties properties;
     private final AdaptiveRetrievalProperties adaptiveRetrievalProperties;
     private final AgentExecutionHandleRegistry executionHandleRegistry;
@@ -90,6 +87,7 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     private final ReadDocumentContextTool readDocumentContextTool;
     private final GetDocumentOutlineTool getDocumentOutlineTool;
     private final AgentHistoryService historyService;
+    private final AgentCitationService citationService;
 
     @Override
     public Flux<AgentRunEvent> execute(AgentRunCommand command) {
@@ -329,10 +327,22 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
             return Flux.empty();
         }
         List<String> files = extractSources(finalText);
+        // Phase 2C：回答后核验引用并写入三账分离的"最终引用"账；核验失败不阻断收尾
+        List<AgentCitation> citations = verifyCitations(run, finalText);
+        run.recordCitations(citations);
         run.succeed(Instant.now());
         return Flux.concat(
-                Flux.just(eventMapper.sources(run.runId(), files)),
+                Flux.just(eventMapper.sources(run.runId(), files, citations)),
                 Flux.just(eventMapper.completed(run.runId(), run.assistantMessageId())));
+    }
+
+    private List<AgentCitation> verifyCitations(AgentRun run, String finalText) {
+        try {
+            return citationService.extractAndVerify(run, finalText);
+        } catch (Exception e) {
+            log.warn("引用核验失败 runId={}: {}", run.runId(), e.getMessage());
+            return List.of();
+        }
     }
 
     private Flux<AgentRunEvent> failIfRunning(AgentRun run, String code, String message) {
@@ -405,41 +415,7 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     }
 
     List<String> extractSources(String text) {
-        if (text == null || text.isBlank()) {
-            return List.of();
-        }
-        LinkedHashSet<String> files = new LinkedHashSet<>();
-        Matcher matcher = CITATION.matcher(visibleMarkdownText(text));
-        while (matcher.find()) {
-            for (String source : matcher.group(1).split("[；;]")) {
-                String name = source.trim();
-                if (!name.isBlank()) {
-                    files.add(name);
-                }
-            }
-        }
-        return List.copyOf(files);
-    }
-
-    private String visibleMarkdownText(String text) {
-        StringBuilder visible = new StringBuilder(text.length());
-        boolean inFence = false;
-        boolean inInlineCode = false;
-        for (int index = 0; index < text.length(); index++) {
-            if (text.startsWith("```", index)) {
-                inFence = !inFence;
-                index += 2;
-                continue;
-            }
-            if (!inFence && text.charAt(index) == '`') {
-                inInlineCode = !inInlineCode;
-                continue;
-            }
-            if (!inFence && !inInlineCode) {
-                visible.append(text.charAt(index));
-            }
-        }
-        return visible.toString();
+        return citationService.extractSourceFilenames(text);
     }
 
     private long durationMs(Long startNanos) {

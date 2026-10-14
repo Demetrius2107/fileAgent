@@ -280,6 +280,8 @@ public class ElasticsearchKnowledgeIndexRepository implements KnowledgeIndexRepo
         source.put("parentId", value(chunk.metadata(), "parentId"));
         source.put("chunkType", value(chunk.metadata(), "chunkType"));
         source.put("rowIndex", integerValue(chunk.metadata(), "rowIndex"));
+        source.put("page", integerValue(chunk.metadata(), "page"));
+        source.put("documentVersion", integerValue(chunk.metadata(), "documentVersion"));
         source.put("metadata", chunk.metadata());
         if (embedding != null) {
             source.put("embedding", embedding);

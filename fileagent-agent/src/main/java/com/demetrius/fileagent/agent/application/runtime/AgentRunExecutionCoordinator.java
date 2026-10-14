@@ -4,6 +4,7 @@ import com.demetrius.fileagent.agent.application.AgentRunFinalizationService;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRunRepository;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
+import com.demetrius.fileagent.api.dto.AgentCitation;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
@@ -23,6 +24,7 @@ import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -196,8 +198,9 @@ public class AgentRunExecutionCoordinator {
             Flux<AgentRunEvent> execution = executionEngine.execute(command);
             StringBuilder answer = new StringBuilder();
             LinkedHashSet<String> sourceFiles = new LinkedHashSet<>();
+            List<AgentCitation> citations = new CopyOnWriteArrayList<>();
             execution
-                    .doOnNext(event -> handleExecutionEvent(runId, event, answer, sourceFiles))
+                    .doOnNext(event -> handleExecutionEvent(runId, event, answer, sourceFiles, citations))
                     .doOnError(error -> failExecution(runId, error))
                     .doFinally(signal -> releaseCapacity(runId))
                     .subscribe();
@@ -217,7 +220,7 @@ public class AgentRunExecutionCoordinator {
     }
 
     private void handleExecutionEvent(String runId, AgentRunEvent event, StringBuilder answer,
-                                      LinkedHashSet<String> sourceFiles) {
+                                      LinkedHashSet<String> sourceFiles, List<AgentCitation> citations) {
         AgentRunEntity run = runRepository.findByRunId(runId).orElse(null);
         if (run == null || isTerminal(run.getStatus())) {
             return;
@@ -228,9 +231,12 @@ public class AgentRunExecutionCoordinator {
         if ("sources".equals(event.type()) && event.files() != null) {
             sourceFiles.addAll(event.files());
         }
+        if ("sources".equals(event.type()) && event.citations() != null) {
+            citations.addAll(event.citations());
+        }
         if ("run.completed".equals(event.type())) {
             AgentRunEntity finalized = finalizationService.finalizeSuccess(runId, answer.toString(),
-                    List.copyOf(sourceFiles));
+                    List.copyOf(sourceFiles), List.copyOf(citations));
             if (finalized.getStatus() == AgentRunStatus.SUCCEEDED) {
                 eventHub.publish(AgentRunEvent.completed(runId, finalized.getAssistantMessageId()),
                         Math.max(0L, finalized.getVersion()));

@@ -917,7 +917,55 @@
         const sources = el('div', 'message-sources');
         sources.appendChild(svgEl(SVG.sourceIcon));
         sources.appendChild(document.createTextNode(text));
+        renderCitations(sources, event.citations);
         assistant.querySelector('.message-body').appendChild(sources);
+    }
+
+    /* Phase 2C 结构化引用：定位到 chunk/页码/版本，未通过核验的标注状态 */
+    const CITATION_STATUS_LABELS = {
+        SUPPORTED: '已核验',
+        QUOTE_MISMATCH: '原文已变更',
+        CHUNK_MISSING: '证据已移除',
+        NOT_IN_CONTEXT: '未进入上下文'
+    };
+
+    function renderCitations(container, citations) {
+        if (!Array.isArray(citations) || citations.length === 0) { return; }
+        const list = el('div', 'citation-list');
+        for (const citation of citations.slice(0, 12)) {
+            const chip = el('button', 'citation-chip');
+            chip.type = 'button';
+            const parts = [];
+            if (citation.page != null) {
+                parts.push(`第 ${citation.page} 页`);
+            } else if (citation.sheetName) {
+                parts.push(citation.sheetName);
+            }
+            if (citation.chunkIndex != null) {
+                parts.push(`片段 ${citation.chunkIndex + 1}`);
+            }
+            if (citation.documentVersion != null) {
+                parts.push(`v${citation.documentVersion}`);
+            }
+            const status = CITATION_STATUS_LABELS[citation.status] || citation.status;
+            const label = el('span', 'citation-chip-label', citation.filename
+                + (parts.length > 0 ? `（${parts.join(' · ')}）` : ''));
+            const badge = el('span',
+                `citation-status ${citation.status === 'SUPPORTED' ? 'citation-status-ok' : 'citation-status-warn'}`,
+                status);
+            chip.appendChild(label);
+            chip.appendChild(badge);
+            if (citation.fileId != null && citation.status !== 'NOT_IN_CONTEXT') {
+                chip.title = '点击查看原文';
+                chip.addEventListener('click', () => {
+                    openDocView({ id: citation.fileId, filename: citation.filename });
+                });
+            } else {
+                chip.disabled = true;
+            }
+            list.appendChild(chip);
+        }
+        container.appendChild(list);
     }
 
     /* Agent 工具过程轨迹：每一步追加一行，回答完成后保留，展示 Agent 做了什么 */

@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.infrastructure.tool;
 
 import com.demetrius.fileagent.agent.application.tool.AgentToolContext;
+import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.api.port.KnowledgeContextPort;
 import com.demetrius.fileagent.common.exception.BizException;
 import io.agentscope.core.message.ToolResultBlock;
@@ -99,6 +100,11 @@ public class ReadDocumentContextTool extends ToolBase {
                 bodyLength = Math.max(0, available - ToolOutputBudget.length("…(截断)"));
             }
             contentCharacters += Math.min(bodyLength, ToolOutputBudget.length(chunk.content()));
+            /* 证据登记用未截断全文，供引用映射与核验使用；截断只影响渲染给模型的正文 */
+            context.run().addContextEvidence(new AgentRun.ContextEvidence(
+                    chunk.chunkId(), chunk.fileId(), chunk.filename(), chunk.content(),
+                    chunk.page(), chunk.sheetName(), chunk.sectionId(), chunk.chunkIndex(),
+                    chunk.documentVersion(), 0));
             count++;
         }
         return new RenderedContext(count, contentCharacters,

@@ -181,6 +181,7 @@ public class SearchDocsTool extends ToolBase {
             context.run().addAllowedChunk(entry.hit().parentId());
             context.run().addAllowedFile(entry.hit().fileId());
             context.run().addRetrievedHit(entry.hit());
+            context.run().addContextEvidence(toEvidence(entry.hit()));
         });
         context.run().recordRetrievalExecution(new AgentRun.RetrievalExecution(
                 queryType,
@@ -423,7 +424,15 @@ public class SearchDocsTool extends ToolBase {
             context.run().addAllowedChunk(hit.parentId());
             context.run().addAllowedFile(hit.fileId());
             context.run().addRetrievedHit(hit);
+            context.run().addContextEvidence(toEvidence(hit));
         });
+    }
+
+    /** 检索命中的完整片段登记为上下文证据（Phase 2C：最终引用的合法来源）。 */
+    private AgentRun.ContextEvidence toEvidence(KnowledgeHit hit) {
+        return new AgentRun.ContextEvidence(hit.chunkId(), hit.fileId(), hit.filename(),
+                hit.content(), hit.page(), hit.sheetName(), hit.sectionId(), hit.chunkIndex(),
+                hit.documentVersion(), 0);
     }
 
     private ToolResultBlock budgetExhausted(AgentToolContext context) {

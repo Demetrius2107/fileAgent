@@ -139,6 +139,14 @@ public class AgentRunEntity {
     @Column(name = "budget_reasons", columnDefinition = "CLOB")
     private String budgetReasons;
 
+    /**
+     * Phase 2C 结构化引用（含核验结论与原文摘录）的持久化 JSON；
+     * 与助手消息同事务写入，历史报告按生成时的 documentVersion 追溯。
+     */
+    @Lob
+    @Column(name = "citations_json", columnDefinition = "CLOB")
+    private String citationsJson;
+
     /** 当前持有执行租约的实例标识，防止多个恢复协调器同时执行同一 Run。 */
     @Column(name = "execution_owner")
     private String executionOwner;
@@ -213,6 +221,13 @@ public class AgentRunEntity {
         this.assistantMessageId = requireValue(messageId, "messageId");
         this.status = AgentRunStatus.SUCCEEDED;
         finish(now);
+    }
+
+    /** 最终化事务内写入结构化引用 JSON（Phase 2C）；与成功收尾同事务，只允许 RUNNING 态写入。 */
+    public void recordCitations(String citationsJson, Instant now) {
+        requireStatus(AgentRunStatus.RUNNING);
+        this.citationsJson = citationsJson;
+        touch(now);
     }
 
     public void fail(String code, Instant now) {

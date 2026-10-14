@@ -1,13 +1,16 @@
 package com.demetrius.fileagent.agent.domain.run;
 
+import com.demetrius.fileagent.api.dto.AgentCitation;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.RetrievalQueryType;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort.KnowledgeHit;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -56,6 +59,14 @@ public class AgentRun {
     private volatile int lastToolResultCount;
     private final List<RetrievalExecution> retrievalExecutions = new CopyOnWriteArrayList<>();
     private volatile int invalidPlanCount;
+    /**
+     * 实际渲染进模型上下文的证据（Phase 2C 三账分离的"最终上下文"账）：
+     * 同一 chunk 重复进入时保留内容更完整的一版（精读覆盖检索摘要）。
+     */
+    private final Map<String, ContextEvidence> contextEvidences = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicInteger evidenceSequence =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private volatile List<AgentCitation> finalCitations = List.of();
 
     private AgentRun(String runId, Long sessionId, String traceId) {
         this.runId = runId;
@@ -216,6 +227,35 @@ public class AgentRun {
         }
     }
 
+    /**
+     * 登记一块实际渲染给模型的证据；同 chunkId 已存在且新证据正文不短于旧版时覆盖，
+     * 保证引用映射与核验使用最完整的上下文版本。登记顺序由 Run 统一分配。
+     */
+    public void addContextEvidence(ContextEvidence evidence) {
+        if (evidence == null || evidence.chunkId() == null) {
+            return;
+        }
+        ContextEvidence ordered = evidence.order() > 0 ? evidence
+                : withOrder(evidence, evidenceSequence.incrementAndGet());
+        contextEvidences.merge(ordered.chunkId(), ordered, (existing, incoming) ->
+                evidenceLength(incoming) >= evidenceLength(existing) ? incoming : existing);
+    }
+
+    private ContextEvidence withOrder(ContextEvidence evidence, int order) {
+        return new ContextEvidence(evidence.chunkId(), evidence.fileId(), evidence.filename(),
+                evidence.content(), evidence.page(), evidence.sheetName(), evidence.sectionId(),
+                evidence.chunkIndex(), evidence.documentVersion(), order);
+    }
+
+    private int evidenceLength(ContextEvidence evidence) {
+        return evidence.content() == null ? 0 : evidence.content().length();
+    }
+
+    /** 记录回答后核验完成的结构化引用（三账分离的"最终引用"账，成功收尾前写入一次）。 */
+    public void recordCitations(List<AgentCitation> citations) {
+        this.finalCitations = citations == null ? List.of() : List.copyOf(citations);
+    }
+
     public boolean isAllowedChunk(String chunkId) {
         return chunkId != null && this.allowedChunkIds.contains(chunkId);
     }
@@ -359,6 +399,34 @@ public class AgentRun {
 
     public int retrievalRoundCount() {
         return retrievalExecutions.size();
+    }
+
+    /** 上下文证据按首次进入顺序返回（同 chunk 去重后保留最完整版本）。 */
+    public List<ContextEvidence> contextEvidences() {
+        List<ContextEvidence> ordered = new ArrayList<>(contextEvidences.values());
+        ordered.sort(java.util.Comparator.comparingInt(ContextEvidence::order));
+        return List.copyOf(ordered);
+    }
+
+    public List<AgentCitation> finalCitations() {
+        return finalCitations;
+    }
+
+    /**
+     * 单块上下文证据（Phase 2C）：由检索/精读工具在渲染进模型上下文时登记，
+     * 是最终引用的唯一合法来源。
+     */
+    public record ContextEvidence(
+            String chunkId,
+            Long fileId,
+            String filename,
+            String content,
+            Integer page,
+            String sheetName,
+            String sectionId,
+            int chunkIndex,
+            Integer documentVersion,
+            int order) {
     }
 
     public int invalidPlanCount() {

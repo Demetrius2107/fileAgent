@@ -67,7 +67,9 @@ public class KnowledgeContextPortImpl implements KnowledgeContextPort {
                 chunk.content(),
                 stringValue(metadata.get("sheetName")),
                 stringValue(metadata.get("sectionId")),
-                chunk.chunkIndex());
+                chunk.chunkIndex(),
+                integerValue(metadata.get("page")),
+                integerValue(metadata.get("documentVersion")));
     }
 
     private DocumentOutlineItem toOutlineItem(KnowledgeChunk chunk) {

@@ -19,4 +19,7 @@ public interface RagFileJpaRepository extends JpaRepository<RagFileEntity, Long>
 
     boolean existsByRagNameAndKnowledgeTagAndSha256AndStatus(String ragName, String knowledgeTag,
                                                              String sha256, ParseStatus status);
+
+    List<RagFileEntity> findByRagNameAndKnowledgeTagAndFilename(String ragName, String knowledgeTag,
+                                                                String filename);
 }

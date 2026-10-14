@@ -24,6 +24,10 @@ public interface RagFileRepository {
     boolean existsByRagNameAndKnowledgeTagAndSha256AndStatus(String ragName, String knowledgeTag,
                                                              String sha256, ParseStatus status);
 
+    /** 同一知识库名称+标签+文件名的现存记录（Phase 2C：推导替换上传的下一个文档版本） */
+    List<RagFileEntity> findByRagNameAndKnowledgeTagAndFilename(String ragName, String knowledgeTag,
+                                                                String filename);
+
     /** 删除记录（索引失败回滚用） */
     void delete(RagFileEntity ragFile);
 }

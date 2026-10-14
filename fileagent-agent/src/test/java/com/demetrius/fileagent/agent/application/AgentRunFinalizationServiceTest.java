@@ -54,7 +54,7 @@ class AgentRunFinalizationServiceTest {
     @BeforeEach
     void setUp() {
         service = new AgentRunFinalizationService(runRepository, stepRepository, sessionMessagePort,
-                List.of(contributor));
+                List.of(contributor), new com.fasterxml.jackson.databind.ObjectMapper());
     }
 
     @Test

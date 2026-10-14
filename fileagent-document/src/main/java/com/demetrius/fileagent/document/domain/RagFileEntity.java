@@ -49,6 +49,13 @@ public class RagFileEntity {
     @Column(name = "chunk_count")
     private Integer chunkCount = 0;
 
+    /**
+     * 文档版本（Phase 2C）：同一知识库+标签+文件名的替换性上传递增；
+     * 历史引用按生成时的版本号追溯，删除旧文件不回退版本计数。
+     */
+    @Column(name = "document_version", nullable = false)
+    private Integer documentVersion = 1;
+
     /** 索引状态 */
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)

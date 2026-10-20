@@ -40,6 +40,8 @@
         <poi.version>5.2.5</poi.version>
         <agentscope.version>2.0.1</agentscope.version>
         <victools-jsonschema.version>5.0.0</victools-jsonschema.version>
+        <okhttp.version>4.12.0</okhttp.version>
+        <json-schema-validator.version>1.5.7</json-schema-validator.version>
     </properties>
 
     <dependencyManagement>
@@ -122,6 +124,18 @@
                 <groupId>com.github.victools</groupId>
                 <artifactId>jsonschema-module-swagger-2</artifactId>
                 <version>${victools-jsonschema.version}</version>
+            </dependency>
+
+            <!-- 注册式 HTTP 动作：固定客户端和 JSON Schema 校验器版本。 -->
+            <dependency>
+                <groupId>com.squareup.okhttp3</groupId>
+                <artifactId>okhttp</artifactId>
+                <version>${okhttp.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.networknt</groupId>
+                <artifactId>json-schema-validator</artifactId>
+                <version>${json-schema-validator.version}</version>
             </dependency>
 
             <!-- Swagger -->

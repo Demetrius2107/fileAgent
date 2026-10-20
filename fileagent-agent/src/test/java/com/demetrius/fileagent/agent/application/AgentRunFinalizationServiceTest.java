@@ -13,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -54,7 +55,7 @@ class AgentRunFinalizationServiceTest {
     @BeforeEach
     void setUp() {
         service = new AgentRunFinalizationService(runRepository, stepRepository, sessionMessagePort,
-                List.of(contributor), new com.fasterxml.jackson.databind.ObjectMapper());
+                List.of(contributor), new ObjectMapper());
     }
 
     @Test

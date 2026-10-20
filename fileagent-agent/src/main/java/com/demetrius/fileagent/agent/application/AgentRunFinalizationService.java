@@ -10,12 +10,12 @@ import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.MessageType;
 import com.demetrius.fileagent.api.port.SessionMessagePort;
 import com.demetrius.fileagent.common.exception.BizException;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Instant;
 import java.util.List;
@@ -86,7 +86,7 @@ public class AgentRunFinalizationService {
     private String writeCitationsJson(String runId, List<AgentCitation> citations) {
         try {
             return objectMapper.writeValueAsString(citations);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             log.warn("结构化引用序列化失败 runId={}, count={}", runId, citations.size(), e);
             return "[]";
         }

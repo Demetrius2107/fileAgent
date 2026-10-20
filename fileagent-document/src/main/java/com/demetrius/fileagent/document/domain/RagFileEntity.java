@@ -4,6 +4,7 @@ import com.demetrius.fileagent.api.enums.ParseStatus;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.ColumnDefault;
 
 import java.time.LocalDateTime;
 
@@ -53,6 +54,7 @@ public class RagFileEntity {
      * 文档版本（Phase 2C）：同一知识库+标签+文件名的替换性上传递增；
      * 历史引用按生成时的版本号追溯，删除旧文件不回退版本计数。
      */
+    @ColumnDefault("1")
     @Column(name = "document_version", nullable = false)
     private Integer documentVersion = 1;
 

@@ -157,6 +157,27 @@ class CallRegisteredHttpApiToolTest {
                         .contains("外部操作可能已执行", "execution-unknown", "禁止自动重试")
                         .doesNotContain("执行成功", "不应原样输出"))
                 .verifyComplete();
+
+        assertThat(tool.takeCompletionNotice("tool-call-1")).satisfies(notice -> {
+            assertThat(notice.code()).isEqualTo("OUTCOME_UNKNOWN");
+            assertThat(notice.message())
+                    .contains("外部操作可能已执行", "execution-unknown", "人工核对")
+                    .doesNotContain("不应原样输出");
+        });
+        assertThat(tool.takeCompletionNotice("tool-call-1")).isNull();
+    }
+
+    @Test
+    void completionNoticeShouldHaveBoundedLength() {
+        when(actionExecutionPort.execute(any())).thenReturn(new ActionExecutionView(
+                "execution-failed", "operation-failed", ActionExecutionStatus.FAILED,
+                "X".repeat(1_000), "不应进入完成事件", false,
+                Instant.parse("2026-10-20T08:00:00Z"), Instant.parse("2026-10-20T08:00:01Z")));
+        runApproved("tool-call-1");
+
+        assertThat(tool.takeCompletionNotice("tool-call-1").message())
+                .hasSizeLessThanOrEqualTo(512)
+                .doesNotContain("不应进入完成事件");
     }
 
     @Test

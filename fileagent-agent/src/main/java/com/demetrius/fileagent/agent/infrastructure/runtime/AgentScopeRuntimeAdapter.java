@@ -21,6 +21,7 @@ import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
 import com.demetrius.fileagent.api.dto.AgentCitation;
 import com.demetrius.fileagent.agent.infrastructure.tool.AgentActionToolFactory;
 import com.demetrius.fileagent.agent.infrastructure.tool.AgentApprovalBindingChangedException;
+import com.demetrius.fileagent.agent.infrastructure.tool.CallRegisteredHttpApiTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.RunScopedActionTool;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentApprovalView;
@@ -448,7 +449,11 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
                 ToolResultEndEvent end = (ToolResultEndEvent) event;
                 long durationMs = durationMs(toolStartNanos.remove(end.getToolCallId()));
                 completeApprovedStepIfMatched(run, resumedApproval, end.getToolCallId());
-                return handleToolResultEnd(run, agent, ctx, end.getToolCallName(), step.get(), durationMs);
+                RunScopedActionTool actionTool = actionTools.get(end.getToolCallName());
+                CallRegisteredHttpApiTool.CompletionNotice notice = actionTool instanceof CallRegisteredHttpApiTool httpTool
+                        ? httpTool.takeCompletionNotice(end.getToolCallId()) : null;
+                return handleToolResultEnd(
+                        run, agent, ctx, end.getToolCallName(), step.get(), durationMs, notice);
             }
             case TEXT_BLOCK_DELTA -> {
                 TextBlockDeltaEvent delta = (TextBlockDeltaEvent) event;
@@ -500,10 +505,21 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     Flux<AgentRunEvent> handleToolResultEnd(AgentRun run, ReActAgent agent,
                                             RuntimeContext context, String toolName,
                                             int step, long durationMs) {
+        return handleToolResultEnd(run, agent, context, toolName, step, durationMs, null);
+    }
+
+    Flux<AgentRunEvent> handleToolResultEnd(AgentRun run, ReActAgent agent,
+                                            RuntimeContext context, String toolName,
+                                            int step, long durationMs,
+                                            CallRegisteredHttpApiTool.CompletionNotice notice) {
         String failureCode = run.pendingToolFailureCode();
         if (failureCode != null) {
             agent.interrupt(context);
             return failIfRunning(run, failureCode, "知识库检索暂时不可用");
+        }
+        if (notice != null) {
+            return Flux.just(eventMapper.toolCompleted(
+                    run.runId(), toolName, step, durationMs, notice.code(), notice.message()));
         }
         return Flux.just(eventMapper.toolCompleted(run.runId(), toolName, step,
                 run.lastToolResultCount(), durationMs));

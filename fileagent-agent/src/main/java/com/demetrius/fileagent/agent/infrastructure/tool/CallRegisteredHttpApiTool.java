@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * {@code call_registered_http_api} 运行级工具：模型只选择预注册 Endpoint 并提交受 Schema 约束的参数。
@@ -48,6 +50,7 @@ public final class CallRegisteredHttpApiTool extends RunScopedActionTool {
     private static final int MAX_ARGUMENT_FIELDS = 64;
     private static final int MAX_PREVIEW_CHARACTERS = 2_000;
     private static final int MAX_RESULT_CHARACTERS = 4_000;
+    private static final int MAX_COMPLETION_NOTICE_CHARACTERS = 512;
     private static final Set<String> INPUT_FIELDS = Set.of("endpointId", "arguments");
 
     private final String actorId;
@@ -55,6 +58,7 @@ public final class CallRegisteredHttpApiTool extends RunScopedActionTool {
     private final ActionExecutionPort actionExecutionPort;
     private final ObjectMapper objectMapper;
     private final EnvelopeCrypto envelopeCrypto;
+    private final ConcurrentMap<String, CompletionNotice> completionNotices = new ConcurrentHashMap<>();
 
     CallRegisteredHttpApiTool(String runId,
                               String actorId,
@@ -133,7 +137,16 @@ public final class CallRegisteredHttpApiTool extends RunScopedActionTool {
                 executionKey, operationFingerprint, candidate.operationId(), candidate.canonicalArguments(),
                 candidate.canonicalInputHmac(), actorId, candidate.authorizedResourceScopes(),
                 candidate.resourceScope()));
-        return ToolResultBlock.text(truncate(renderResult(result), MAX_RESULT_CHARACTERS));
+        String rendered = truncate(renderResult(result), MAX_RESULT_CHARACTERS);
+        completionNotices.put(candidate.toolCallId(), new CompletionNotice(
+                result.status().name(),
+                truncate(renderCompletionNotice(result), MAX_COMPLETION_NOTICE_CHARACTERS)));
+        return ToolResultBlock.text(rendered);
+    }
+
+    /** 返回并移除指定 ToolCall 的受控完成通知，防止重复事件再次展示动作结果。 */
+    public CompletionNotice takeCompletionNotice(String toolCallId) {
+        return toolCallId == null ? null : completionNotices.remove(toolCallId);
     }
 
     private CanonicalArguments canonicalize(Map<String, Object> arguments) {
@@ -283,6 +296,19 @@ public final class CallRegisteredHttpApiTool extends RunScopedActionTool {
         };
     }
 
+    private static String renderCompletionNotice(ActionExecutionView result) {
+        String identity = "executionId=" + result.executionId()
+                + (isBlank(result.operationId()) ? "" : "，operationId=" + result.operationId());
+        return switch (result.status()) {
+            case SUCCEEDED -> "外部动作执行成功，" + identity;
+            case FAILED -> "外部动作执行失败，" + identity + codeText(result);
+            case OUTCOME_UNKNOWN -> "外部操作可能已执行，" + identity
+                    + "。请人工核对，禁止自动重试。" + codeText(result);
+            case CANCELLED -> "外部动作已取消，" + identity + codeText(result);
+            case PENDING, EXECUTING -> "外部动作仍在处理，" + identity + "。请勿重复提交。";
+        };
+    }
+
     private static String codeText(ActionExecutionView result) {
         return isBlank(result.resultCode()) ? "" : "，结果码=" + result.resultCode();
     }
@@ -352,6 +378,10 @@ public final class CallRegisteredHttpApiTool extends RunScopedActionTool {
     }
 
     private record CanonicalArguments(String json, String hmac) {
+    }
+
+    /** SSE 可公开的最小动作完成信息。 */
+    public record CompletionNotice(String code, String message) {
     }
 
     private static final class FieldCounter {

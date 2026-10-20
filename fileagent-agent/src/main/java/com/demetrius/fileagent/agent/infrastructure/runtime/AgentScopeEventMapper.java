@@ -30,6 +30,12 @@ public class AgentScopeEventMapper {
         return AgentRunEvent.toolCompleted(runId, tool, step, resultCount, durationMs);
     }
 
+    /** 副作用动作只映射服务端生成的状态与提示，不映射外部响应正文。 */
+    public AgentRunEvent toolCompleted(String runId, String tool, int step, long durationMs,
+                                       String code, String message) {
+        return AgentRunEvent.actionToolCompleted(runId, tool, step, durationMs, code, message);
+    }
+
     public AgentRunEvent delta(String runId, String content) {
         return AgentRunEvent.delta(runId, content);
     }

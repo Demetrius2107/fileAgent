@@ -490,6 +490,8 @@ Phase 3 的强保证限定为 ASKING 检查点上的审批暂停与动作恢复�
 | 陈旧 `RUNNING` | 无 ASKING 检查点 | Run 转为 `FAILED/AGENT_RUN_INTERRUPTED`，不从头静默重跑 |
 | 终态 Run | 任意 | 永不恢复执行 |
 
+`execute_python` 是上述通用恢复矩阵的失败关闭例外：应用重启时，任何尚未执行完成的 Python Approval/Step/Run 都不得重新入队或调用 Worker。旧审批与步骤必须收敛为取消/失败；用户需要执行时只能创建新 Run，并再次明确审批。重启前已经保存的成功结果可以只读查询，但不能再次运行代码。
+
 审批过期必须在一个事务中把 Approval 转为 `EXPIRED`、对应 Step 转为 `EXPIRED`、Run 转为 `TIMED_OUT`。若无法验证检查点与不可变动作快照完全匹配，则使用 `AGENT_CHECKPOINT_MISSING` 或 `AGENT_RECOVERY_FAILED` 安全失败。
 
 `ApprovalExpiryScheduler` 默认每 30 秒扫描到期的 PENDING Approval，应用启动时立即扫描一次；迁移使用 CAS 并释放 `active_slot`，避免无人访问时审批永久占用会话。
@@ -652,7 +654,7 @@ Phase 3 主应用与 Worker 只允许同机 loopback 或 Unix Domain Socket 通�
 
 容器沙箱仍共享宿主内核。本阶段只承诺在上述威胁模型和自动化用例内阻断已定义风险，不宣称绝对无法逃逸；面对恶意多租户或高对抗代码的生产环境，需要升级到 gVisor、Kata Containers 或 microVM，该升级不属于 Phase 3。
 
-Python 无网络、无宿主持久化副作用，因此从 ASKING 检查点恢复且确认旧容器已不存在时允许重新执行。其结果仍通过本地幂等账本缓存，正常重试优先返回已保存结果。
+`execute_python` 固定为 `HIGH_RISK_WRITE` 并逐次审批。只有当前进程中本次审批明确批准后才允许调用 Worker；拒绝、审批过期、取消或应用重启恢复均不得运行脚本。重启后不从 ASKING 检查点恢复 Python 执行，也不因旧容器已不存在而重放代码；如仍需执行，必须创建新 Run 并重新审批。
 
 ## 13. API 与 SSE
 
@@ -886,7 +888,7 @@ Checkpoint：
   -> FAILED：只有明确允许且未超 attempt 时才能重试
 ```
 
-- Python 的过期 `EXECUTING` 可在容器不存在且检查点稳定时重新执行。
+- Python 的过期 `EXECUTING`、重启中断或未知结果一律失败关闭，不自动重新执行；需要再次运行时必须创建新 Run 并重新审批。
 - HTTP 写操作只有远端幂等能力成立时允许恢复重试。
 - `action_tool_execution` 成功结果需要保存受限密文，使 Agent 崩溃后可以重新注入相同结果。
 - 同一个持久化 ToolCall 由 `execution_key` 去重；即使模型生成新的 `toolCallId`，同一 Run 内语义相同的动作也由 `operation_fingerprint` 复用原结果或要求重新确认，不静默执行第二次。
@@ -1100,6 +1102,7 @@ sensitiveErrorLeakRate        = 0.0
 
 - 定义的沙箱隔离用例无法访问网络和宿主数据；
 - 所有资源限制测试通过；
+- `execute_python` 在拒绝、过期、取消和重启恢复场景均不会调用 Worker；
 - 安全评测和前三套 Agent 回归通过。
 
 ## 20. 与 Phase 2C 的并行边界

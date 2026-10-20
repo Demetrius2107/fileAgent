@@ -50,17 +50,17 @@ fileAgent/
 │   ├── domain/                       待建（Action / 意图模型）
 │   └── infrastructure/               StreamingChatClient（模型流适配）/ DocumentParsedEventListener（索引订阅）
 
-├── fileagent-agent/               ✅ Agent 运行域（Phase 1 + Phase 3A/3B）
+├── fileagent-agent/               ✅ Agent 运行域（Phase 1 + Phase 3A/3B/3C）
 │   ├── interfaces/                   AgentRunController / AgentRunQueryController / AgentApprovalController（SSE、快照、active、取消、单次审批）
 │   ├── application/                  AgentRunAppService（同步 prepare）/ AgentRunFinalizationService / AgentApprovalService / AgentApprovalWorkflowService / AgentApprovalExpiryScheduler / AgentPromptFactory / AgentToolContext
 │   ├── domain/                       AgentRunEntity / AgentStepEntity / AgentCheckpointEntity / AgentApprovalEntity / AgentRunBudget / AgentActionPolicy
-│   └── infrastructure/               AgentScopeRuntimeAdapter（暂停/ConfirmResult 恢复）/ AgentPersistenceAdapter / DatabaseAgentStateStore / AgentRunExecutionCoordinator / AgentRunEventHub / 只读工具 / RunScopedActionTool
+│   └── infrastructure/               AgentScopeRuntimeAdapter（暂停/ConfirmResult 恢复）/ AgentPersistenceAdapter / DatabaseAgentStateStore / AgentRunExecutionCoordinator / AgentRunEventHub / 只读工具 / RunScopedActionTool / CallRegisteredHttpApiTool
 
-├── fileagent-action/              ✅ 动作执行域
-│   ├── interfaces/                   待建（风险确认接口）
-│   ├── application/                  ActionExecutorService（接口）
-│   ├── domain/                       ActionHandler（接口）
-│   └── infrastructure/               ActionHandlerRegistry
+├── fileagent-action/              ✅ 动作执行域（Phase 3C 注册式 HTTP）
+│   ├── interfaces/                   暂无公开 Controller；由 api Port 跨域调用
+│   ├── application/                  ActionExecutionService（定义复核、幂等执行、结果收敛）
+│   ├── domain/                       ActionToolExecutionEntity / ActionToolExecutionRepository（副作用账本）
+│   └── infrastructure/               Endpoint 注册与 Schema / 安全 URI / DNS-IP 策略 / 受限 OkHttp / JPA
 │
 ├── fileagent-evaluation/          ✅ RAG 端到端评测工具
 │   ├── evaluation/                   JSONL 加载 / Runner / 指标 / 报告 / 质量门禁
@@ -125,8 +125,8 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | session | api + web + data-jpa + h2(runtime) + spring-boot-data-jpa-test(test) |
 | document | api + web + data-jpa + spring-ai-starter-model-openai（Embedding）+ spring-boot-starter-elasticsearch（知识索引与检索）+ pdfbox + poi-ooxml + h2(runtime) + testcontainers-elasticsearch / testcontainers-junit-jupiter / spring-boot-data-jpa-test(test) |
 | chat | api + web + webflux（流式调用）+ spring-ai-starter-model-deepseek + spring-ai-starter-model-openai（多 Provider 动态构建）+ data-jpa（模型配置实体）+ micrometer-tracing + reactor-test(test) |
-| agent | api + web + webflux（SSE）+ data-jpa + h2(runtime) + agentscope-core + agentscope-extensions-model-openai + swagger-annotations-jakarta + micrometer-tracing + reactor-test / spring-boot-data-jpa-test(test) |
-| action | api + web（M2+ 加 poi / graalvm polyglot） |
+| agent | api + web + webflux（SSE）+ data-jpa + h2(runtime) + agentscope-core + agentscope-extensions-model-openai + JSON Schema Validator + swagger-annotations-jakarta + micrometer-tracing + reactor-test / spring-boot-data-jpa-test(test) |
+| action | api + web + data-jpa + h2(runtime) + OkHttp + JSON Schema Validator（Phase 3D 再加独立沙箱 Worker 客户端） |
 | evaluation | api + web + Jackson 3（内部接口默认关闭，通过 API Port 执行正式 RAG 并接收 DeepSeek Judge 结果） |
 | starter | 全部业务域 + evaluation + h2(runtime) + springdoc + spring-boot-starter-opentelemetry |
 | ragflow-quickstart | webflux + validation（独立调用 RAGFlow HTTP API） |
@@ -157,7 +157,10 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | `fileagent.agent.pending-start-timeout` / `lease-duration` / `recovery-scan-interval` | PENDING 超时、执行租约与重启恢复扫描 | ✅ |
 | `fileagent.agent.replay-max-events` / `replay-max-bytes` | 单个 Run 的内存事件回放上限 | ✅ |
 | `fileagent.agent.actions-enabled` | 是否向 Agent 注册受控副作用工具，默认关闭 | ✅ |
+| `fileagent.agent.authorized-action-resource-scopes` | 本地运行身份允许的动作资源范围，默认空即全部拒绝 | ✅ |
 | `fileagent.agent.approval-timeout` / `approval-expiry-scan-interval` | 单次审批有效期与过期扫描周期 | ✅ |
+| `fileagent.action.http.enabled` | 注册式 HTTP 动作开关，默认关闭，且依赖 `actions-enabled` | ✅ |
+| `fileagent.action.http.endpoints` | 服务端 Endpoint、Schema、权限、出站和幂等定义 | ✅，凭证值除外 |
 | `fileagent.evaluation.endpoint.enabled` | 是否开启内部评测接口，默认 false | ✅ |
 | `fileagent.evaluation.endpoint.token` | `${FILEAGENT_EVALUATION_TOKEN}` | ❌ 严禁提交 |
 | RAG Judge 模型 | 固定使用 `deepseek-v4-pro`，复用 `FILEAGENT_CHAT_API_KEY` | ❌ API Key 严禁提交 |

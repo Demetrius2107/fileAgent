@@ -13,6 +13,7 @@ import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
+import com.demetrius.fileagent.agent.infrastructure.tool.CallRegisteredHttpApiTool;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.port.KnowledgeCatalogPort;
 import com.demetrius.fileagent.api.port.KnowledgeContextPort;
@@ -86,6 +87,27 @@ class AgentScopeRuntimeAdapterTest {
             assertThat(event.message()).isEqualTo("知识库检索暂时不可用");
         });
         assertThat(run.isTerminal()).isTrue();
+    }
+
+    @Test
+    void actionCompletionShouldPublishControlledNoticeInsteadOfResultCount() {
+        AgentRun run = AgentRun.pending("run-action", 1L, "trace-action");
+        run.start(CLOCK.instant());
+
+        List<AgentRunEvent> events = adapter.handleToolResultEnd(
+                run, mock(ReActAgent.class), RuntimeContext.builder().sessionId("run-action").build(),
+                "call_registered_http_api", 2, 18L,
+                new CallRegisteredHttpApiTool.CompletionNotice(
+                        "OUTCOME_UNKNOWN",
+                        "外部操作可能已执行，executionId=execution-1。请人工核对。"))
+                .collectList().block();
+
+        assertThat(events).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo("tool.completed");
+            assertThat(event.resultCount()).isNull();
+            assertThat(event.code()).isEqualTo("OUTCOME_UNKNOWN");
+            assertThat(event.message()).contains("executionId=execution-1", "人工核对");
+        });
     }
 
     @Test

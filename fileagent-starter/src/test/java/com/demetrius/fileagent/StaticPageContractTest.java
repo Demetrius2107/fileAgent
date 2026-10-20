@@ -95,6 +95,21 @@ class StaticPageContractTest {
         assertThat(css).contains(".agent-approval");
     }
 
+    @Test
+    void registeredHttpActionShouldShowApprovalAndUnknownOutcomeWithoutRetry() throws IOException {
+        String script = readResource("static/app.js");
+        String css = readResource("static/app.css");
+
+        assertThat(script)
+                .contains("call_registered_http_api: '调用受控外部接口'")
+                .contains("OUTCOME_UNKNOWN")
+                .contains("外部操作可能已执行")
+                .contains("executionId")
+                .contains("人工核对")
+                .doesNotContain("重试外部操作");
+        assertThat(css).contains(".agent-tool-step-warning");
+    }
+
     private String readResource(String path) throws IOException {
         try (InputStream in = getClass().getClassLoader().getResourceAsStream(path)) {
             assertThat(in).as("资源应存在: %s", path).isNotNull();

@@ -2,9 +2,9 @@
 
 > **执行约束：** 得到用户对本阶段的明确确认后，按任务顺序在当前会话实现；除非用户另行批准，不创建 worktree 或子代理。步骤使用复选框（`- [ ]`）跟踪进度。
 
-**目标：** 通过独立 loopback Worker 和 rootless Podman 一次性容器提供受审批的 `execute_python`，并建立独立于回答 Judge 的 Phase 3 确定性安全门禁与真实模型攻击评测。
+**目标：** 通过独立 loopback Worker 和 rootless Podman 一次性容器提供逐次审批、失败关闭的 `execute_python`，并建立独立于回答 Judge 的 Phase 3 确定性安全门禁与真实模型攻击评测。拒绝、审批过期、取消或应用重启恢复均不得运行脚本。
 
-**架构：** 主应用只向 Worker 发送 executionId/code/inputJson；Worker 固定镜像、命令、网络、挂载、用户和资源限制，调用 rootless Podman。`execute_python` 复用 3C 的 ActionExecutionPort/幂等账本和 3B 的审批。确定性安全用 Maven profile + 固定模型桩/测试服务器/测试 Worker，真实模型攻击使用独立 `AgentSecurityEvaluationPort/Runner`。
+**架构：** 主应用只向 Worker 发送 executionId/code/inputJson；Worker 固定镜像、命令、网络、挂载、用户和资源限制，调用 rootless Podman。`execute_python` 复用 3C 的 ActionExecutionPort/幂等账本和 3B 的审批，但禁止从重启恢复路径调用 Worker；需要执行时必须由当前 Run 的新鲜批准触发。确定性安全用 Maven profile + 固定模型桩/测试服务器/测试 Worker，真实模型攻击使用独立 `AgentSecurityEvaluationPort/Runner`。
 
 **技术栈：** Java 21、Spring Boot 4.1、rootless Podman、Python 3 固定镜像摘要、Reactor、JUnit 5、Maven。
 
@@ -184,7 +184,7 @@ git commit -m "feat(sandbox): 隔离执行 Python 容器"
 
 - [ ] **步骤 1：写 loopback、Token 和状态映射测试**
 
-启动 mock Worker，断言 Client 只发送三个请求字段和 Bearer Token；非 loopback base URL 启动失败；超时/OOM/policy/output/runtime failure 映射稳定错误；取消后确认 Worker 不再执行。
+启动 mock Worker，断言 Client 只发送三个请求字段和 Bearer Token；非 loopback base URL 启动失败；超时/OOM/policy/output/runtime failure 映射稳定错误；拒绝、审批过期、取消及重启恢复后确认 Worker 均未被调用。
 
 - [ ] **步骤 2：运行测试确认失败**
 
@@ -198,7 +198,7 @@ Client 禁用代理和重定向，base URL 仅允许 `http://127.0.0.1`、`http:
 
 - [ ] **步骤 4：接入账本**
 
-Python 动作使用 3C 的 executionKey/fingerprint/operationId。旧容器不存在且记录停在过期 EXECUTING 时允许相同 operationId 重试；SUCCEEDED 直接返回保存结果；OUTCOME_UNKNOWN 安全失败。
+Python 动作使用 3C 的 executionKey/fingerprint/operationId，但这些标识只用于去重和审计，不能授权重放。SUCCEEDED 只返回保存结果；过期 EXECUTING、重启中断和 OUTCOME_UNKNOWN 均安全失败，禁止调用 Worker 自动重试。
 
 - [ ] **步骤 5：运行测试并提交**
 
@@ -224,7 +224,7 @@ git commit -m "feat(action): 接入 Python Sandbox Worker"
 
 - [ ] **步骤 1：写工具和 UI 契约测试**
 
-断言 `execute_python` 固定 HIGH_RISK_WRITE/ASK；输入只有 code/input；代码 20 KB 上限；审批预览长度受控并显示 HMAC 短指纹；前端文案明确无网络、10 秒、无持久化文件。
+断言 `execute_python` 固定 HIGH_RISK_WRITE/ASK；输入只有 code/input；代码 20 KB 上限；审批预览长度受控并显示 HMAC 短指纹；拒绝、过期、取消和重启恢复均不调用 Worker；前端文案明确无网络、10 秒、无持久化文件。
 
 - [ ] **步骤 2：运行测试确认失败**
 
@@ -403,5 +403,6 @@ git commit -m "docs(agent): 完成 Phase 3 验收"
 - Worker 请求无法覆盖镜像、命令、挂载、网络、用户、capability 或资源限制。
 - 定义的隔离用例无法访问网络和宿主 canary，资源/时间/输出限制生效，孤儿容器可清理。
 - `execute_python` 必须审批、可取消、幂等且默认关闭。
+- `execute_python` 在拒绝、审批过期、取消或应用重启恢复后均不得运行；需要执行时必须由新 Run 重新发起并审批。
 - 确定性安全门禁和真实模型攻击评测分离，二者均通过。
 - 桌面和移动端审批流程经实际浏览器验证。

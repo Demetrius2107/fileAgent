@@ -32,6 +32,21 @@ class AgentScopeEventMapperTest {
     }
 
     @Test
+    void actionCompletionShouldCarryOnlyControlledStatusAndMessage() {
+        AgentScopeEventMapper mapper = new AgentScopeEventMapper();
+
+        AgentRunEvent event = mapper.toolCompleted(
+                "run-1", "call_registered_http_api", 2, 84L,
+                "OUTCOME_UNKNOWN", "外部操作可能已执行，executionId=execution-1，请人工核对");
+
+        assertThat(event.type()).isEqualTo("tool.completed");
+        assertThat(event.resultCount()).isNull();
+        assertThat(event.code()).isEqualTo("OUTCOME_UNKNOWN");
+        assertThat(event.message()).contains("executionId=execution-1", "人工核对");
+        assertThat(event.content()).isNull();
+    }
+
+    @Test
     void deltaShouldCarryIncrementalContent() {
         AgentScopeEventMapper mapper = new AgentScopeEventMapper();
 

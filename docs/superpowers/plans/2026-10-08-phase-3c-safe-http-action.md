@@ -6,7 +6,7 @@
 
 **架构：** `fileagent-api` 定义一个具有解析定义、执行、查状态、取消四项能力的 `ActionExecutionPort`；`fileagent-action` 拥有 Endpoint 配置、HTTP 客户端和执行账本；`fileagent-agent` 每个 Run 创建一个 `RunScopedActionTool`，模型只能提交 endpointId 和结构化 arguments。OkHttp 的自定义 DNS 在实际连接使用经过校验的 IP，同时保留原 hostname 的 Host/SNI。
 
-**技术栈：** Java 21、Spring Boot 4.1、Spring Data JPA、OkHttp 4.12.0、networknt JSON Schema Validator 1.5.7、H2、AgentScope ToolBase。
+**技术栈：** Java 21、Spring Boot 4.1、Spring Data JPA、OkHttp 4.12.0、networknt JSON Schema Validator 2.0.0、H2、AgentScope ToolBase。
 
 ---
 
@@ -58,17 +58,17 @@
 - 创建：`fileagent-api/src/main/java/com/demetrius/fileagent/api/enums/ActionCancelStatus.java`
 - 测试：`fileagent-api/src/test/java/com/demetrius/fileagent/api/port/ActionExecutionPortContractTest.java`
 
-- [ ] **步骤 1：写 DTO 防御性复制和字段契约测试**
+- [x] **步骤 1：写 DTO 防御性复制和字段契约测试**
 
 断言 credentials、baseUrl、内部 Header 不存在于 `ActionDefinitionView`；arguments 和 resource scope 构造时防御性复制；取消结果仅允许 NOT_STARTED/CANCELLED/OUTCOME_UNKNOWN。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`mvn -pl fileagent-api -am test -Dtest=ActionExecutionPortContractTest -Dsurefire.failIfNoSpecifiedTests=false`
 
 预期：FAIL，新 Port 不存在。
 
-- [ ] **步骤 3：实现精确 Port**
+- [x] **步骤 3：实现精确 Port**
 
 ```java
 /**
@@ -86,9 +86,9 @@ public interface ActionExecutionPort {
 }
 ```
 
-`ActionExecutionCommand` 固定字段：runId、toolCallId、actionId、definitionVersion、endpointRevision、endpointConfigHash、executionKey、operationFingerprint、operationId、canonicalArguments、canonicalInputHmac、actorId、resourceScope。模型不能构造该 record。
+`ActionExecutionCommand` 固定字段：runId、toolCallId、toolName、toolVersion、actionId、definitionVersion、endpointRevision、endpointConfigHash、policyVersion、executionKey、operationFingerprint、operationId、canonicalArguments、canonicalInputHmac、actorId、authorizedResourceScopes、resourceScope。模型不能构造该 record。
 
-- [ ] **步骤 4：运行测试并提交**
+- [x] **步骤 4：运行测试并提交**
 
 运行：`mvn -pl fileagent-api -am test -Dtest=ActionExecutionPortContractTest -Dsurefire.failIfNoSpecifiedTests=false`
 
@@ -108,17 +108,17 @@ git commit -m "feat(api): 定义动作执行契约"
 - 修改：`fileagent-action/pom.xml`
 - 测试：`fileagent-action/src/test/java/com/demetrius/fileagent/action/infrastructure/persistence/ActionToolExecutionJpaTest.java`
 
-- [ ] **步骤 1：写三标识约束和 CAS 测试**
+- [x] **步骤 1：写三标识约束和 CAS 测试**
 
 断言 `executionKey` 唯一、`operationId` 唯一、`UNIQUE(run_id, operation_fingerprint)`；并发 begin 只有一个进入 EXECUTING；OUTCOME_UNKNOWN 不允许自动重试。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`mvn -pl fileagent-action -am test -Dtest=ActionToolExecutionJpaTest -Dsurefire.failIfNoSpecifiedTests=false`
 
 预期：FAIL，账本实体不存在。
 
-- [ ] **步骤 3：实现账本实体**
+- [x] **步骤 3：实现账本实体**
 
 ```java
 @Entity
@@ -145,7 +145,7 @@ public class ActionToolExecutionEntity {
 
 其余字段按设计稿完整实现；请求和结果哈希使用 HMAC，结果正文只存信封密文。
 
-- [ ] **步骤 4：运行测试并提交**
+- [x] **步骤 4：运行测试并提交**
 
 运行：`mvn -pl fileagent-action -am test -Dtest=ActionToolExecutionJpaTest -Dsurefire.failIfNoSpecifiedTests=false`
 
@@ -166,30 +166,30 @@ git commit -m "feat(action): 增加副作用幂等账本"
 - 创建：`fileagent-action/src/main/java/com/demetrius/fileagent/action/infrastructure/http/CanonicalActionArguments.java`
 - 测试：`fileagent-action/src/test/java/com/demetrius/fileagent/action/infrastructure/http/RegisteredHttpActionRegistryTest.java`
 
-- [ ] **步骤 1：写启动校验测试**
+- [x] **步骤 1：写启动校验测试**
 
 覆盖重复 endpointId、非 HTTPS 凭证 Endpoint、写操作缺失 idempotencyHeader、Schema 深度/字段/Body 超限、缺失 dataEgressPolicy、配置哈希不稳定。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`mvn -pl fileagent-action -am test -Dtest=RegisteredHttpActionRegistryTest -Dsurefire.failIfNoSpecifiedTests=false`
 
 预期：FAIL。
 
-- [ ] **步骤 3：加入依赖并实现注册表**
+- [x] **步骤 3：加入依赖并实现注册表**
 
 根 POM 固定：
 
 ```xml
 <okhttp.version>4.12.0</okhttp.version>
-<json-schema-validator.version>1.5.7</json-schema-validator.version>
+<json-schema-validator.version>2.0.0</json-schema-validator.version>
 ```
 
 注册定义包含 endpointId/displayName/definitionVersion/endpointRevision/configHash/policyVersion/method/baseUrl/pathTemplate/requestSchema/riskLevel/dataEgressPolicy/credentialRef/timeouts/maxResponseBytes/contentTypes/idempotencyHeader。`configHash` 排除凭证值，只覆盖目标、请求和权限边界。
 
 `CanonicalActionArguments` 使用 Jackson 递归排序 object key，数组保持顺序，拒绝 NaN/Infinity，输出稳定 canonical JSON 和 HMAC。
 
-- [ ] **步骤 4：运行测试并提交**
+- [x] **步骤 4：运行测试并提交**
 
 运行：`mvn -pl fileagent-action -am test -Dtest=RegisteredHttpActionRegistryTest -Dsurefire.failIfNoSpecifiedTests=false`
 
@@ -209,21 +209,21 @@ git commit -m "feat(action): 注册受控 HTTP 动作"
 - 测试：`fileagent-action/src/test/java/com/demetrius/fileagent/action/infrastructure/http/SafeHttpUriBuilderTest.java`
 - 测试：`fileagent-action/src/test/java/com/demetrius/fileagent/action/infrastructure/http/ValidatedDnsTest.java`
 
-- [ ] **步骤 1：写攻击向量测试**
+- [x] **步骤 1：写攻击向量测试**
 
 覆盖绝对 URL、`//host`、userinfo、反斜线、CRLF、单/双编码 `..`；IPv4/IPv6 loopback、RFC1918、link-local、metadata、组播、保留、ULA、IPv4-mapped IPv6；混合合法/禁止解析结果必须整体拒绝；每次 lookup 重新校验。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`mvn -pl fileagent-action -am test -Dtest=SafeHttpUriBuilderTest,ValidatedDnsTest -Dsurefire.failIfNoSpecifiedTests=false`
 
 预期：FAIL。
 
-- [ ] **步骤 3：实现结构化 URI Builder**
+- [x] **步骤 3：实现结构化 URI Builder**
 
 只能把 Schema 声明的 path/query/body 字段编码到注册模板；先单次 decode 检查，再拒绝结果仍含 `%2e/%2f/%5c/%0d/%0a` 的双重编码信号。禁止字符串拼 URL。
 
-- [ ] **步骤 4：实现 OkHttp DNS 固定**
+- [x] **步骤 4：实现 OkHttp DNS 固定**
 
 ```java
 final class ValidatedDns implements okhttp3.Dns {
@@ -243,7 +243,7 @@ final class ValidatedDns implements okhttp3.Dns {
 
 OkHttp 使用原 hostname 建 TLS/SNI，并直接连接本次 `lookup` 返回地址。Client 固定 `Proxy.NO_PROXY`、`followRedirects(false)`、`followSslRedirects(false)`、`retryOnConnectionFailure(false)`。
 
-- [ ] **步骤 5：运行测试并提交**
+- [x] **步骤 5：运行测试并提交**
 
 运行：`mvn -pl fileagent-action -am test -Dtest=SafeHttpUriBuilderTest,ValidatedDnsTest -Dsurefire.failIfNoSpecifiedTests=false`
 
@@ -262,27 +262,27 @@ git commit -m "feat(action): 阻断 HTTP SSRF 与路径注入"
 - 测试：`fileagent-action/src/test/java/com/demetrius/fileagent/action/infrastructure/http/RegisteredHttpExecutorTest.java`
 - 测试：`fileagent-action/src/test/java/com/demetrius/fileagent/action/application/ActionExecutionServiceTest.java`
 
-- [ ] **步骤 1：写本地测试 Server 和失败窗口测试**
+- [x] **步骤 1：写本地测试 Server 和失败窗口测试**
 
 使用 `com.sun.net.httpserver.HttpServer` 与测试专用 loopback policy，覆盖 operationId Header、压缩后响应超 256 KB、Header 超限、错误 Content-Type、3xx、连接/读取/总超时、远端成功但本地记账前故障 -> OUTCOME_UNKNOWN、相同 fingerprint 只计数一次。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`mvn -pl fileagent-action -am test -Dtest=RegisteredHttpExecutorTest,ActionExecutionServiceTest -Dsurefire.failIfNoSpecifiedTests=false`
 
 预期：FAIL。
 
-- [ ] **步骤 3：实现流式读取和幂等**
+- [x] **步骤 3：实现流式读取和幂等**
 
 响应经 OkHttp 解压后从 `ResponseBody.byteStream()` 累计读取，超过 Endpoint `maxResponseBytes` 立即关闭；不调用无界 `string()`。写 Endpoint 把稳定 `operationId` 放入注册的幂等 Header。日志只记录 endpointId、executionId、状态、耗时和字节数。
 
 `ActionExecutionService.execute` 先原子创建/读取账本，再调用 Executor；SUCCEEDED 返回密文结果摘要；新鲜 EXECUTING 返回处理中；OUTCOME_UNKNOWN 永不自动重试。
 
-- [ ] **步骤 4：实现取消语义**
+- [x] **步骤 4：实现取消语义**
 
 请求未发送返回 NOT_STARTED；OkHttp Call 成功取消且确认未写出返回 CANCELLED；可能已经送达返回 OUTCOME_UNKNOWN。不得把最后一种映射成普通取消。
 
-- [ ] **步骤 5：运行测试并提交**
+- [x] **步骤 5：运行测试并提交**
 
 运行：`mvn -pl fileagent-action -am test -Dtest=RegisteredHttpExecutorTest,ActionExecutionServiceTest -Dsurefire.failIfNoSpecifiedTests=false`
 
@@ -303,23 +303,23 @@ git commit -m "feat(action): 执行幂等注册 HTTP 动作"
 - 修改：`fileagent-starter/src/main/resources/application.yml`
 - 测试：`fileagent-agent/src/test/java/com/demetrius/fileagent/agent/infrastructure/tool/CallRegisteredHttpApiToolTest.java`
 
-- [ ] **步骤 1：写工具输入和审批测试**
+- [x] **步骤 1：写工具输入和审批测试**
 
 模型 Schema 只能包含 endpointId 和 arguments；URL/method/header/credential/actorId 字段被拒绝；定义版本和 HMAC 在批准后变化时不执行；同语义新 toolCallId 复用原 operation。
 
-- [ ] **步骤 2：运行测试确认失败**
+- [x] **步骤 2：运行测试确认失败**
 
 运行：`mvn -pl fileagent-agent -am test -Dtest=CallRegisteredHttpApiToolTest -Dsurefire.failIfNoSpecifiedTests=false`
 
 预期：FAIL。
 
-- [ ] **步骤 3：实现按 Run 工具**
+- [x] **步骤 3：实现按 Run 工具**
 
 工具继承 `RunScopedActionTool`；构造时固定 runId/actorId/授权资源。`buildCandidate` 调用 `resolveDefinition`、Schema 校验、canonical JSON 和策略；`executeVerified` 组装 `ActionExecutionCommand` 并调用 Port。
 
 只有 `fileagent.agent.actions-enabled=true` 且 `fileagent.action.http.enabled=true` 时注册；默认 false。
 
-- [ ] **步骤 4：运行测试并提交**
+- [x] **步骤 4：运行测试并提交**
 
 运行：`mvn -pl fileagent-agent -am test -Dtest=CallRegisteredHttpApiToolTest,AgentScopeRuntimeAdapterTest -Dsurefire.failIfNoSpecifiedTests=false`
 
@@ -341,25 +341,27 @@ git commit -m "feat(agent): 接入注册式 HTTP 工具"
 - 修改：`docs/AGENTIC-RAG-ENTERPRISE-ROADMAP.md`
 - 创建：`docs/HTTP-ACTION-CONFIG.md`
 
-- [ ] **步骤 1：补前端契约**
+- [x] **步骤 1：补前端契约**
 
 HTTP 审批展示 Endpoint displayName、动作、资源和非敏感参数；OUTCOME_UNKNOWN 显示“外部操作可能已执行”、executionId、人工核对指引，且无自动重试按钮。
 
-- [ ] **步骤 2：运行模块测试**
+- [x] **步骤 2：运行模块测试**
 
 运行：`mvn -pl fileagent-api,fileagent-action,fileagent-agent,fileagent-starter -am test`
 
 预期：PASS。
 
-- [ ] **步骤 3：写部署文档**
+- [x] **步骤 3：写部署文档**
 
 文档给出一个默认关闭的测试 GET Endpoint 和一个带远端幂等 Header 的写 Endpoint 配置；凭证只引用环境变量，不写真实 Token；明确生产只允许 HTTPS 和公开地址。
 
-- [ ] **步骤 4：运行全量测试和既有 Agent 回归**
+- [x] **步骤 4a：运行全量测试**
 
 运行：`mvn test`
 
 预期：PASS。
+
+- [ ] **步骤 4b：在已配置模型和知识库的部署实例上运行既有 Agent 回归**
 
 部署后运行：
 
@@ -371,7 +373,7 @@ FILEAGENT_EVALUATION_DATASET_VERSION=context-v2 ./fileagent-evaluation/scripts/r
 
 预期：三套门禁通过。
 
-- [ ] **步骤 5：提交 Phase 3C**
+- [x] **步骤 5：提交 Phase 3C**
 
 ```bash
 git diff --check

@@ -483,7 +483,7 @@ Request:
 - `run.status`：`PENDING`、`CANCELLED` 等状态快照；新建 Run 的第一个事件为 `PENDING`，前端应显示“Agent 已排队”
 - `run.started`：运行开始，`status=RUNNING`
 - `tool.started`：`{ "step": 1, "tool": "search_docs" }`
-- `tool.completed`：`{ "step": 1, "tool": "search_docs", "resultCount": 3, "durationMs": 42 }`（只带结果数量与耗时，不带正文）
+- `tool.completed`：只读知识工具返回 `{ "step": 1, "tool": "search_docs", "resultCount": 3, "durationMs": 42 }`；副作用工具的 `resultCount` 为 null，只额外返回受控 `code/message`，例如 `OUTCOME_UNKNOWN` 和包含 `executionId` 的人工核对提示。两类事件都不带工具结果正文。
 - `message.delta`：`{ "content": "模型增量正文" }`
 - `sources`：`{ "files": ["员工手册.pdf"], "citations": [...] }` 回答实际引用的文件名；Phase 2C 起 `citations` 为结构化引用数组（可能为空数组），每项：
   ```json
@@ -565,6 +565,30 @@ Request：
 - 若管理员在审批等待期间关闭 `fileagent.agent.actions-enabled`，新的 `APPROVE` 返回 `403` 且不会改变 Approval；`DENY` 仍可用于安全结束既有等待。
 - 默认在启动时及每 30 秒扫描一次过期审批，将 Approval、Tool Step、Run 一并收敛为 `EXPIRED`、`EXPIRED`、`TIMED_OUT`，释放会话活动槽位并发出状态事件。超时时间和扫描间隔分别由 `fileagent.agent.approval-timeout`、`approval-expiry-scan-interval` 配置。
 - 成功响应是持续 `text/event-stream`，响应头带 `X-Agent-Run-Id`；页面应继续处理 `approval.resolved`、`run.started`、工具事件和最终事件。业务错误在流建立前仍按对应 HTTP 状态返回单个 `event:error`。
+
+### 4.8 注册式 HTTP 动作
+
+`call_registered_http_api` 不是任意 HTTP 客户端。模型输入固定为：
+
+```json
+{
+  "endpointId": "create-expense-draft",
+  "arguments": {
+    "amount": 100,
+    "memo": "客户拜访"
+  }
+}
+```
+
+- 只有 `fileagent.agent.actions-enabled=true` 与 `fileagent.action.http.enabled=true` 同时成立时，工具才会注册；任一开关默认均为 false。
+- URL、Method、Header、凭证引用、操作者身份、授权资源范围和风险等级全部来自服务端配置，HTTP 或模型请求不能覆盖。
+- 服务端先验证 Endpoint JSON Schema、模型可写字段、可信资源范围和风险策略。`READ_ONLY` 且不外发模型自由文本时可以自动执行；其他动作进入 4.7 的单次审批。
+- Approval 绑定工具版本、定义版本、Endpoint revision、配置 HMAC、策略版本、资源范围、规范化参数 HMAC 和 operationId。审批等待期间任一绑定变化都会拒绝旧批准。
+- 同一 ToolCall 使用唯一 `executionKey`；同一 Run 内语义相同的新 ToolCall 使用相同 `operationFingerprint/operationId`。任一重复命中都复用账本状态或结果，不产生第二次副作用。
+- HTTP 连接禁用代理、重定向和自动重试，并对 DNS/IP、路径/query 注入、Content-Type、Header 与解压后响应大小实施硬限制。
+- 写请求可能已经到达远端但本地无法确认结果时，`tool.completed.code=OUTCOME_UNKNOWN`，`message` 只包含受控说明、`executionId`/`operationId` 和人工核对指引。前端与模型不得自动重试或声称执行成功。
+
+完整字段、只读与幂等写入示例见 [HTTP-ACTION-CONFIG.md](./HTTP-ACTION-CONFIG.md)。
 
 ---
 

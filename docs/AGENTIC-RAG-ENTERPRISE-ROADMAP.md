@@ -359,7 +359,7 @@ flowchart LR
 
 **预计**：3～4 周。
 
-**当前进度**：Phase 3A「持久化 Agent Runtime」与 3B 中的「高风险动作单次审批」已完成；补充信息型 `WAITING_USER_INPUT`、3C（外部工具安全边界）与 3D（真实受控写操作）尚未开始。
+**当前进度**：Phase 3A「持久化 Agent Runtime」、3B「高风险动作单次审批」和 3C「注册式安全 HTTP 工具」已完成；补充信息型 `WAITING_USER_INPUT` 与 3D「Python 隔离沙箱」尚未实现。
 
 #### 3A：持久化 Agent Runtime（已完成）
 
@@ -378,19 +378,24 @@ flowchart LR
 - 目前没有内置写入型业务工具，`actions-enabled` 默认关闭；`RunScopedActionTool` 是后续连接器或受控操作接入时必须使用的权限与恢复边界。
 - `WAITING_USER_INPUT`（让用户补充信息）不在本次范围，仍待单独设计其输入版本、上下文合并与恢复契约。
 
-#### 3C：工具权限与安全边界（未完成）
+#### 3C：工具权限与安全边界（已完成）
 
-- 实现 `ALLOW / DENY / ASK` 权限策略、Schema 校验、业务授权和资源级权限检查。
-- 增加外部 HTTP 白名单、DNS/IP 校验、重定向与响应大小限制，并对错误回流做脱敏。
+- `call_registered_http_api` 只接受 `endpointId + arguments`，URL、Method、Header、凭证、身份、风险和资源权限均由服务端预注册；工具只有在 Agent 与 HTTP 两个开关同时启用时才出现。
+- 已实现 `ALLOW / DENY / ASK`、Endpoint JSON Schema、模型可写字段、可信资源范围和审批后不可变绑定复核；写动作或外发模型自由文本必须审批。
+- `action_tool_execution` 用 `executionKey + operationFingerprint + operationId` 阻断同一 ToolCall 和同 Run 等价动作的重复副作用；结果密文保存，`OUTCOME_UNKNOWN` 永不自动重试。
+- HTTP 出站只允许公开 HTTPS 目标，逐次校验全部 DNS 结果，阻断本机/内网/元数据/保留地址；禁用代理、重定向和客户端自动重试，并限制路径注入、Header、Content-Type、超时和解压后响应大小。
+- 前端沿用 3B 内联审批区展示动作、资源、影响和脱敏参数；不确定结果明确展示 `executionId` 与人工核对提示。
+- 部署配置与检查清单见 `docs/HTTP-ACTION-CONFIG.md`。
 
 #### 3D：受控写操作（未完成）
 
-- 为每个 Tool Call 增加唯一幂等键和副作用审计，防止重试导致重复写入。
-- 将代码执行移入隔离沙箱，默认无网络、只读文件系统，并设置 CPU、内存和时间上限。
+- 实现 `execute_python`，固定为 `HIGH_RISK_WRITE`：每一次执行都必须先进入审批，批准后才允许发送到独立隔离 Worker。
+- 拒绝、审批过期、取消或应用重启恢复都不能运行脚本；重启后不得从旧检查点自动执行或重放 Python，必须新建 Run 并重新审批。
+- 将代码执行移入独立 rootless 容器沙箱，默认无网络、只读文件系统，并设置 CPU、内存、进程、时间和输出上限。
 
-#### 后续开发任务（3B～3D）
+#### 后续开发任务（3D）
 
-- 每个 Tool Call 使用唯一幂等键，防止重试导致重复发送、重复写库。
+- Python 复用 3C 的幂等账本，但重启和未知结果一律失败关闭，不能据此自动重放代码。
 - 工具风险等级：
   - `READ_ONLY`：可自动执行；
   - `LOW_RISK_WRITE`：按策略执行；

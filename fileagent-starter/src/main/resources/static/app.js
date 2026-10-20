@@ -1138,7 +1138,9 @@
     const TOOL_LABELS = {
         search_docs: '检索知识',
         list_knowledge_files: '列出知识文件',
-        read_document_context: '读取文档上下文'
+        read_document_context: '读取文档上下文',
+        get_document_outline: '读取文档目录',
+        call_registered_http_api: '调用受控外部接口'
     };
 
     function renderToolStatus(assistant, event) {
@@ -1158,7 +1160,17 @@
                 const steps = statusEl.querySelectorAll('.agent-tool-step');
                 const last = steps[steps.length - 1];
                 if (last) {
-                    last.textContent = `第 ${event.step} 步：${TOOL_LABELS[event.tool] || event.tool} 完成（${event.resultCount || 0} 条）`;
+                    if (event.tool === 'call_registered_http_api') {
+                        const fallback = event.code === 'OUTCOME_UNKNOWN'
+                            ? '外部操作可能已执行，executionId 不可用，请人工核对'
+                            : `${TOOL_LABELS[event.tool]}${event.code === 'SUCCEEDED' ? '成功' : '已结束'}`;
+                        last.textContent = `第 ${event.step} 步：${event.message || fallback}`;
+                        if (event.code === 'OUTCOME_UNKNOWN') {
+                            last.classList.add('agent-tool-step-warning');
+                        }
+                    } else {
+                        last.textContent = `第 ${event.step} 步：${TOOL_LABELS[event.tool] || event.tool} 完成（${event.resultCount || 0} 条）`;
+                    }
                     last.classList.add('agent-tool-step-done');
                 }
             }

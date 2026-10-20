@@ -8,7 +8,7 @@ import java.util.List;
  * Agent Run 的受控事件契约（SSE 事件的数据载体）。
  * <p>
  * 只承载事件类型、runId、状态、步骤号、工具名、结果数量、耗时、增量文本、
- * 来源文件、结构化引用、审批视图、错误码/展示信息和 traceId。工具事件不带文档正文，
+ * 来源文件、结构化引用、审批视图、受控动作状态、错误码/展示信息和 traceId。工具事件不带文档正文，
  * {@code message.delta} 不带模型推理内容。{@code citations} 为 Phase 2C 追加字段，
  * 仅 {@code sources} 事件携带；{@code approval} 仅审批事件携带，其余事件保持 null。
  */
@@ -57,6 +57,14 @@ public record AgentRunEvent(
         return new AgentRunEvent("tool.completed", runId, null,
                 null, step, tool, resultCount, durationMs,
                 null, null, null, null, null, null, null, null, null, null);
+    }
+
+    /** 副作用工具完成事件只公开受控状态与安全提示，不携带工具结果正文。 */
+    public static AgentRunEvent actionToolCompleted(String runId, String tool, int step,
+                                                    long durationMs, String code, String message) {
+        return new AgentRunEvent("tool.completed", runId, null,
+                null, step, tool, null, durationMs,
+                null, null, code, message, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent delta(String runId, String content) {

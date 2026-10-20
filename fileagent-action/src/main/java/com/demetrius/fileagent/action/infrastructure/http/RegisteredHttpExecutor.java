@@ -53,11 +53,11 @@ public class RegisteredHttpExecutor {
     public RegisteredHttpExecutor(RegisteredHttpActionRegistry registry,
                                   ObjectMapper objectMapper,
                                   SafeHttpUriBuilder uriBuilder,
-                                  ValidatedDns validatedDns) {
+                                  BlockedAddressPolicy blockedAddressPolicy) {
         this.registry = registry;
         this.objectMapper = objectMapper;
         this.uriBuilder = uriBuilder;
-        this.validatedDns = validatedDns;
+        this.validatedDns = new ValidatedDns(blockedAddressPolicy);
     }
 
     /** 执行一次已注册动作；本方法不做网络重试，无法确认远端结果时返回 OUTCOME_UNKNOWN。 */

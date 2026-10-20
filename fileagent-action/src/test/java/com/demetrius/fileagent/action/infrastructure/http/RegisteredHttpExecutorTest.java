@@ -9,7 +9,6 @@ import com.demetrius.fileagent.api.enums.ActionRiskLevel;
 import com.demetrius.fileagent.common.security.EnvelopeCrypto;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import okhttp3.Dns;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -158,7 +157,6 @@ class RegisteredHttpExecutorTest {
         properties.setEndpoints(List.of(endpoint(path, maxResponseBytes, readTimeout)));
         RegisteredHttpActionRegistry registry = RegisteredHttpActionRegistry.forTesting(
                 properties, objectMapper, crypto);
-        Dns loopbackDns = hostname -> List.of(InetAddress.getLoopbackAddress());
         BlockedAddressPolicy allowLoopback = new BlockedAddressPolicy() {
             @Override
             public boolean isBlocked(InetAddress address) {
@@ -166,7 +164,7 @@ class RegisteredHttpExecutorTest {
             }
         };
         return new RegisteredHttpExecutor(registry, objectMapper, new SafeHttpUriBuilder(),
-                ValidatedDns.forTesting(loopbackDns, allowLoopback));
+                allowLoopback);
     }
 
     private Endpoint endpoint(String path, int maxResponseBytes, Duration readTimeout) {

@@ -56,12 +56,21 @@ public class RegisteredHttpActionRegistry {
     private final Map<String, RegisteredEndpoint> endpoints;
     private final ObjectMapper objectMapper;
     private final EnvelopeCrypto envelopeCrypto;
+    private final boolean allowInsecureLoopbackForTests;
 
     public RegisteredHttpActionRegistry(RegisteredHttpActionProperties properties,
                                         ObjectMapper objectMapper,
                                         EnvelopeCrypto envelopeCrypto) {
+        this(properties, objectMapper, envelopeCrypto, false);
+    }
+
+    private RegisteredHttpActionRegistry(RegisteredHttpActionProperties properties,
+                                         ObjectMapper objectMapper,
+                                         EnvelopeCrypto envelopeCrypto,
+                                         boolean allowInsecureLoopbackForTests) {
         this.objectMapper = objectMapper;
         this.envelopeCrypto = envelopeCrypto;
+        this.allowInsecureLoopbackForTests = allowInsecureLoopbackForTests;
         Map<String, RegisteredEndpoint> registered = new LinkedHashMap<>();
         List<Endpoint> configured = properties.getEndpoints() == null ? List.of() : properties.getEndpoints();
         for (Endpoint endpoint : configured) {
@@ -71,6 +80,12 @@ public class RegisteredHttpActionRegistry {
             }
         }
         this.endpoints = Map.copyOf(registered);
+    }
+
+    static RegisteredHttpActionRegistry forTesting(RegisteredHttpActionProperties properties,
+                                                    ObjectMapper objectMapper,
+                                                    EnvelopeCrypto envelopeCrypto) {
+        return new RegisteredHttpActionRegistry(properties, objectMapper, envelopeCrypto, true);
     }
 
     /** 返回不包含真实 URL、凭证和内部 Header 的跨域定义快照。 */
@@ -266,7 +281,15 @@ public class RegisteredHttpActionRegistry {
         if (optionalText(credentialRef) != null && !"https".equals(scheme)) {
             throw new IllegalStateException(endpointId + " 带凭证的 Endpoint 必须使用 HTTPS");
         }
+        if (!"https".equals(scheme)
+                && !(allowInsecureLoopbackForTests && isLoopbackHost(uri.getHost()))) {
+            throw new IllegalStateException(endpointId + ".baseUrl 生产配置必须使用 HTTPS");
+        }
         return uri.normalize().toString();
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        return "localhost".equalsIgnoreCase(host) || "::1".equals(host) || host.startsWith("127.");
     }
 
     private String writeJson(Object value) {

@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.action.infrastructure.http;
 
 import okhttp3.Dns;
+import org.springframework.stereotype.Component;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -14,14 +15,23 @@ import java.util.Objects;
  * @since 0.1.0
  * @date 2026-10-20
  */
+@Component
 public class ValidatedDns implements Dns {
 
     private final Dns delegate;
     private final BlockedAddressPolicy policy;
 
-    public ValidatedDns(Dns delegate, BlockedAddressPolicy policy) {
+    public ValidatedDns(BlockedAddressPolicy policy) {
+        this(Dns.SYSTEM, policy);
+    }
+
+    private ValidatedDns(Dns delegate, BlockedAddressPolicy policy) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
         this.policy = Objects.requireNonNull(policy, "policy");
+    }
+
+    static ValidatedDns forTesting(Dns delegate, BlockedAddressPolicy policy) {
+        return new ValidatedDns(delegate, policy);
     }
 
     @Override

@@ -55,6 +55,17 @@ class RegisteredHttpActionRegistryTest {
     }
 
     @Test
+    void shouldRejectAnonymousPlainHttpInProductionRegistry() {
+        Endpoint endpoint = validEndpoint("expense");
+        endpoint.setBaseUrl("http://api.example.com");
+        endpoint.setCredentialRef(null);
+
+        assertThatThrownBy(() -> registry(properties(endpoint)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("生产配置必须使用 HTTPS");
+    }
+
+    @Test
     void shouldRejectWriteActionWithoutRemoteIdempotencyHeader() {
         Endpoint endpoint = validEndpoint("expense");
         endpoint.setIdempotencyHeader(null);

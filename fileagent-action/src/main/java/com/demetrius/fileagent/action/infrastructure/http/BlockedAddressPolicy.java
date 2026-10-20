@@ -1,5 +1,7 @@
 package com.demetrius.fileagent.action.infrastructure.http;
 
+import org.springframework.stereotype.Component;
+
 import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -11,6 +13,7 @@ import java.net.InetAddress;
  * @since 0.1.0
  * @date 2026-10-20
  */
+@Component
 public class BlockedAddressPolicy {
 
     /** 任一非公网或可映射到受限 IPv4 的地址都必须阻断。 */

@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.action.infrastructure.http;
 
 import okhttp3.HttpUrl;
+import org.springframework.stereotype.Component;
 
 import java.net.URI;
 import java.net.URLDecoder;
@@ -22,6 +23,7 @@ import java.util.regex.Pattern;
  * @since 0.1.0
  * @date 2026-10-20
  */
+@Component
 public class SafeHttpUriBuilder {
 
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{([A-Za-z][A-Za-z0-9_-]{0,63})}");

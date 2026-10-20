@@ -60,7 +60,7 @@ class ValidatedDnsTest {
         Dns delegate = hostname -> List.of(
                 InetAddress.getByName("8.8.8.8"),
                 InetAddress.getByName("127.0.0.1"));
-        ValidatedDns dns = new ValidatedDns(delegate, policy);
+        ValidatedDns dns = ValidatedDns.forTesting(delegate, policy);
 
         assertThatThrownBy(() -> dns.lookup("api.example.com"))
                 .isInstanceOf(UnknownHostException.class)
@@ -73,7 +73,7 @@ class ValidatedDnsTest {
         Dns changing = hostname -> lookups.getAndIncrement() == 0
                 ? List.of(InetAddress.getByName("8.8.8.8"))
                 : List.of(InetAddress.getByName("10.0.0.1"));
-        ValidatedDns dns = new ValidatedDns(changing, policy);
+        ValidatedDns dns = ValidatedDns.forTesting(changing, policy);
 
         assertThat(dns.lookup("api.example.com")).containsExactly(InetAddress.getByName("8.8.8.8"));
         assertThatThrownBy(() -> dns.lookup("api.example.com"))

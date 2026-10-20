@@ -149,7 +149,9 @@ class AgentScopeApprovalPauseTest {
                 new GetDocumentOutlineTool(),
                 historyService,
                 approvalService,
-                List.of((AgentActionToolFactory) command -> new AskingActionTool(command.runId())));
+                List.of((AgentActionToolFactory) command -> new AskingActionTool(command.runId())),
+                new com.demetrius.fileagent.agent.application.AgentCitationService(
+                        mock(KnowledgeContextPort.class)));
 
         List<String> eventTypes = adapter.execute(new AgentRunCommand(
                         "run-ask", 1L, "trace-ask", "执行测试操作", List.of(), KnowledgeScope.global()))

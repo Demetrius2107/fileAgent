@@ -114,7 +114,9 @@ class AgentScopeApprovalResumeTest {
                 mock(AgentHistoryService.class),
                 approvalService,
                 List.of((AgentActionToolFactory) command -> new ResumedActionTool(
-                        command.runId(), executionCount, actionStages)));
+                        command.runId(), executionCount, actionStages)),
+                new com.demetrius.fileagent.agent.application.AgentCitationService(
+                        mock(KnowledgeContextPort.class)));
 
         List<String> eventTypes = adapter.resume(new AgentRunCommand(
                         runId, 1L, "trace-resume", "执行测试操作", List.of(), KnowledgeScope.global()),
@@ -175,7 +177,9 @@ class AgentScopeApprovalResumeTest {
                 mock(AgentHistoryService.class),
                 approvalService,
                 List.of((AgentActionToolFactory) command -> new ResumedActionTool(
-                        command.runId(), new AtomicInteger(), new CopyOnWriteArrayList<>())));
+                        command.runId(), new AtomicInteger(), new CopyOnWriteArrayList<>())),
+                new com.demetrius.fileagent.agent.application.AgentCitationService(
+                        mock(KnowledgeContextPort.class)));
 
         assertThat(adapter.recoverWaitingApproval(new AgentRunCommand(
                 runId, 1L, "trace-rebuild", "执行测试操作", List.of(), KnowledgeScope.global())))

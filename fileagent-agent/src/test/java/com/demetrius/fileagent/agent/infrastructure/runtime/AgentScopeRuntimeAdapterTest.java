@@ -59,11 +59,10 @@ class AgentScopeRuntimeAdapterTest {
                 mock(GetDocumentOutlineTool.class),
                 mock(AgentHistoryService.class),
                 mock(AgentApprovalService.class),
-                List.of()),
-                mock(AgentHistoryService.class),
+                List.of(),
                 // 引用抽取走真实服务（正则逻辑所在），核验端口保持 mock
                 new com.demetrius.fileagent.agent.application.AgentCitationService(
-                        mock(KnowledgeContextPort.class));
+                        mock(KnowledgeContextPort.class)));
     }
 
     @Test

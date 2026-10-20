@@ -141,6 +141,7 @@ public class RegisteredHttpActionRegistry {
         }
         Set<String> modelWritableFields = immutableSortedSet(egress.getModelWritableFields());
         Map<String, Object> requestSchema = validateSchema(endpointId, endpoint.getRequestSchema(), modelWritableFields);
+        new SafeHttpUriBuilder().validateDefinition(baseUrl, pathTemplate, requestSchema);
         String resourceScope = requireText(endpoint.getResourceScope(), endpointId + ".resourceScope");
         String safeSummary = requireText(endpoint.getSafeSummary(), endpointId + ".safeSummary");
         String expectedImpact = requireText(endpoint.getExpectedImpact(), endpointId + ".expectedImpact");

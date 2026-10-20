@@ -75,6 +75,16 @@ class RegisteredHttpActionRegistryTest {
     }
 
     @Test
+    void shouldRejectUnsafePathTemplateDuringRegistration() {
+        Endpoint endpoint = validEndpoint("expense");
+        endpoint.setPathTemplate("//evil.example/expenses");
+
+        assertThatThrownBy(() -> registry(properties(endpoint)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("路径模板");
+    }
+
+    @Test
     void shouldRejectSchemaBeyondDepthFieldAndStringLimits() {
         Endpoint deep = validEndpoint("deep");
         deep.setRequestSchema(deepSchema(10));

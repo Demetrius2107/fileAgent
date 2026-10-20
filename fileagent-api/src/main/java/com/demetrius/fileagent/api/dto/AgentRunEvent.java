@@ -29,11 +29,12 @@ public record AgentRunEvent(
         String traceId,
         String eventId,
         Long runVersion,
+        AgentApprovalView approval,
         List<AgentCitation> citations) {
 
     public static AgentRunEvent runStarted(String runId, String traceId) {
         return new AgentRunEvent("run.started", runId, AgentRunStatus.RUNNING,
-                null, null, null, null, null, null, null, null, null, null, traceId, null, null, null);
+                null, null, null, null, null, null, null, null, null, null, traceId, null, null, null, null);
     }
 
     public static AgentRunEvent pending(String runId) {
@@ -43,6 +44,24 @@ public record AgentRunEvent(
     public static AgentRunEvent status(String runId, AgentRunStatus status, String summary) {
         return new AgentRunEvent("run.status", runId, status,
                 summary, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        return new AgentRunEvent(
+                "run.status",
+                runId,
+                status,
+                summary,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     public static AgentRunEvent toolStarted(String runId, String tool, int step) {
@@ -71,6 +90,7 @@ public record AgentRunEvent(
     public static AgentRunEvent sources(String runId, List<String> files, List<AgentCitation> citations) {
         return new AgentRunEvent("sources", runId, null,
                 null, null, null, null, null, null, files, null, null, null, null, null, null, citations);
+                null, null, null, null, null, null, files, null, null, null, null, null, null, null);
     }
 
     public static AgentRunEvent completed(String runId, Long messageId) {
@@ -90,11 +110,26 @@ public record AgentRunEvent(
                 null, null, null, null, null, null, null, code, message, null, traceId, null, null, null);
     }
 
+    /** AgentScope 已保存 ASKING 检查点后，向客户端公开当前一次不可变动作审批。 */
+    public static AgentRunEvent approvalRequired(String runId, AgentApprovalView approval) {
+        return new AgentRunEvent("approval.required", runId, AgentRunStatus.WAITING_APPROVAL,
+                null, null, approval == null ? null : approval.tool(), null, null,
+                null, null, null, null, null, null, null, null, approval);
+    }
+
+    /** 审批已落库并重新进入待调度队列；事件不包含用户备注或原始工具参数。 */
+    public static AgentRunEvent approvalResolved(String runId, AgentApprovalView approval) {
+        return new AgentRunEvent("approval.resolved", runId, AgentRunStatus.PENDING,
+                null, null, approval == null ? null : approval.tool(), null, null,
+                null, null, null, null, null, null, null, null, approval);
+                null, null, null, null, null, null, null, code, message, null, traceId, null, null, null);
+    }
+
     /**
      * 由运行事件通道在发布时写入不可预测事件 ID 与对应 Run 版本。
      */
     public AgentRunEvent withMetadata(String eventId, long runVersion) {
         return new AgentRunEvent(type, runId, status, summary, step, tool, resultCount, durationMs,
-                content, files, code, message, messageId, traceId, eventId, runVersion, citations);
+                content, files, code, message, messageId, traceId, eventId, runVersion, citations, approval);
     }
 }

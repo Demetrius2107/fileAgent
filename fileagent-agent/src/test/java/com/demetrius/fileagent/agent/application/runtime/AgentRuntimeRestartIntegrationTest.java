@@ -3,6 +3,7 @@ package com.demetrius.fileagent.agent.application.runtime;
 import com.demetrius.fileagent.agent.application.AgentRunFinalizationService;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRunRepository;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalRepository;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.persistence.AgentPersistenceAdapter;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
@@ -200,6 +201,7 @@ class AgentRuntimeRestartIntegrationTest {
         @Bean
         AgentRunExecutionCoordinator agentRunExecutionCoordinator(
                 AgentRunRepository runRepository,
+                AgentApprovalRepository approvalRepository,
                 AgentExecutionEngine executionEngine,
                 AgentRunCommandCodec commandCodec,
                 AgentRunEventHub eventHub,
@@ -207,7 +209,7 @@ class AgentRuntimeRestartIntegrationTest {
                 AgentProperties properties,
                 Clock clock,
                 ThreadPoolTaskExecutor executor) {
-            return new AgentRunExecutionCoordinator(runRepository, executionEngine, commandCodec,
+            return new AgentRunExecutionCoordinator(runRepository, approvalRepository, executionEngine, commandCodec,
                     eventHub, finalizationService, properties, clock, executor);
         }
     }

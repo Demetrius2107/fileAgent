@@ -1,9 +1,12 @@
 package com.demetrius.fileagent.agent.application.runtime;
 
 import com.demetrius.fileagent.agent.application.AgentRunFinalizationService;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalEntity;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalRepository;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRunRepository;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
+import com.demetrius.fileagent.api.dto.AgentApprovalView;
 import com.demetrius.fileagent.api.dto.AgentCitation;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
@@ -21,6 +24,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -45,6 +49,7 @@ public class AgentRunExecutionCoordinator {
     private static final String CODE_RECOVERY_FAILED = "AGENT_RECOVERY_FAILED";
 
     private final AgentRunRepository runRepository;
+    private final AgentApprovalRepository approvalRepository;
     private final AgentExecutionEngine executionEngine;
     private final AgentRunCommandCodec commandCodec;
     private final AgentRunEventHub eventHub;
@@ -59,6 +64,7 @@ public class AgentRunExecutionCoordinator {
     private final String executionOwner = "fileagent-" + UUID.randomUUID();
 
     public AgentRunExecutionCoordinator(AgentRunRepository runRepository,
+                                        AgentApprovalRepository approvalRepository,
                                         AgentExecutionEngine executionEngine,
                                         AgentRunCommandCodec commandCodec,
                                         AgentRunEventHub eventHub,
@@ -67,6 +73,7 @@ public class AgentRunExecutionCoordinator {
                                         Clock clock,
                                         @Qualifier("agentRunTaskExecutor") ThreadPoolTaskExecutor executor) {
         this.runRepository = runRepository;
+        this.approvalRepository = approvalRepository;
         this.executionEngine = executionEngine;
         this.commandCodec = commandCodec;
         this.eventHub = eventHub;
@@ -96,7 +103,7 @@ public class AgentRunExecutionCoordinator {
             if (run.getStatus() == AgentRunStatus.PENDING) {
                 recoverPending(run, now);
             } else if (run.getStatus() == AgentRunStatus.RUNNING) {
-                failRecovery(run, CODE_RUN_INTERRUPTED, now);
+                recoverInterruptedRun(run, now);
             }
         }
     }
@@ -173,6 +180,29 @@ public class AgentRunExecutionCoordinator {
         }
     }
 
+    /**
+     * 仅允许将严格校验出的 ASKING 检查点收敛回 WAITING_APPROVAL，其余中断运行一律不重放。
+     */
+    private void recoverInterruptedRun(AgentRunEntity run, Instant now) {
+        try {
+            AgentRunCommand command = commandCodec.decrypt(run);
+            Optional<AgentApprovalView> approval = Optional.ofNullable(
+                    executionEngine.recoverWaitingApproval(command)).orElse(Optional.empty());
+            if (approval.isPresent()) {
+                AgentRunEntity waiting = runRepository.findByRunId(run.getRunId()).orElse(null);
+                if (waiting != null && waiting.getStatus() == AgentRunStatus.WAITING_APPROVAL) {
+                    eventHub.publish(AgentRunEvent.approvalRequired(waiting.getRunId(), approval.get()),
+                            Math.max(0L, waiting.getVersion()));
+                    return;
+                }
+                log.warn("中断 Agent Run 的审批恢复未收敛到等待状态 runId={}", run.getRunId());
+            }
+        } catch (Exception e) {
+            log.warn("中断 Agent Run 的审批恢复失败 runId={}: {}", run.getRunId(), e.getMessage());
+        }
+        failRecovery(run, CODE_RUN_INTERRUPTED, now);
+    }
+
     private void executeInWorker(AgentRunCommand command) {
         String runId = command.runId();
         try {
@@ -195,7 +225,10 @@ public class AgentRunExecutionCoordinator {
             leasedRun.start(now);
             AgentRunEntity runningRun = runRepository.save(leasedRun);
             leasedRunIds.add(runId);
-            Flux<AgentRunEvent> execution = executionEngine.execute(command);
+            AgentApprovalEntity approval = approvalRepository.findLatestResolvedByRunId(runId).orElse(null);
+            Flux<AgentRunEvent> execution = approval == null
+                    ? executionEngine.execute(command)
+                    : executionEngine.resume(command, approval);
             StringBuilder answer = new StringBuilder();
             LinkedHashSet<String> sourceFiles = new LinkedHashSet<>();
             List<AgentCitation> citations = new CopyOnWriteArrayList<>();

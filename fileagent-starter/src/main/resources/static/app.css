@@ -566,6 +566,87 @@ body {
     background: var(--danger-light);
 }
 
+/* 单次高风险操作的内联审批区，信息来自服务端脱敏审批快照。 */
+.agent-approval {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border: 1px solid #e7c76f;
+    border-radius: 6px;
+    background: #fffbeb;
+    color: #3f3f46;
+}
+.agent-approval[data-expired="true"] {
+    border-color: #f0b6b6;
+    background: #fff5f5;
+}
+.agent-approval-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #713f12;
+    overflow-wrap: anywhere;
+}
+.agent-approval[data-expired="true"] .agent-approval-title { color: #991b1b; }
+.agent-approval-details {
+    display: grid;
+    gap: 5px;
+    margin: 8px 0;
+}
+.agent-approval-detail {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 8px;
+    font-size: 12px;
+    line-height: 1.45;
+}
+.agent-approval-detail dt { color: #78716c; }
+.agent-approval-detail dd {
+    min-width: 0;
+    margin: 0;
+    color: #44403c;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+.agent-approval-deadline {
+    font-size: 12px;
+    color: #a16207;
+}
+.agent-approval[data-expired="true"] .agent-approval-deadline { color: #b91c1c; }
+.agent-approval-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+.agent-approval-actions button {
+    min-height: 30px;
+    padding: 5px 10px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.agent-approval-approve {
+    color: #fff;
+    background: #047857;
+}
+.agent-approval-approve:hover:not(:disabled) { background: #065f46; }
+.agent-approval-deny {
+    color: #991b1b;
+    border-color: #f1b5b5 !important;
+    background: #fff;
+}
+.agent-approval-deny:hover:not(:disabled) { background: #fef2f2; }
+.agent-approval-actions button:disabled {
+    cursor: default;
+    opacity: 0.55;
+}
+.agent-approval-resolved {
+    font-size: 12px;
+    color: #57534e;
+}
+
 /* Agent 工具过程轨迹：每一步一行，回答完成后保留 */
 .agent-tool-status {
     margin-top: 6px;
@@ -910,6 +991,7 @@ dialog.upload-dialog form {
     .session-panel.open, .knowledge-panel.open { transform: translateX(0); }
 
     .message { max-width: 92%; }
+    .agent-approval-detail { grid-template-columns: 36px minmax(0, 1fr); }
 }
 
 /* ===== 状态徽标 ===== */

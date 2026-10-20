@@ -2,10 +2,13 @@ package com.demetrius.fileagent.agent.infrastructure.persistence;
 
 import com.demetrius.fileagent.agent.domain.checkpoint.AgentCheckpointEntity;
 import com.demetrius.fileagent.agent.domain.checkpoint.AgentCheckpointRepository;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalEntity;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalRepository;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRunRepository;
 import com.demetrius.fileagent.agent.domain.step.AgentStepEntity;
 import com.demetrius.fileagent.agent.domain.step.AgentStepRepository;
+import com.demetrius.fileagent.api.enums.ApprovalStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -24,11 +27,13 @@ import java.util.Set;
  */
 @Component
 @RequiredArgsConstructor
-public class AgentPersistenceAdapter implements AgentRunRepository, AgentStepRepository, AgentCheckpointRepository {
+public class AgentPersistenceAdapter implements AgentRunRepository, AgentStepRepository, AgentCheckpointRepository,
+        AgentApprovalRepository {
 
     private final AgentRunJpaRepository agentRunJpaRepository;
     private final AgentStepJpaRepository agentStepJpaRepository;
     private final AgentCheckpointJpaRepository agentCheckpointJpaRepository;
+    private final AgentApprovalJpaRepository agentApprovalJpaRepository;
 
     @Override
     public AgentRunEntity save(AgentRunEntity run) {
@@ -66,6 +71,11 @@ public class AgentPersistenceAdapter implements AgentRunRepository, AgentStepRep
     }
 
     @Override
+    public Optional<AgentStepEntity> findById(Long stepId) {
+        return agentStepJpaRepository.findById(stepId);
+    }
+
+    @Override
     public List<AgentStepEntity> findStepsByRunId(String runId) {
         return agentStepJpaRepository.findByRunIdOrderBySequenceNoAsc(runId);
     }
@@ -88,5 +98,54 @@ public class AgentPersistenceAdapter implements AgentRunRepository, AgentStepRep
     @Override
     public Set<String> findRunIds() {
         return new LinkedHashSet<>(agentCheckpointJpaRepository.findAllRunIds());
+    }
+
+    @Override
+    public AgentApprovalEntity save(AgentApprovalEntity approval) {
+        return agentApprovalJpaRepository.save(approval);
+    }
+
+    @Override
+    public Optional<AgentApprovalEntity> findByApprovalId(String approvalId) {
+        return agentApprovalJpaRepository.findById(approvalId);
+    }
+
+    @Override
+    public Optional<AgentApprovalEntity> findByRunIdAndToolCallId(String runId, String toolCallId) {
+        return agentApprovalJpaRepository.findByRunIdAndToolCallId(runId, toolCallId);
+    }
+
+    @Override
+    public Optional<AgentApprovalEntity> findPendingByRunId(String runId) {
+        return agentApprovalJpaRepository.findFirstByRunIdAndStatusOrderByCreatedAtDesc(runId,
+                ApprovalStatus.PENDING);
+    }
+
+    @Override
+    public Optional<AgentApprovalEntity> findLatestResolvedByRunId(String runId) {
+        return agentApprovalJpaRepository.findFirstByRunIdAndStatusInOrderByUpdatedAtDesc(runId,
+                List.of(ApprovalStatus.APPROVED, ApprovalStatus.DENIED));
+    }
+
+    @Override
+    public List<AgentApprovalEntity> findPendingExpiredAt(Instant now) {
+        return agentApprovalJpaRepository.findByStatusAndExpiresAtLessThanEqual(ApprovalStatus.PENDING, now);
+    }
+
+    @Override
+    public boolean decidePending(String approvalId, long expectedVersion, ApprovalStatus decision,
+                                 String actorId, String comment, String reason, Instant now) {
+        return agentApprovalJpaRepository.decidePending(approvalId, expectedVersion, decision,
+                actorId, comment, reason, now) == 1;
+    }
+
+    @Override
+    public boolean expirePending(String approvalId, long expectedVersion, Instant now, String reason) {
+        return agentApprovalJpaRepository.expirePending(approvalId, expectedVersion, now, reason) == 1;
+    }
+
+    @Override
+    public boolean cancelPending(String approvalId, long expectedVersion, Instant now, String reason) {
+        return agentApprovalJpaRepository.cancelPending(approvalId, expectedVersion, now, reason) == 1;
     }
 }

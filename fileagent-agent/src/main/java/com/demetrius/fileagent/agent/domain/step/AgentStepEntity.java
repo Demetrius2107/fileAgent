@@ -1,5 +1,6 @@
 package com.demetrius.fileagent.agent.domain.step;
 
+import com.demetrius.fileagent.agent.domain.policy.AgentActionCandidate;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -165,6 +166,34 @@ public class AgentStepEntity {
         return new AgentStepEntity(runId, sequenceNo, stepType, now);
     }
 
+    /**
+     * 创建已经通过基础校验但必须等待审批的工具步骤，所有可恢复绑定事实一次写入。
+     */
+    public static AgentStepEntity waitingApproval(AgentActionCandidate candidate, int sequenceNo,
+                                                  String inputCiphertext, Instant now) {
+        if (candidate == null) {
+            throw new IllegalArgumentException("candidate 不能为空");
+        }
+        AgentStepEntity step = pending(candidate.runId(), sequenceNo, AgentStepType.TOOL_CALL, now);
+        step.toolCallId = requireText(candidate.toolCallId(), "toolCallId");
+        step.toolName = requireText(candidate.toolName(), "toolName");
+        step.toolVersion = requireText(candidate.toolVersion(), "toolVersion");
+        step.toolDefinitionVersion = requireText(candidate.toolDefinitionVersion(), "toolDefinitionVersion");
+        step.endpointRevision = requireText(candidate.endpointRevision(), "endpointRevision");
+        step.endpointConfigHash = requireText(candidate.endpointConfigHash(), "endpointConfigHash");
+        step.riskLevel = requireValue(candidate.riskLevel(), "riskLevel").name();
+        step.policyDecision = "ASK";
+        step.policyVersion = requireText(candidate.policyVersion(), "policyVersion");
+        step.safeSummary = requireText(candidate.safeSummary(), "safeSummary");
+        step.canonicalInputHmac = requireText(candidate.canonicalInputHmac(), "canonicalInputHmac");
+        step.inputCiphertext = requireText(inputCiphertext, "inputCiphertext");
+        step.operationFingerprint = requireText(candidate.operationId(), "operationId");
+        step.operationId = candidate.operationId();
+        step.start(now);
+        step.waitForApproval();
+        return step;
+    }
+
     public void start(Instant now) {
         Instant transitionTime = requireValue(now, "now");
         requireStatus(AgentStepStatus.PENDING);
@@ -175,6 +204,14 @@ public class AgentStepEntity {
     public void waitForApproval() {
         requireStatus(AgentStepStatus.RUNNING);
         this.status = AgentStepStatus.WAITING_APPROVAL;
+    }
+
+    /**
+     * 用户已经对绑定动作作出决定后恢复原步骤，不能通过新建步骤绕过原审批审计。
+     */
+    public void resumeAfterApproval() {
+        requireStatus(AgentStepStatus.WAITING_APPROVAL);
+        this.status = AgentStepStatus.RUNNING;
     }
 
     public void succeed(String code, String summary, Instant now) {

@@ -25,6 +25,9 @@ public class AgentProperties {
     /** Feature Flag：是否启用结构化检索模式（search_docs 声明查询类型 + 档位策略），默认关闭。 */
     private boolean adaptiveRetrievalEnabled = false;
 
+    /** Feature Flag：是否向 Agent 暴露受控副作用工具，默认关闭。 */
+    private boolean actionsEnabled = false;
+
     private int maxSteps = 8;
     private int maxModelCalls = 4;
     private Duration runTimeout = Duration.ofSeconds(45);
@@ -40,6 +43,8 @@ public class AgentProperties {
     private Duration recoveryScanInterval = Duration.ofSeconds(15);
     private int replayMaxEvents = 100;
     private int replayMaxBytes = 256 * 1024;
+    private Duration approvalTimeout = Duration.ofMinutes(5);
+    private Duration approvalExpiryScanInterval = Duration.ofSeconds(30);
 
     private int maxPromptCharacters = 8000;
     private int maxHistoryCharacters = 8000;
@@ -69,7 +74,9 @@ public class AgentProperties {
         }
         if (pendingStartTimeout.isNegative() || pendingStartTimeout.isZero()
                 || leaseDuration.isNegative() || leaseDuration.isZero()
-                || recoveryScanInterval.isNegative() || recoveryScanInterval.isZero()) {
+                || recoveryScanInterval.isNegative() || recoveryScanInterval.isZero()
+                || approvalTimeout.isNegative() || approvalTimeout.isZero()
+                || approvalExpiryScanInterval.isNegative() || approvalExpiryScanInterval.isZero()) {
             throw new BizException("fileagent.agent 运行时长配置必须大于 0");
         }
     }

@@ -40,4 +40,24 @@ class AgentRunEntityTest {
         assertThat(run.getExecutionOwner()).isNull();
         assertThat(run.getLeaseExpiresAt()).isNull();
     }
+
+    @Test
+    void shouldKeepSessionSlotWhileWaitingForApprovalAndReturnToPendingForResume() {
+        AgentRunEntity run = AgentRunEntity.pending(
+                "run-approval", 1L, "trace-1", "local-operator", "cipher", "hmac");
+        run.start(NOW);
+
+        run.waitForApproval(NOW.plusSeconds(1));
+
+        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.WAITING_APPROVAL);
+        assertThat(run.getActiveSlot()).isEqualTo("session:1");
+        assertThat(run.getExecutionOwner()).isNull();
+        assertThat(run.getLeaseExpiresAt()).isNull();
+
+        run.resumeAfterApproval(NOW.plusSeconds(2));
+
+        assertThat(run.getStatus()).isEqualTo(AgentRunStatus.PENDING);
+        assertThat(run.getActiveSlot()).isEqualTo("session:1");
+        assertThat(run.getStartedAt()).isEqualTo(NOW);
+    }
 }

@@ -1,22 +1,29 @@
 package com.demetrius.fileagent.agent.infrastructure.runtime;
 
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
+import com.demetrius.fileagent.agent.application.AgentApprovalService;
 import com.demetrius.fileagent.agent.application.AgentCitationService;
 import com.demetrius.fileagent.agent.application.AgentHistoryService;
 import com.demetrius.fileagent.agent.application.runtime.AgentExecutionEngine;
 import com.demetrius.fileagent.agent.application.tool.AgentToolContext;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.agent.domain.run.AgentRunBudget;
 import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.run.AgentExecutionHandleRegistry;
 import com.demetrius.fileagent.agent.infrastructure.state.DatabaseAgentStateStore;
+import com.demetrius.fileagent.agent.infrastructure.state.StrictAgentStateLoader;
 import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
 import com.demetrius.fileagent.api.dto.AgentCitation;
+import com.demetrius.fileagent.agent.infrastructure.tool.AgentActionToolFactory;
+import com.demetrius.fileagent.agent.infrastructure.tool.AgentApprovalBindingChangedException;
+import com.demetrius.fileagent.agent.infrastructure.tool.RunScopedActionTool;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
+import com.demetrius.fileagent.api.dto.AgentApprovalView;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
 import com.demetrius.fileagent.api.dto.MessageDto;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
@@ -30,6 +37,8 @@ import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEndEvent;
 import io.agentscope.core.event.AgentEvent;
 import io.agentscope.core.event.AgentResultEvent;
+import io.agentscope.core.event.ConfirmResult;
+import io.agentscope.core.event.RequireUserConfirmEvent;
 import io.agentscope.core.event.ExceedMaxItersEvent;
 import io.agentscope.core.event.TextBlockDeltaEvent;
 import io.agentscope.core.event.ToolCallStartEvent;
@@ -38,8 +47,11 @@ import io.agentscope.core.message.ContentBlock;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.MsgRole;
 import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.ToolUseBlock;
+import io.agentscope.core.state.AgentState;
 import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
+import io.agentscope.core.util.JsonUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -47,12 +59,18 @@ import reactor.core.publisher.Flux;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * AgentScope ReAct 单次执行引擎：实现 {@link AgentExecutionEngine}。
@@ -71,11 +89,18 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     private static final String CODE_RUN_CANCELLED = "AGENT_RUN_CANCELLED";
     private static final String CODE_MODEL_UNAVAILABLE = "AGENT_MODEL_UNAVAILABLE";
     private static final String CODE_RUNTIME_UNAVAILABLE = "AGENT_RUNTIME_UNAVAILABLE";
+    private static final String CODE_APPROVAL_PERSIST_FAILED = "AGENT_APPROVAL_PERSIST_FAILED";
+    private static final String CODE_TOOL_BATCH_REQUIRES_SEQUENTIAL_EXECUTION =
+            "TOOL_BATCH_REQUIRES_SEQUENTIAL_EXECUTION";
+    private static final String CODE_APPROVAL_TOOL_UNAVAILABLE = "AGENT_APPROVAL_TOOL_UNAVAILABLE";
+    private static final String CODE_APPROVAL_BINDING_CHANGED = "AGENT_APPROVAL_BINDING_CHANGED";
+    private static final String CODE_APPROVAL_STATE_INVALID = "AGENT_APPROVAL_STATE_INVALID";
 
     private final AgentProperties properties;
     private final AdaptiveRetrievalProperties adaptiveRetrievalProperties;
     private final AgentExecutionHandleRegistry executionHandleRegistry;
     private final DatabaseAgentStateStore databaseAgentStateStore;
+    private final StrictAgentStateLoader strictAgentStateLoader;
     private final AgentScopeModelFactory modelFactory;
     private final AgentPromptFactory promptFactory;
     private final KnowledgeSearchPort knowledgeSearchPort;
@@ -87,11 +112,36 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     private final ReadDocumentContextTool readDocumentContextTool;
     private final GetDocumentOutlineTool getDocumentOutlineTool;
     private final AgentHistoryService historyService;
+    private final AgentApprovalService approvalService;
+    private final List<AgentActionToolFactory> actionToolFactories;
     private final AgentCitationService citationService;
 
     @Override
     public Flux<AgentRunEvent> execute(AgentRunCommand command) {
         return Flux.defer(() -> executeInIsolatedRuntime(command));
+    }
+
+    @Override
+    public Flux<AgentRunEvent> resume(AgentRunCommand command, AgentApprovalEntity approval) {
+        return Flux.defer(() -> resumeInIsolatedRuntime(command, approval));
+    }
+
+    @Override
+    public Optional<AgentApprovalView> recoverWaitingApproval(AgentRunCommand command) {
+        if (command == null || command.runId() == null || command.runId().isBlank()) {
+            throw new IllegalArgumentException("Agent Run 命令不能为空");
+        }
+        AgentState state = strictAgentStateLoader.loadVerified(command.runId());
+        Optional<ToolUseBlock> askingToolCall = findSingleAskingToolCall(state);
+        if (askingToolCall.isEmpty()) {
+            return Optional.empty();
+        }
+        RunScopedActionTool actionTool = createActionTools(command, true).get(askingToolCall.get().getName());
+        if (actionTool == null) {
+            throw new IllegalStateException("审批动作工具不可用");
+        }
+        return Optional.of(approvalService.pause(command.runId(),
+                actionTool.rebuildApprovalCandidate(askingToolCall.get())));
     }
 
     private Flux<AgentRunEvent> executeInIsolatedRuntime(AgentRunCommand command) {
@@ -117,12 +167,14 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
             Map<String, Long> toolStartNanos = new ConcurrentHashMap<>();
             StringBuilder answer = new StringBuilder();
             AtomicInteger step = new AtomicInteger(0);
+            AtomicReference<PendingApproval> pendingApproval = new AtomicReference<>();
 
             return Flux.concat(
                             Flux.just(eventMapper.started(run.runId(), run.traceId())),
                             agent.streamEvents(userMessage, ctx)
                                     .concatMap(ev -> mapEvent(ev, run, agent, ctx, step,
-                                            toolStartNanos, answer, assembly.toolContext(), null)))
+                                            toolStartNanos, answer, assembly.toolContext(), assembly.actionTools(),
+                                            pendingApproval, null, null)))
                     .timeout(effectiveRunTimeout())
                     .onErrorResume(e -> onError(e, run))
                     .doFinally(signal -> executionHandleRegistry.remove(command.runId()));
@@ -136,6 +188,121 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
         }
     }
 
+    /**
+     * 使用数据库中原始 ASKING ToolCall 恢复 AgentScope，不接受客户端重写参数或永久权限规则。
+     */
+    private Flux<AgentRunEvent> resumeInIsolatedRuntime(AgentRunCommand command, AgentApprovalEntity approval) {
+        AgentRun run = AgentRun.pending(command.runId(), command.sessionId(), command.traceId());
+        run.start(Instant.now());
+        try {
+            if (approval == null || !command.runId().equals(approval.getRunId())) {
+                return failIfRunning(run, CODE_APPROVAL_STATE_INVALID, "审批与当前运行不匹配");
+            }
+            AgentState state = strictAgentStateLoader.loadVerified(command.runId());
+            ToolUseBlock storedToolCall = AgentApprovalService.requireAskingToolCall(
+                    state, approval.getToolCallId(), approval.getToolName());
+            AgentAssembly assembly = assemble(command, run,
+                    new AgentHistoryService.PreparedHistory(null, List.of(), false), true);
+            RunScopedActionTool actionTool = assembly.actionTools().get(approval.getToolName());
+            if (actionTool == null) {
+                return failIfRunning(run, CODE_APPROVAL_TOOL_UNAVAILABLE, "审批动作工具不可用");
+            }
+            boolean approved = approval.getStatus() == com.demetrius.fileagent.api.enums.ApprovalStatus.APPROVED;
+            if (!approved && approval.getStatus() != com.demetrius.fileagent.api.enums.ApprovalStatus.DENIED) {
+                return failIfRunning(run, CODE_APPROVAL_STATE_INVALID, "审批尚未完成");
+            }
+            if (approved) {
+                actionTool.restoreApprovedBinding(approval, storedToolCall);
+            }
+            ToolUseBlock confirmationToolCall = normalizeToolCallContent(storedToolCall);
+            ReActAgent agent = assembly.agent();
+            RuntimeContext context = assembly.context();
+            executionHandleRegistry.register(command.runId(), () -> {
+                run.requestCancel();
+                try {
+                    agent.interrupt(context);
+                } catch (Exception e) {
+                    log.warn("中断恢复中的 Agent 失败 runId={}: {}", command.runId(), e.getMessage());
+                }
+            });
+            Map<String, Long> toolStartNanos = new ConcurrentHashMap<>();
+            StringBuilder answer = new StringBuilder();
+            AtomicInteger step = new AtomicInteger(approved ? 1 : 0);
+            if (approved) {
+                run.incrementStep();
+                toolStartNanos.put(storedToolCall.getId(), System.nanoTime());
+            }
+            AtomicReference<PendingApproval> pendingApproval = new AtomicReference<>();
+            Msg confirmation = Msg.builder()
+                    .role(MsgRole.USER)
+                    .metadata(Map.of(Msg.METADATA_CONFIRM_RESULTS,
+                            List.of(new ConfirmResult(approved, confirmationToolCall, List.of()))))
+                    .build();
+            return Flux.concat(
+                            Flux.just(eventMapper.started(run.runId(), run.traceId())),
+                            approved
+                                    ? Flux.just(eventMapper.toolStarted(run.runId(), storedToolCall.getName(), 1))
+                                    : Flux.empty(),
+                            agent.streamEvents(confirmation, context)
+                                    .concatMap(event -> mapEvent(event, run, agent, context, step,
+                                            toolStartNanos, answer, assembly.toolContext(), assembly.actionTools(),
+                                            pendingApproval, approval, null)))
+                    .timeout(effectiveRunTimeout())
+                    .onErrorResume(error -> {
+                        if (approved) {
+                            approvalService.failApprovedStep(command.runId(), approval.getApprovalId(),
+                                    approval.getToolCallId());
+                        }
+                        return onError(error, run);
+                    })
+                    .doFinally(signal -> executionHandleRegistry.remove(command.runId()));
+        } catch (AgentApprovalBindingChangedException exception) {
+            log.warn("审批动作绑定变化，拒绝恢复 runId={}: {}", command.runId(), exception.getMessage());
+            approvalService.invalidateApprovedBinding(command.runId(), approval.getApprovalId());
+            return failIfRunning(run, CODE_APPROVAL_BINDING_CHANGED, "审批动作绑定已变化");
+        } catch (RuntimeException exception) {
+            log.warn("Agent 审批恢复初始化失败 runId={}: {}", command.runId(), exception.getMessage());
+            return failIfRunning(run, CODE_APPROVAL_STATE_INVALID, "审批检查点无法恢复");
+        }
+    }
+
+    /**
+     * AgentScope 恢复执行时会用 {@code content} 做工具参数校验；该字段始终由已校验的原始 input 重建，
+     * 不信任检查点中可能与 input 不一致的旧 JSON 文本。
+     */
+    private ToolUseBlock normalizeToolCallContent(ToolUseBlock toolCall) {
+        String canonicalContent = JsonUtils.getJsonCodec().toJson(toolCall.getInput());
+        if (canonicalContent.equals(toolCall.getContent())) {
+            return toolCall;
+        }
+        return new ToolUseBlock(
+                toolCall.getId(),
+                toolCall.getName(),
+                toolCall.getInput(),
+                canonicalContent,
+                toolCall.getMetadata(),
+                toolCall.getState());
+    }
+
+    private Optional<ToolUseBlock> findSingleAskingToolCall(AgentState state) {
+        if (state == null || state.getContext() == null) {
+            throw new IllegalStateException("Agent 审批检查点不完整");
+        }
+        List<ToolUseBlock> askingToolCalls = state.getContext().stream()
+                .flatMap(message -> message.getContent().stream())
+                .filter(ToolUseBlock.class::isInstance)
+                .map(ToolUseBlock.class::cast)
+                .filter(toolCall -> toolCall.getState() == io.agentscope.core.message.ToolCallState.ASKING)
+                .toList();
+        if (askingToolCalls.isEmpty()) {
+            return Optional.empty();
+        }
+        if (askingToolCalls.size() != 1) {
+            throw new IllegalStateException("一次运行不能同时等待多个审批操作");
+        }
+        return Optional.of(askingToolCalls.getFirst());
+    }
+
     /** 生效的 Run 超时：结构化检索模式用独立预算（启动时已校验大于 toolTimeout 的 3 倍）。 */
     private Duration effectiveRunTimeout() {
         return properties.isAdaptiveRetrievalEnabled()
@@ -146,11 +313,16 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     private AgentAssembly assemble(AgentRunCommand command, AgentRun run,
                                    AgentHistoryService.PreparedHistory preparedHistory,
                                    boolean persistAgentScopeState) {
+        AgentToolContext toolContext = new AgentToolContext(
+                run, currentBudget(), knowledgeSearchPort, knowledgeCatalogPort, knowledgeContextPort,
+                command.knowledgeScope());
+        Map<String, RunScopedActionTool> actionTools = createActionTools(command, persistAgentScopeState);
         Toolkit toolkit = new Toolkit();
         toolkit.registerAgentTool(searchDocsTool);
         toolkit.registerAgentTool(listKnowledgeFilesTool);
         toolkit.registerAgentTool(readDocumentContextTool);
         toolkit.registerAgentTool(getDocumentOutlineTool);
+        actionTools.values().forEach(toolkit::registerAgentTool);
 
         Model model = modelFactory.create();
         ReActAgent.Builder builder = ReActAgent.builder()
@@ -167,17 +339,13 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
         }
         ReActAgent agent = builder.build();
 
-        AgentToolContext toolContext = new AgentToolContext(
-                run, currentBudget(), knowledgeSearchPort, knowledgeCatalogPort, knowledgeContextPort,
-                command.knowledgeScope());
-
         RuntimeContext ctx = RuntimeContext.builder()
                 .sessionId(command.runId())
                 .userId("local-operator")
                 .put(AgentToolContext.class, toolContext)
                 .build();
 
-        return new AgentAssembly(agent, ctx, buildUserMessage(command, preparedHistory), toolContext);
+        return new AgentAssembly(agent, ctx, buildUserMessage(command, preparedHistory), toolContext, actionTools);
     }
 
     /**
@@ -201,7 +369,8 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
                             assembly.agent().streamEvents(assembly.userMessage(), assembly.context())
                                     .concatMap(ev -> mapEvent(ev, run, assembly.agent(), assembly.context(),
                                             step, toolStartNanos, answer,
-                                            assembly.toolContext(), toolCalls)))
+                                            assembly.toolContext(), assembly.actionTools(),
+                                            new AtomicReference<>(), null, toolCalls)))
                     .timeout(effectiveRunTimeout())
                     .onErrorResume(e -> onError(e, run))
                     .blockLast();
@@ -247,13 +416,17 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     }
 
     private record AgentAssembly(ReActAgent agent, RuntimeContext context, Msg userMessage,
-                                 AgentToolContext toolContext) {
+                                 AgentToolContext toolContext,
+                                 Map<String, RunScopedActionTool> actionTools) {
     }
 
     private Flux<AgentRunEvent> mapEvent(AgentEvent event, AgentRun run, ReActAgent agent, RuntimeContext ctx,
                                          AtomicInteger step,
                                          Map<String, Long> toolStartNanos, StringBuilder answer,
                                          AgentToolContext toolContext,
+                                         Map<String, RunScopedActionTool> actionTools,
+                                         AtomicReference<PendingApproval> pendingApproval,
+                                         AgentApprovalEntity resumedApproval,
                                          List<String> toolCalls) {
         switch (event.getType()) {
             case TOOL_CALL_START -> {
@@ -273,6 +446,7 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
             case TOOL_RESULT_END -> {
                 ToolResultEndEvent end = (ToolResultEndEvent) event;
                 long durationMs = durationMs(toolStartNanos.remove(end.getToolCallId()));
+                completeApprovedStepIfMatched(run, resumedApproval, end.getToolCallId());
                 return handleToolResultEnd(run, agent, ctx, end.getToolCallName(), step.get(), durationMs);
             }
             case TEXT_BLOCK_DELTA -> {
@@ -293,13 +467,25 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
                 ExceedMaxItersEvent exceed = (ExceedMaxItersEvent) event;
                 return failIfRunning(run, CODE_BUDGET_EXCEEDED, "超出最大迭代次数: " + exceed.getMaxIters());
             }
+            case REQUIRE_USER_CONFIRM -> {
+                return captureApproval((RequireUserConfirmEvent) event, run, agent, ctx,
+                        actionTools, pendingApproval);
+            }
             case AGENT_RESULT -> {
+                PendingApproval pending = pendingApproval.getAndSet(null);
+                if (pending != null) {
+                    return pauseForApproval(run, pending);
+                }
                 AgentResultEvent result = (AgentResultEvent) event;
                 String finalText = answer.length() > 0 ? answer.toString() : extractText(result.getResult());
                 return complete(run, finalText);
             }
             case AGENT_END -> {
-                if (!run.isTerminal()) {
+                PendingApproval pending = pendingApproval.getAndSet(null);
+                if (pending != null) {
+                    return pauseForApproval(run, pending);
+                }
+                if (run.isRunning()) {
                     return complete(run, answer.toString());
                 }
                 return Flux.empty();
@@ -323,7 +509,7 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     }
 
     private Flux<AgentRunEvent> complete(AgentRun run, String finalText) {
-        if (run.isTerminal()) {
+        if (!run.isRunning()) {
             return Flux.empty();
         }
         List<String> files = extractSources(finalText);
@@ -354,7 +540,7 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     }
 
     private Flux<AgentRunEvent> onError(Throwable error, AgentRun run) {
-        if (run.isTerminal()) {
+        if (run.isTerminal() || run.isWaitingApproval()) {
             return Flux.empty();
         }
         if (error instanceof TimeoutException) {
@@ -368,6 +554,74 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
         log.warn("Agent 运行失败 runId={}: {}", run.runId(), error.getMessage());
         run.fail(CODE_MODEL_UNAVAILABLE, Instant.now());
         return Flux.just(eventMapper.failed(run.runId(), CODE_MODEL_UNAVAILABLE, "模型调用失败", run.traceId()));
+    }
+
+    private Map<String, RunScopedActionTool> createActionTools(AgentRunCommand command,
+                                                                 boolean persistAgentScopeState) {
+        if (!persistAgentScopeState || !properties.isActionsEnabled()) {
+            return Map.of();
+        }
+        Map<String, RunScopedActionTool> tools = new LinkedHashMap<>();
+        for (AgentActionToolFactory factory : actionToolFactories) {
+            RunScopedActionTool tool = factory.create(command);
+            if (tool == null || tool.getName() == null || tool.getName().isBlank()
+                    || tools.putIfAbsent(tool.getName(), tool) != null) {
+                throw new IllegalStateException("副作用工具注册不合法或重名");
+            }
+        }
+        return Map.copyOf(tools);
+    }
+
+    private Flux<AgentRunEvent> captureApproval(RequireUserConfirmEvent event, AgentRun run,
+                                                  ReActAgent agent, RuntimeContext context,
+                                                  Map<String, RunScopedActionTool> actionTools,
+                                                  AtomicReference<PendingApproval> pendingApproval) {
+        if (event.getToolCalls().size() != 1) {
+            agent.interrupt(context);
+            return failIfRunning(run, CODE_TOOL_BATCH_REQUIRES_SEQUENTIAL_EXECUTION,
+                    "一次只能审批一个副作用操作");
+        }
+        io.agentscope.core.message.ToolUseBlock toolCall = event.getToolCalls().getFirst();
+        RunScopedActionTool tool = actionTools.get(toolCall.getName());
+        if (tool == null) {
+            agent.interrupt(context);
+            return failIfRunning(run, CODE_APPROVAL_TOOL_UNAVAILABLE, "审批动作工具不可用");
+        }
+        try {
+            PendingApproval captured = new PendingApproval(tool.approvalCandidate(toolCall));
+            if (!pendingApproval.compareAndSet(null, captured)) {
+                agent.interrupt(context);
+                return failIfRunning(run, CODE_TOOL_BATCH_REQUIRES_SEQUENTIAL_EXECUTION,
+                        "一次运行不能同时等待多个审批操作");
+            }
+            return Flux.empty();
+        } catch (RuntimeException exception) {
+            log.warn("捕获 Agent 审批动作失败 runId={}: {}", run.runId(), exception.getMessage());
+            agent.interrupt(context);
+            return failIfRunning(run, CODE_APPROVAL_TOOL_UNAVAILABLE, "审批动作绑定不可用");
+        }
+    }
+
+    private Flux<AgentRunEvent> pauseForApproval(AgentRun run, PendingApproval pending) {
+        try {
+            AgentApprovalView approval = approvalService.pause(run.runId(), pending.candidate());
+            run.waitForApproval();
+            return Flux.just(eventMapper.approvalRequired(run.runId(), approval));
+        } catch (RuntimeException exception) {
+            log.warn("保存 Agent 审批暂停失败 runId={}: {}", run.runId(), exception.getMessage());
+            return failIfRunning(run, CODE_APPROVAL_PERSIST_FAILED, "审批状态保存失败");
+        }
+    }
+
+    private void completeApprovedStepIfMatched(AgentRun run, AgentApprovalEntity approval, String toolCallId) {
+        if (approval == null || approval.getStatus() != com.demetrius.fileagent.api.enums.ApprovalStatus.APPROVED
+                || !approval.getToolCallId().equals(toolCallId)) {
+            return;
+        }
+        approvalService.completeApprovedStep(run.runId(), approval.getApprovalId(), toolCallId);
+    }
+
+    private record PendingApproval(com.demetrius.fileagent.agent.domain.policy.AgentActionCandidate candidate) {
     }
 
     private AgentHistoryService.PreparedHistory prepareHistory(AgentRun run, AgentRunCommand command) {

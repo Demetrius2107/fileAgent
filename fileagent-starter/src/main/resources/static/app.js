@@ -466,6 +466,7 @@
         if (agentRunState && agentRunState.recoveryTimer) {
             clearTimeout(agentRunState.recoveryTimer);
         }
+        clearAgentApprovalTimer(agentRunState);
         agentRunState = null;
         currentRunId = null;
         abortController = null;
@@ -499,7 +500,10 @@
             connectionOpen: false,
             reconnecting: false,
             cancelRequested: false,
-            recoveryTimer: null
+            recoveryTimer: null,
+            approval: null,
+            approvalSubmitting: false,
+            approvalExpiryTimer: null
         };
     }
 
@@ -521,6 +525,10 @@
 
     function canReconnectAgentStatus(status) {
         return status === 'PENDING' || status === 'RUNNING';
+    }
+
+    function shouldPollAgentStatus(status) {
+        return canReconnectAgentStatus(status) || status === 'WAITING_APPROVAL';
     }
 
     function appendAgentError(assistant, message) {
@@ -547,6 +555,134 @@
         }
         statusEl.dataset.status = status || '';
         statusEl.textContent = summary || labels[status] || 'Agent 状态更新中';
+    }
+
+    function clearAgentApprovalTimer(state) {
+        if (state && state.approvalExpiryTimer) {
+            clearTimeout(state.approvalExpiryTimer);
+            state.approvalExpiryTimer = null;
+        }
+    }
+
+    function isApprovalExpired(approval) {
+        const expiry = Date.parse(approval && approval.expiresAt);
+        return Number.isFinite(expiry) && expiry <= Date.now();
+    }
+
+    function approvalDeadlineText(approval) {
+        const expiry = Date.parse(approval && approval.expiresAt);
+        if (!Number.isFinite(expiry)) { return '到期时间不可用'; }
+        const remainingSeconds = Math.ceil((expiry - Date.now()) / 1000);
+        if (remainingSeconds <= 0) { return '审批已过期'; }
+        if (remainingSeconds < 60) { return `剩余 ${remainingSeconds} 秒`; }
+        const minutes = Math.floor(remainingSeconds / 60);
+        const seconds = remainingSeconds % 60;
+        return `剩余 ${minutes} 分 ${seconds} 秒`;
+    }
+
+    function appendApprovalDetail(container, label, value) {
+        const row = el('div', 'agent-approval-detail');
+        row.appendChild(el('dt', null, label));
+        row.appendChild(el('dd', null, value || '-'));
+        container.appendChild(row);
+    }
+
+    function renderAgentApproval(state) {
+        if (!isVisibleAgentRun(state)) { return; }
+        const body = state.assistant.querySelector('.message-body');
+        let panel = body.querySelector('.agent-approval');
+        const approval = state.approval;
+        clearAgentApprovalTimer(state);
+        if (!approval) {
+            if (panel) { panel.remove(); }
+            return;
+        }
+        if (!panel) {
+            panel = el('section', 'agent-approval');
+            body.appendChild(panel);
+        }
+        const expired = isApprovalExpired(approval);
+        panel.replaceChildren();
+        panel.dataset.status = approval.status || 'PENDING';
+        panel.dataset.expired = String(expired);
+
+        const title = el('div', 'agent-approval-title', approval.actionSummary || '需要确认的操作');
+        panel.appendChild(title);
+        const details = el('dl', 'agent-approval-details');
+        appendApprovalDetail(details, '影响', approval.expectedImpact);
+        appendApprovalDetail(details, '资源', approval.resourceScope);
+        appendApprovalDetail(details, '参数', approval.parameterPreview);
+        appendApprovalDetail(details, '指纹', approval.parameterFingerprint);
+        panel.appendChild(details);
+
+        const deadline = el('div', 'agent-approval-deadline', approvalDeadlineText(approval));
+        panel.appendChild(deadline);
+        const actions = el('div', 'agent-approval-actions');
+        const pending = approval.status === 'PENDING';
+        if (pending) {
+            const approveButton = el('button', 'agent-approval-approve', '批准本次操作');
+            approveButton.type = 'button';
+            approveButton.disabled = expired || state.approvalSubmitting;
+            approveButton.addEventListener('click', () => submitAgentApproval(state, 'APPROVE'));
+            const denyButton = el('button', 'agent-approval-deny', '拒绝本次操作');
+            denyButton.type = 'button';
+            denyButton.disabled = expired || state.approvalSubmitting;
+            denyButton.addEventListener('click', () => submitAgentApproval(state, 'DENY'));
+            actions.append(approveButton, denyButton);
+        } else {
+            actions.appendChild(el('span', 'agent-approval-resolved', approval.status === 'APPROVED'
+                ? '已批准，正在继续执行' : '已拒绝，正在继续处理'));
+        }
+        panel.appendChild(actions);
+
+        if (pending && !expired) {
+            state.approvalExpiryTimer = setTimeout(() => renderAgentApproval(state), 1000);
+        } else if (expired) {
+            scheduleAgentPolling(state);
+        }
+    }
+
+    async function submitAgentApproval(state, decision) {
+        const approval = state.approval;
+        if (!isVisibleAgentRun(state) || state.terminal || state.approvalSubmitting
+            || !approval || approval.status !== 'PENDING') {
+            return;
+        }
+        if (isApprovalExpired(approval)) {
+            renderAgentApproval(state);
+            refreshAgentRun(state).catch(() => {});
+            return;
+        }
+        state.approvalSubmitting = true;
+        renderAgentApproval(state);
+        const lastEventId = lastAgentEventIds.get(state.runId);
+        const headers = { 'X-FileAgent-Client': 'web' };
+        if (lastEventId) { headers['Last-Event-ID'] = lastEventId; }
+        try {
+            await streamSse(`/api/agent-runs/${state.runId}/approvals/${approval.approvalId}`, { decision },
+                (event) => handleAgentEvent(state, event), {
+                    headers,
+                    signal: state.controller.signal,
+                    onResponse: () => { state.connectionOpen = true; }
+                });
+        } catch (error) {
+            if (!isVisibleAgentRun(state) || error.name === 'AbortError') { return; }
+            if (error.status === 409) {
+                try {
+                    await refreshAgentRun(state);
+                } catch (refreshError) {
+                    appendAgentError(state.assistant, `刷新审批状态失败：${refreshError.message}`);
+                }
+            } else {
+                appendAgentError(state.assistant, `提交审批失败：${error.message}`);
+            }
+        } finally {
+            state.connectionOpen = false;
+            state.approvalSubmitting = false;
+            if (isVisibleAgentRun(state) && state.status === 'WAITING_APPROVAL' && state.approval) {
+                renderAgentApproval(state);
+            }
+        }
     }
 
     function shouldIgnoreAgentEvent(event) {
@@ -581,6 +717,16 @@
             renderToolStatus(state.assistant, event);
         } else if (event.type === 'run.started') {
             applyAgentStatus(state, event.status || 'RUNNING', event.summary);
+        } else if (event.type === 'approval.required') {
+            state.approval = event.approval || null;
+            state.approvalSubmitting = false;
+            applyAgentStatus(state, event.status || 'WAITING_APPROVAL', event.summary);
+            renderAgentApproval(state);
+        } else if (event.type === 'approval.resolved') {
+            state.approval = null;
+            state.approvalSubmitting = false;
+            renderAgentApproval(state);
+            applyAgentStatus(state, event.status || 'PENDING', event.summary);
         } else if (event.type === 'run.status') {
             applyAgentStatus(state, event.status, event.summary, event.status === 'SUCCEEDED');
         } else if (event.type === 'run.completed') {
@@ -600,11 +746,23 @@
         if (!isVisibleAgentRun(state) || !status) { return; }
         state.status = status;
         renderAgentRunStatus(state.assistant, status, summary);
+        if (status === 'WAITING_APPROVAL' && !state.content) {
+            state.bubble.innerHTML = '';
+        }
+        if (status !== 'WAITING_APPROVAL' && state.approval) {
+            state.approval = null;
+            state.approvalSubmitting = false;
+            renderAgentApproval(state);
+        }
         if (isTerminalAgentStatus(status)) {
             finishAgentRun(state, reloadMessages);
             return;
         }
         if (canReconnectAgentStatus(status)) {
+            setStreaming(true);
+            scheduleAgentPolling(state);
+        } else if (shouldPollAgentStatus(status)) {
+            // WAITING_APPROVAL 仍是同一会话的活动 Run；保留停止入口并阻止提交新问题。
             setStreaming(true);
             scheduleAgentPolling(state);
         } else {
@@ -621,6 +779,7 @@
             clearTimeout(state.recoveryTimer);
             state.recoveryTimer = null;
         }
+        clearAgentApprovalTimer(state);
         if (!isVisibleAgentRun(state)) { return; }
         if (reloadMessages && (forceReload || !state.content)) {
             try {
@@ -647,7 +806,7 @@
 
     function scheduleAgentPolling(state) {
         clearAgentPolling();
-        if (!isVisibleAgentRun(state) || state.terminal || !canReconnectAgentStatus(state.status)) { return; }
+        if (!isVisibleAgentRun(state) || state.terminal || !shouldPollAgentStatus(state.status)) { return; }
         agentPollTimer = setTimeout(async () => {
             agentPollTimer = null;
             try {
@@ -685,7 +844,10 @@
             return;
         }
         if (active.runId !== state.runId) { return; }
+        state.approval = active.approval || null;
+        state.approvalSubmitting = false;
         applyAgentStatus(state, active.status);
+        renderAgentApproval(state);
         if (!state.terminal && canReconnectAgentStatus(state.status)) {
             if (!state.connectionOpen && !state.reconnecting) {
                 connectAgentEvents(state);
@@ -730,7 +892,9 @@
             agentRunState = state;
             abortController = state.controller;
             rememberAgentRun(state, active.runId);
+            state.approval = active.approval || null;
             applyAgentStatus(state, active.status);
+            renderAgentApproval(state);
             if (!state.terminal && canReconnectAgentStatus(state.status)) {
                 connectAgentEvents(state);
             }
@@ -841,7 +1005,9 @@
                 if (parsed && parsed.traceId) { traceId = parsed.traceId; }
             } catch (e) { /* 无法解析的错误体 */ }
             if (traceId) { message += `（traceId：${traceId}）`; }
-            throw new Error(message);
+            const error = new Error(message);
+            error.status = response.status;
+            throw error;
         }
 
         if (options.onResponse) { options.onResponse(response); }

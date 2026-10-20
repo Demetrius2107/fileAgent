@@ -469,8 +469,8 @@ data:{"type":"error","code":"404","message":"会话不存在","traceId":"0123456
 
 - 请求头 `Accept: text/event-stream`，响应 `Content-Type: text/event-stream`；响应头 `X-Trace-Id` 返回本次运行的 `traceId`，`X-Agent-Run-Id` 返回已经持久化的 `runId`
 - 服务端先同步完成 prepare：校验会话与请求、读取历史、保存 USER 消息和 `PENDING` Run；事务提交后才由后台受限线程池入队执行。SSE 连接只是事件订阅，浏览器刷新或断连不会取消 Run。
-- 流程：`PENDING` → ReAct 循环（只读知识工具检索）→ 完整 ASSISTANT、FINALIZATION Step 与 `SUCCEEDED` 状态在一个事务中落库
-- Agent 只能调用服务端固定的只读知识工具（检索文档 / 列知识文件 / 读文档上下文），禁止任意文件路径、URL 或写操作
+- 流程：`PENDING` → ReAct 循环（知识工具检索，或受控动作工具请求审批）→ 完整 ASSISTANT、FINALIZATION Step 与 `SUCCEEDED` 状态在一个事务中落库
+- 默认仅注册服务端固定的只读知识工具（检索文档 / 列知识文件 / 读文档上下文）。副作用工具必须显式开启 `fileagent.agent.actions-enabled`，并由服务端策略决定 `ALLOW / DENY / ASK`；当前没有内置写入型业务工具。
 - 敏感配置（模型 apiKey/baseUrl）绝不进入任何事件；工具正文、思维链不外发
 
 Request:
@@ -501,6 +501,8 @@ Request:
   - 结构化引用同时以 `citations_json` 持久化在 `agent_run` 表，历史报告按生成时的 `documentVersion` 追溯
 - `run.completed`：`{ "status": "SUCCEEDED", "messageId": 21 }`
 - `run.failed`：`{ "status": "FAILED", "code": "...", "message": "...", "traceId": "..." }`
+- `approval.required`：`{ "status": "WAITING_APPROVAL", "tool": "...", "approval": { ... } }`。审批视图只包含动作摘要、资源范围、预计影响、脱敏参数预览、参数短指纹、截止时间和风险等级，不含原始工具参数或模型思维链；该事件后当前 SSE 可正常结束。
+- `approval.resolved`：`{ "status": "PENDING", "tool": "...", "approval": { "status": "APPROVED|DENIED", ... } }`。表示决定已持久化并已交给后台续跑，事件不返回用户备注或原始参数。
 
 每个 SSE 帧均带 `id: <eventId>`，`data` 也包含 `eventId` 与对应的 `runVersion`。客户端保存最后成功处理的 `eventId`，用于断线恢复和去重。
 
@@ -519,14 +521,14 @@ Request:
 ### 4.3 Agent Run 快照查询
 `GET /api/agent-runs/{runId}`
 
-返回 `ApiResult<AgentRunSnapshot>`，含 `runId`/`status`/`stepCount`/`modelCallCount`/`assistantMessageId`/`failureCode`/`traceId`，以及 `historyCharacters`、`summaryCharacters`、`searchSnippetCharacters`、`documentReadCharacters`、`toolResultCharacters`、`inputTokens`、`outputTokens`、`totalTokens`、`historyCompressed`、`budgetReasons`；不含思维链、Prompt、摘要正文与工具正文。Run 不存在返回 HTTP 404 + `code=404`。
+返回 `ApiResult<AgentRunSnapshot>`，含 `runId`/`status`/`stepCount`/`modelCallCount`/`assistantMessageId`/`failureCode`/`traceId`，以及 `historyCharacters`、`summaryCharacters`、`searchSnippetCharacters`、`documentReadCharacters`、`toolResultCharacters`、`inputTokens`、`outputTokens`、`totalTokens`、`historyCompressed`、`budgetReasons`。当 `status=WAITING_APPROVAL` 时，额外返回脱敏 `approval` 视图，供页面刷新或 409 后恢复审批区；其他状态为 `null`。不含思维链、Prompt、摘要正文与工具正文。Run 不存在返回 HTTP 404 + `code=404`。
 
 Run/Step/Checkpoint 保存在 H2；进程重启后 Run 快照仍可查询。事件增量仅保留有限内存窗口，重启后不能伪造已经丢失的模型增量。
 
 ### 4.4 当前活动 Run 查询
 `GET /api/sessions/{sessionId}/agent-runs/active`
 
-返回该会话中尚未进入终态的 `ApiResult<AgentRunSnapshot>`；没有活动 Run 时 `data=null`。前端在页面刷新、切回会话或 SSE EOF/网络错误后应调用此接口：`PENDING`/`RUNNING` 保持输入禁用并恢复订阅，终态则重新读取会话消息。
+返回该会话中尚未进入终态的 `ApiResult<AgentRunSnapshot>`；没有活动 Run 时 `data=null`。前端在页面刷新、切回会话或 SSE EOF/网络错误后应调用此接口：`PENDING`/`RUNNING` 保持输入禁用并恢复订阅，`WAITING_APPROVAL` 从快照恢复审批区，终态则重新读取会话消息。
 
 ### 4.5 Agent Run 事件恢复
 `GET /api/agent-runs/{runId}/events`
@@ -538,7 +540,31 @@ Run/Step/Checkpoint 保存在 H2；进程重启后 Run 快照仍可查询。事�
 ### 4.6 Agent Run 取消
 `POST /api/agent-runs/{runId}/cancel`
 
-显式结束 `PENDING` 或 `RUNNING` Run：先持久化 `CANCELLED`，再中断本进程的模型调用句柄，返回最新快照；对已结束 Run 幂等。浏览器切换会话、关闭标签或 SSE 断连不得调用该接口。
+显式结束 `PENDING`、`RUNNING` 或 `WAITING_APPROVAL` Run：先持久化 `CANCELLED`；等待审批时同时撤销尚未决议的 Approval 与 Tool Step；运行中再中断本进程的模型调用句柄。接口返回最新快照，对已结束 Run 幂等。浏览器切换会话、关闭标签或 SSE 断连不得调用该接口。
+
+### 4.7 Agent 高风险动作审批
+`POST /api/agent-runs/{runId}/approvals/{approvalId}`
+
+当 AgentScope 为一个服务端动作工具返回 `ASK` 后，系统先保存可校验的 `ASKING` 检查点、不可变审批快照和 `WAITING_APPROVAL` Run，随后通过 `approval.required` 事件展示本次动作。客户端只能对当前审批作出一次决定，不能提交工具参数、资源范围、操作者身份或“始终允许”规则。
+
+请求头：
+- `Accept: text/event-stream`
+- `X-FileAgent-Client: web`
+- 浏览器自动发送的同源 `Origin` 与 `Host`；缺失、不一致或非 HTTP(S) Origin 返回 `403`
+- `Last-Event-ID` 可选，用于在决定提交后从已有回放窗口继续订阅
+
+Request：
+```json
+{ "decision": "APPROVE", "comment": "确认执行本次操作" }
+```
+
+- `decision` 只能是 `APPROVE` 或 `DENY`；`comment` 为可选审计备注，服务端会删除控制字符并限制为 500 字符，不会传入模型或 `ConfirmResult`。
+- 服务端先以 Approval 版本条件 CAS 落库决议；只有首次决议成功时才在同一事务提交前预留后台容量。容量不足会回滚该次决议，使 Approval 保持 `PENDING`；提交成功后才发布 `approval.resolved` 并入队恢复同一个 Agent Run。
+- `APPROVE` 恢复时只读取数据库中原始 `ASKING ToolCall`，再次核对工具、Schema、资源、策略、端点版本和参数 HMAC；任一绑定变化均会取消旧批准，不能执行。
+- 相同审批重复提交相同决定是幂等的，不会二次恢复或二次执行；提交相反决定返回 `409`。队列容量不足返回 `429` 且 Approval 保持 `PENDING`；审批已过期返回 `409`。
+- 若管理员在审批等待期间关闭 `fileagent.agent.actions-enabled`，新的 `APPROVE` 返回 `403` 且不会改变 Approval；`DENY` 仍可用于安全结束既有等待。
+- 默认在启动时及每 30 秒扫描一次过期审批，将 Approval、Tool Step、Run 一并收敛为 `EXPIRED`、`EXPIRED`、`TIMED_OUT`，释放会话活动槽位并发出状态事件。超时时间和扫描间隔分别由 `fileagent.agent.approval-timeout`、`approval-expiry-scan-interval` 配置。
+- 成功响应是持续 `text/event-stream`，响应头带 `X-Agent-Run-Id`；页面应继续处理 `approval.resolved`、`run.started`、工具事件和最终事件。业务错误在流建立前仍按对应 HTTP 状态返回单个 `event:error`。
 
 ---
 

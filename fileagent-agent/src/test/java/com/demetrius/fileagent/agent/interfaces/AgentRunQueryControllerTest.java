@@ -50,7 +50,7 @@ class AgentRunQueryControllerTest {
     void snapshotShouldReturnApiResultWithSnapshot() throws Exception {
         AgentRunSnapshot snapshot = new AgentRunSnapshot(
                 "run-1", 1L, AgentRunStatus.RUNNING, Instant.now(), null, 1, 1, null, null, "trace-1",
-                0, 0, 0, 0, 0, 0, 0, 0, false, List.of(), null);
+                0, 0, 0, 0, 0, 0, 0, 0, false, List.of(), null, null);
         when(agentRuntimePort.snapshot("run-1")).thenReturn(snapshot);
 
         mockMvc.perform(get("/api/agent-runs/run-1"))
@@ -73,7 +73,7 @@ class AgentRunQueryControllerTest {
     void cancelShouldReturnApiResultWithCancelledStatus() throws Exception {
         AgentRunSnapshot snapshot = new AgentRunSnapshot(
                 "run-1", 1L, AgentRunStatus.CANCELLED, Instant.now(), Instant.now(), 0, 0, null, null, "trace-1",
-                0, 0, 0, 0, 0, 0, 0, 0, false, List.of(), null);
+                0, 0, 0, 0, 0, 0, 0, 0, false, List.of(), null, null);
         when(agentRuntimePort.cancel("run-1")).thenReturn(snapshot);
 
         mockMvc.perform(post("/api/agent-runs/run-1/cancel"))

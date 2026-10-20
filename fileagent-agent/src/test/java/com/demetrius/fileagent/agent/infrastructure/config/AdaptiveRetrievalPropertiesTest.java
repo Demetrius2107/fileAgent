@@ -2,8 +2,12 @@ package com.demetrius.fileagent.agent.infrastructure.config;
 
 import com.demetrius.fileagent.common.exception.BizException;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 
 import java.time.Duration;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -69,6 +73,16 @@ class AdaptiveRetrievalPropertiesTest {
     }
 
     @Test
+    void actionResourceScopesShouldBindEmptyAndCommaSeparatedValues() {
+        AgentProperties empty = bindAgentProperties("");
+        AgentProperties configured = bindAgentProperties("expense:draft,ticket:update");
+
+        assertThat(empty.getAuthorizedActionResourceScopes()).isEmpty();
+        assertThat(configured.getAuthorizedActionResourceScopes())
+                .containsExactlyInAnyOrder("expense:draft", "ticket:update");
+    }
+
+    @Test
     void modelCallDefaultsShouldKeepEightStepsAndAllowSixAdaptiveCalls() {
         AgentProperties base = new AgentProperties();
         AdaptiveRetrievalProperties adaptive = new AdaptiveRetrievalProperties();
@@ -118,5 +132,11 @@ class AdaptiveRetrievalPropertiesTest {
 
         assertThatThrownBy(properties::validate)
                 .isInstanceOf(BizException.class);
+    }
+
+    private static AgentProperties bindAgentProperties(String scopes) {
+        MapConfigurationPropertySource source = new MapConfigurationPropertySource(Map.of(
+                "fileagent.agent.authorized-action-resource-scopes", scopes));
+        return new Binder(source).bind("fileagent.agent", Bindable.of(AgentProperties.class)).get();
     }
 }

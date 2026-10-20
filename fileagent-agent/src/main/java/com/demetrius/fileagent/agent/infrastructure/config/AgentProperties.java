@@ -7,6 +7,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * Agent 运行时配置（前缀 {@code fileagent.agent}）。
@@ -27,6 +29,9 @@ public class AgentProperties {
 
     /** Feature Flag：是否向 Agent 暴露受控副作用工具，默认关闭。 */
     private boolean actionsEnabled = false;
+
+    /** 当前本地运行身份允许操作的资源范围；空集合表示拒绝全部外部动作。 */
+    private Set<String> authorizedActionResourceScopes = new LinkedHashSet<>();
 
     private int maxSteps = 8;
     private int maxModelCalls = 4;
@@ -65,6 +70,10 @@ public class AgentProperties {
                 || readMaxChunks < 1 || maxTotalTokens < 1 || maxConcurrentRuns < 1
                 || maxQueuedRuns < 0 || replayMaxEvents < 1 || replayMaxBytes < 1) {
             throw new BizException("fileagent.agent 上下文预算必须为正数");
+        }
+        if (authorizedActionResourceScopes == null
+                || authorizedActionResourceScopes.stream().anyMatch(scope -> scope == null || scope.isBlank())) {
+            throw new BizException("fileagent.agent 动作资源范围不能包含空值");
         }
         if (maxSummaryCharacters + maxRecentHistoryCharacters > maxHistoryCharacters) {
             throw new BizException("fileagent.agent 摘要预算与最近历史预算不能超过历史总预算");

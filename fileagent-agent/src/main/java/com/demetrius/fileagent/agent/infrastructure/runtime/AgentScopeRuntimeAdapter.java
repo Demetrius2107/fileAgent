@@ -329,7 +329,8 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
                 .name("fileagent-knowledge-agent")
                 .defaultSessionId(command.runId())
                 .description("文件知识助手")
-                .sysPrompt(promptFactory.systemInstruction(properties.isAdaptiveRetrievalEnabled()))
+                .sysPrompt(promptFactory.systemInstruction(
+                        properties.isAdaptiveRetrievalEnabled(), !actionTools.isEmpty()))
                 .model(model)
                 .toolkit(toolkit)
                 .middleware(new AgentBudgetMiddleware())

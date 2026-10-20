@@ -41,7 +41,7 @@
         <agentscope.version>2.0.1</agentscope.version>
         <victools-jsonschema.version>5.0.0</victools-jsonschema.version>
         <okhttp.version>4.12.0</okhttp.version>
-        <json-schema-validator.version>1.5.7</json-schema-validator.version>
+        <json-schema-validator.version>2.0.0</json-schema-validator.version>
     </properties>
 
     <dependencyManagement>

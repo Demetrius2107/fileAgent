@@ -6,11 +6,11 @@ import com.demetrius.fileagent.action.infrastructure.config.RegisteredHttpAction
 import com.demetrius.fileagent.api.dto.action.ActionDefinitionView;
 import com.demetrius.fileagent.api.enums.ActionRiskLevel;
 import com.demetrius.fileagent.common.security.EnvelopeCrypto;
+import com.networknt.schema.Error;
 import com.networknt.schema.InputFormat;
-import com.networknt.schema.JsonSchema;
-import com.networknt.schema.JsonSchemaFactory;
-import com.networknt.schema.SpecVersion;
-import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.Schema;
+import com.networknt.schema.SchemaRegistry;
+import com.networknt.schema.SpecificationVersion;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -107,12 +107,12 @@ public class RegisteredHttpActionRegistry {
             throw new IllegalArgumentException("参数不符合 Schema: 包含模型不可写字段");
         }
         CanonicalActionArguments canonical = CanonicalActionArguments.from(supplied, objectMapper, envelopeCrypto);
-        Set<ValidationMessage> errors = endpoint.schema().validate(canonical.json(), InputFormat.JSON);
+        List<Error> errors = endpoint.schema().validate(canonical.json(), InputFormat.JSON);
         if (!errors.isEmpty()) {
             String details = errors.stream()
                     .sorted(Comparator.comparing(message -> message.getInstanceLocation().toString()))
                     .limit(3)
-                    .map(message -> message.getInstanceLocation() + " " + message.getType())
+                    .map(message -> message.getInstanceLocation() + " " + message.getKeyword())
                     .reduce((left, right) -> left + "; " + right)
                     .orElse("unknown");
             throw new IllegalArgumentException("参数不符合 Schema: " + details);
@@ -206,8 +206,9 @@ public class RegisteredHttpActionRegistry {
         configSnapshot.put("idempotencyHeader", idempotencyHeader);
         String configHash = CanonicalActionArguments.from(configSnapshot, objectMapper, envelopeCrypto).hmac();
 
-        String schemaJson = writeJson(requestSchema);
-        JsonSchema schema = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012).getSchema(schemaJson);
+        String schemaJson = writeJson(validationSchema(requestSchema));
+        Schema schema = SchemaRegistry.withDefaultDialect(SpecificationVersion.DRAFT_2020_12)
+                .getSchema(schemaJson);
         return new RegisteredEndpoint(endpointId, displayName, definitionVersion, endpointRevision, policyVersion,
                 method, baseUrl, pathTemplate, requestSchema, schema, riskLevel, modelWritableFields,
                 egress.isExternalizesModelFreeText(), resourceScope, safeSummary, expectedImpact,
@@ -341,6 +342,23 @@ public class RegisteredHttpActionRegistry {
         return value;
     }
 
+    private static Object validationSchema(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            map.forEach((key, child) -> {
+                String name = String.valueOf(key);
+                if (!"sensitive".equals(name) && !"x-location".equals(name)) {
+                    copy.put(name, validationSchema(child));
+                }
+            });
+            return copy;
+        }
+        if (value instanceof Collection<?> collection) {
+            return collection.stream().map(RegisteredHttpActionRegistry::validationSchema).toList();
+        }
+        return value;
+    }
+
     private static Set<String> immutableSortedSet(Collection<String> values) {
         if (values == null) {
             return Set.of();
@@ -398,7 +416,7 @@ public class RegisteredHttpActionRegistry {
             String baseUrl,
             String pathTemplate,
             Map<String, Object> requestSchema,
-            JsonSchema schema,
+            Schema schema,
             ActionRiskLevel riskLevel,
             Set<String> modelWritableFields,
             boolean externalizesModelFreeText,

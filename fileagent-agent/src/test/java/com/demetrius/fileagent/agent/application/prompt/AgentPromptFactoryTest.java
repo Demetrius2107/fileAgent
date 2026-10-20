@@ -78,4 +78,17 @@ class AgentPromptFactoryTest {
         assertThat(legacy).doesNotContain("queryType");
         assertThat(legacy).doesNotContain("结构化检索模式");
     }
+
+    @Test
+    void actionPromptShouldAppearOnlyWhenRunHasRegisteredActionTool() {
+        AgentPromptFactory factory = new AgentPromptFactory();
+
+        assertThat(factory.systemInstruction(false, false))
+                .doesNotContain("call_registered_http_api");
+        assertThat(factory.systemInstruction(false, true))
+                .contains("call_registered_http_api")
+                .contains("一次只能发起一个外部动作")
+                .contains("等待用户审批")
+                .contains("禁止自动重试");
+    }
 }

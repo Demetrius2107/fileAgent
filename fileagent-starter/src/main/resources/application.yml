@@ -66,6 +66,8 @@ fileagent:
     adaptive-retrieval-enabled: ${FILEAGENT_AGENT_ADAPTIVE_RETRIEVAL_ENABLED:false}
     # 副作用工具默认关闭；开启后每次高风险动作仍必须经过单次人工审批
     actions-enabled: ${FILEAGENT_AGENT_ACTIONS_ENABLED:false}
+    # 本地运行身份被允许操作的服务端资源范围，逗号分隔；默认空表示拒绝全部外部动作
+    authorized-action-resource-scopes: ${FILEAGENT_AGENT_AUTHORIZED_ACTION_RESOURCE_SCOPES:}
     max-prompt-characters: ${FILEAGENT_AGENT_MAX_PROMPT_CHARACTERS:8000}
     max-history-characters: ${FILEAGENT_AGENT_MAX_HISTORY_CHARACTERS:8000}
     max-summary-characters: ${FILEAGENT_AGENT_MAX_SUMMARY_CHARACTERS:2000}
@@ -83,6 +85,11 @@ fileagent:
     replay-max-bytes: ${FILEAGENT_AGENT_REPLAY_MAX_BYTES:262144}
     approval-timeout: ${FILEAGENT_AGENT_APPROVAL_TIMEOUT:5m}
     approval-expiry-scan-interval: ${FILEAGENT_AGENT_APPROVAL_EXPIRY_SCAN_INTERVAL:30s}
+  action:
+    http:
+      # 注册式 HTTP 动作总开关；还需同时开启 fileagent.agent.actions-enabled
+      enabled: ${FILEAGENT_ACTION_HTTP_ENABLED:false}
+      endpoints: []
   chunk-size: 800
   chunk-overlap: 120
   elasticsearch:

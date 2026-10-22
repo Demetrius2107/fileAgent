@@ -1,12 +1,11 @@
 package com.demetrius.fileagent.action.infrastructure.http;
 
-import com.demetrius.fileagent.action.infrastructure.config.RegisteredHttpActionProperties;
 import com.demetrius.fileagent.action.infrastructure.config.RegisteredHttpActionProperties.DataEgressPolicy;
 import com.demetrius.fileagent.action.infrastructure.config.RegisteredHttpActionProperties.Endpoint;
+import com.demetrius.fileagent.action.infrastructure.http.RegisteredHttpActionRegistry.RegisteredEndpoint;
 import com.demetrius.fileagent.api.enums.ActionCancelStatus;
 import com.demetrius.fileagent.api.enums.ActionExecutionStatus;
 import com.demetrius.fileagent.api.enums.ActionRiskLevel;
-import com.demetrius.fileagent.common.security.EnvelopeCrypto;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -30,7 +29,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -150,13 +148,16 @@ class RegisteredHttpExecutorTest {
 
     private RegisteredHttpExecutor executor(String path, int maxResponseBytes, Duration readTimeout) {
         ObjectMapper objectMapper = new ObjectMapper();
-        EnvelopeCrypto crypto = mock(EnvelopeCrypto.class);
-        when(crypto.hmac(anyString())).thenAnswer(invocation -> "hmac:" + invocation.getArgument(0));
-        RegisteredHttpActionProperties properties = new RegisteredHttpActionProperties();
-        properties.setEnabled(true);
-        properties.setEndpoints(List.of(endpoint(path, maxResponseBytes, readTimeout)));
-        RegisteredHttpActionRegistry registry = RegisteredHttpActionRegistry.forTesting(
-                properties, objectMapper, crypto);
+        Endpoint configured = endpoint(path, maxResponseBytes, readTimeout);
+        RegisteredHttpActionRegistry registry = mock(RegisteredHttpActionRegistry.class);
+        when(registry.requireEndpoint("endpoint")).thenReturn(new RegisteredEndpoint(
+                configured.getEndpointId(), configured.getDisplayName(), configured.getDefinitionVersion(),
+                configured.getEndpointRevision(), configured.getPolicyVersion(), configured.getMethod(),
+                configured.getBaseUrl(), configured.getPathTemplate(), configured.getRequestSchema(), null,
+                configured.getRiskLevel(), Set.of(), false, configured.getResourceScope(),
+                configured.getSafeSummary(), configured.getExpectedImpact(), null, configured.getConnectTimeout(),
+                configured.getReadTimeout(), configured.getCallTimeout(), configured.getMaxResponseBytes(),
+                configured.getAllowedContentTypes(), configured.getIdempotencyHeader(), false, false, "test-hash"));
         BlockedAddressPolicy allowLoopback = new BlockedAddressPolicy() {
             @Override
             public boolean isBlocked(InetAddress address) {
@@ -164,7 +165,7 @@ class RegisteredHttpExecutorTest {
             }
         };
         return new RegisteredHttpExecutor(registry, objectMapper, new SafeHttpUriBuilder(),
-                allowLoopback);
+                allowLoopback, "");
     }
 
     private Endpoint endpoint(String path, int maxResponseBytes, Duration readTimeout) {

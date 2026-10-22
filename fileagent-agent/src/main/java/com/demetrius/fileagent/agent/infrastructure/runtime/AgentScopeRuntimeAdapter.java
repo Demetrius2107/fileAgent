@@ -580,6 +580,9 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
         }
         Map<String, RunScopedActionTool> tools = new LinkedHashMap<>();
         for (AgentActionToolFactory factory : actionToolFactories) {
+            if (!factory.available(command)) {
+                continue;
+            }
             RunScopedActionTool tool = factory.create(command);
             if (tool == null || tool.getName() == null || tool.getName().isBlank()
                     || tools.putIfAbsent(tool.getName(), tool) != null) {

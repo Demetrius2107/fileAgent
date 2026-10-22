@@ -5,6 +5,9 @@ import com.demetrius.fileagent.api.dto.action.ActionDefinitionView;
 import com.demetrius.fileagent.api.dto.action.ActionExecutionCommand;
 import com.demetrius.fileagent.api.dto.action.ActionExecutionView;
 
+import java.util.List;
+import java.util.Set;
+
 /**
  * 动作执行跨域契约：只暴露定义快照、受控执行状态和取消语义。
  *
@@ -14,6 +17,9 @@ public interface ActionExecutionPort {
 
     /** 根据服务端注册标识读取无凭证动作定义。 */
     ActionDefinitionView resolveDefinition(String actionId);
+
+    /** 列出当前授权资源范围内的动作定义，不包含连接信息或凭证。 */
+    List<ActionDefinitionView> listDefinitions(Set<String> authorizedResourceScopes);
 
     /** 校验可信命令并通过幂等账本执行动作。 */
     ActionExecutionView execute(ActionExecutionCommand command);

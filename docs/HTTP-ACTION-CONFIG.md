@@ -2,9 +2,30 @@
 
 Phase 3C 提供 `call_registered_http_api`。模型只能选择服务端预注册的 `endpointId` 并提交符合 JSON Schema 的业务参数，不能提交 URL、HTTP Method、Header、凭证、操作者身份或资源权限。
 
+## 本机完整验收（action-mock）
+
+项目内置了一个默认关闭的测试报销服务和两个预注册动作；它们只产生测试草稿，不连接真实报销系统。使用已有模型配置和 Elasticsearch，无需单独部署 Mock 服务。
+
+1. 在 IDEA 的 FileAgent 运行配置中，将 Active profiles 设置为 `action-mock`，并在环境变量中配置 `FILEAGENT_ACTION_MOCK_TOKEN`，例如 `local-demo-token`。Token 只用于测试，不能写入仓库或使用真实业务凭证。
+2. 启动 Elasticsearch 和 FileAgent，打开原有工作台并切换到 Agent 模式。Profile 已在 [application-action-mock.yml](../fileagent-starter/src/main/resources/application-action-mock.yml) 配好 Agent 开关、资源范围、Endpoint 和 Schema，无需再手动 export 其他动作配置。
+3. 输入“创建一条金额 100 元、备注为出差测试的报销草稿”。Agent 根据模型输出选择动作，正常情况下会弹出一次审批，显示动作摘要和参数；`bankAccount` 是可选的测试字段，传入时审批预览应显示 `[REDACTED]`。
+4. 点击拒绝，确认没有新草稿。重新发送请求并点击批准，确认出现工具执行完成事件；日志中 `endpointId=mock-create-expense-draft`、`status=SUCCEEDED`、`resultCode=HTTP_201` 表示实际 HTTP 创建成功。重复提交同一审批不会再次创建草稿。
+5. 使用返回的 `draftId` 提问“查询测试报销草稿 <draftId>”，读取动作按既有只读策略执行，不需要创建审批。模型是否选择正确动作仍取决于实际模型输出，不能仅凭回答推断动作已执行。
+
+默认回调地址是 `http://127.0.0.1:8080`。如果主应用改了端口，设置 `FILEAGENT_ACTION_MOCK_BASE_URL` 为相同的本机地址和端口；部署到受控开发环境时可设置为指向该实例的公网 HTTPS 地址。非 Mock Endpoint 仍禁止本机和内网地址。日志不会输出 Token 或账户原文。
+
+可以连接项目的 H2 文件库（默认 `jdbc:h2:file:./storage/db/fileagent;AUTO_SERVER=TRUE`，用户名 `sa`，空密码；相对路径以服务工作目录为准），执行：
+
+```sql
+SELECT draft_id, amount, memo, created_at FROM action_mock_expense_draft ORDER BY created_at DESC;
+SELECT execution_id, status, result_code, external_request_id FROM action_tool_execution ORDER BY updated_at DESC;
+```
+
+`action_mock_expense_draft` 不保存账户原文；相同幂等键和请求返回同一草稿，参数不同时返回冲突。该 Mock API 自身只校验 Token 和幂等，持有 Token 的客户端可以直接调用它，审批由 Agent 动作链路负责。因此 `action-mock` 仅适用于本机或受控开发环境，不能在生产环境启用，也不能作为真实财务服务。
+
 ## 1. 默认状态与启用顺序
 
-两个开关默认都是 `false`，必须同时开启才会向 Agent 注册工具：
+两个开关默认都是 `false`，必须同时开启且存在当前资源范围可用的 Endpoint 才会向 Agent 注册工具。使用上述 `action-mock` Profile 时不需要重复配置以下示例变量：
 
 ```bash
 export FILEAGENT_AGENT_ACTIONS_ENABLED=true
@@ -134,14 +155,14 @@ export FILEAGENT_EXPENSE_API_TOKEN='由部署平台注入的真实 Token'
 | `model-writable-fields` | 模型允许提交的字段白名单，必须全部存在于 Schema |
 | `externalizes-model-free-text` | 是否把模型自由文本发往外部；只读动作设为 `true` 时也必须审批 |
 | `resource-scope` | 必须同时出现在 `FILEAGENT_AGENT_AUTHORIZED_ACTION_RESOURCE_SCOPES` 中 |
-| `credential-ref` | 环境变量名称；配置凭证的 Endpoint 必须使用 HTTPS |
+| `credential-ref` | 环境变量名称；真实 Endpoint 配置凭证时必须使用 HTTPS，本机 Mock 是受限例外 |
 | `idempotency-header` | 所有非 `READ_ONLY` 动作必填，远端必须按该值保证业务幂等 |
 
 字符串字段必须配置 `maxLength`，单次参数最多 64 KB、最多 64 个字段、最多 8 层；注册 Schema 最多 32 KB。响应最多 256 KB，Endpoint 可配置更小上限。
 
 ## 5. 网络与失败语义
 
-- 生产 Endpoint 只允许 HTTPS；禁止 userinfo、query 和 fragment 出现在 `base-url`。
+- 生产 Endpoint 只允许 HTTPS；禁止 userinfo、query 和 fragment 出现在 `base-url`。本机 Mock 仅在显式启用且固定 ID、方法、路径、风险、范围和地址均匹配时可用 `http://127.0.0.1`，不能用于普通 Endpoint。
 - 每次连接都重新解析 DNS；解析结果中只要包含本机、内网、链路本地、元数据、组播、保留地址或 IPv4-mapped IPv6，就整体拒绝。
 - 禁用系统代理、HTTP/HTTPS 重定向和 OkHttp 自动重试。
 - 路径和查询参数结构化编码，拒绝绝对 URL、`//host`、反斜线、CRLF、`.`/`..` 和双重编码绕过。

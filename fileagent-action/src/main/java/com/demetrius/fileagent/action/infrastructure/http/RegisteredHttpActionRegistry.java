@@ -11,6 +11,7 @@ import com.networknt.schema.InputFormat;
 import com.networknt.schema.Schema;
 import com.networknt.schema.SchemaRegistry;
 import com.networknt.schema.SpecificationVersion;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -56,21 +57,18 @@ public class RegisteredHttpActionRegistry {
     private final Map<String, RegisteredEndpoint> endpoints;
     private final ObjectMapper objectMapper;
     private final EnvelopeCrypto envelopeCrypto;
-    private final boolean allowInsecureLoopbackForTests;
+    private final boolean mockEnabled;
+    private final String mockBaseUrl;
 
     public RegisteredHttpActionRegistry(RegisteredHttpActionProperties properties,
                                         ObjectMapper objectMapper,
-                                        EnvelopeCrypto envelopeCrypto) {
-        this(properties, objectMapper, envelopeCrypto, false);
-    }
-
-    private RegisteredHttpActionRegistry(RegisteredHttpActionProperties properties,
-                                         ObjectMapper objectMapper,
-                                         EnvelopeCrypto envelopeCrypto,
-                                         boolean allowInsecureLoopbackForTests) {
+                                        EnvelopeCrypto envelopeCrypto,
+                                        @Value("${fileagent.action.mock.enabled:false}") boolean mockEnabled,
+                                        @Value("${fileagent.action.mock.base-url:}") String mockBaseUrl) {
         this.objectMapper = objectMapper;
         this.envelopeCrypto = envelopeCrypto;
-        this.allowInsecureLoopbackForTests = allowInsecureLoopbackForTests;
+        this.mockEnabled = mockEnabled;
+        this.mockBaseUrl = mockBaseUrl;
         Map<String, RegisteredEndpoint> registered = new LinkedHashMap<>();
         List<Endpoint> configured = properties.getEndpoints() == null ? List.of() : properties.getEndpoints();
         for (Endpoint endpoint : configured) {
@@ -82,12 +80,6 @@ public class RegisteredHttpActionRegistry {
         this.endpoints = Map.copyOf(registered);
     }
 
-    static RegisteredHttpActionRegistry forTesting(RegisteredHttpActionProperties properties,
-                                                    ObjectMapper objectMapper,
-                                                    EnvelopeCrypto envelopeCrypto) {
-        return new RegisteredHttpActionRegistry(properties, objectMapper, envelopeCrypto, true);
-    }
-
     /** 返回不包含真实 URL、凭证和内部 Header 的跨域定义快照。 */
     public ActionDefinitionView resolveDefinition(String endpointId) {
         RegisteredEndpoint endpoint = requireEndpoint(endpointId);
@@ -97,6 +89,13 @@ public class RegisteredHttpActionRegistry {
                 endpoint.policyVersion(), endpoint.requestSchema(), endpoint.riskLevel(),
                 endpoint.resourceScope(), endpoint.modelWritableFields(), endpoint.externalizesModelFreeText(),
                 endpoint.safeSummary(), endpoint.expectedImpact());
+    }
+
+    /** 仅返回授权范围内的定义，按 ID 排序以保持模型目录稳定。 */
+    public List<ActionDefinitionView> listDefinitions(Set<String> authorizedResourceScopes) {
+        Set<String> scopes = authorizedResourceScopes == null ? Set.of() : authorizedResourceScopes;
+        return endpoints.values().stream().filter(endpoint -> scopes.contains(endpoint.resourceScope()))
+                .map(RegisteredEndpoint::endpointId).sorted().map(this::resolveDefinition).toList();
     }
 
     /** 校验模型参数字段、JSON Schema 和资源上限后返回稳定 JSON/HMAC。 */
@@ -144,11 +143,12 @@ public class RegisteredHttpActionRegistry {
         if (!ALLOWED_METHODS.contains(method)) {
             throw new IllegalStateException(endpointId + ".method 不受支持: " + method);
         }
-        String baseUrl = validateBaseUrl(endpointId, endpoint.getBaseUrl(), endpoint.getCredentialRef());
         String pathTemplate = requireText(endpoint.getPathTemplate(), endpointId + ".pathTemplate");
         if (!pathTemplate.startsWith("/")) {
             throw new IllegalStateException(endpointId + ".pathTemplate 必须以 / 开头");
         }
+        boolean mockLoopback = validateMockEndpoint(endpoint, method, pathTemplate);
+        String baseUrl = validateBaseUrl(endpointId, endpoint.getBaseUrl(), endpoint.getCredentialRef(), mockLoopback);
         ActionRiskLevel riskLevel = requireValue(endpoint.getRiskLevel(), endpointId + ".riskLevel");
         DataEgressPolicy egress = endpoint.getDataEgressPolicy();
         if (egress == null) {
@@ -183,6 +183,9 @@ public class RegisteredHttpActionRegistry {
 
         Map<String, Object> configSnapshot = new LinkedHashMap<>();
         configSnapshot.put("endpointId", endpointId);
+        if (endpoint.isMockEndpoint()) {
+            configSnapshot.put("mockEndpoint", true);
+        }
         configSnapshot.put("displayName", displayName);
         configSnapshot.put("definitionVersion", definitionVersion);
         configSnapshot.put("endpointRevision", endpointRevision);
@@ -213,7 +216,8 @@ public class RegisteredHttpActionRegistry {
                 method, baseUrl, pathTemplate, requestSchema, schema, riskLevel, modelWritableFields,
                 egress.isExternalizesModelFreeText(), resourceScope, safeSummary, expectedImpact,
                 optionalText(endpoint.getCredentialRef()), connectTimeout, readTimeout, callTimeout,
-                endpoint.getMaxResponseBytes(), contentTypes, idempotencyHeader, configHash);
+                endpoint.getMaxResponseBytes(), contentTypes, idempotencyHeader, mockLoopback,
+                endpoint.isMockEndpoint(), configHash);
     }
 
     private Map<String, Object> validateSchema(String endpointId, Map<String, Object> source,
@@ -266,7 +270,45 @@ public class RegisteredHttpActionRegistry {
         }
     }
 
-    private String validateBaseUrl(String endpointId, String rawBaseUrl, String credentialRef) {
+    private boolean validateMockEndpoint(Endpoint endpoint, String method, String pathTemplate) {
+        if (!endpoint.isMockEndpoint()) {
+            return false;
+        }
+        boolean create = "mock-create-expense-draft".equals(endpoint.getEndpointId())
+                && "POST".equals(method) && "/internal/action-mock/v1/expense-drafts".equals(pathTemplate)
+                && endpoint.getRiskLevel() == ActionRiskLevel.LOW_RISK_WRITE
+                && "mock:expense:draft".equals(endpoint.getResourceScope());
+        boolean read = "mock-get-expense-draft".equals(endpoint.getEndpointId())
+                && "GET".equals(method) && "/internal/action-mock/v1/expense-drafts/{draftId}".equals(pathTemplate)
+                && endpoint.getRiskLevel() == ActionRiskLevel.READ_ONLY
+                && "mock:expense:read".equals(endpoint.getResourceScope());
+        if (!mockEnabled || !(create || read)
+                || !"FILEAGENT_ACTION_MOCK_TOKEN".equals(endpoint.getCredentialRef())) {
+            throw new IllegalStateException("仅允许启用的固定 Mock Endpoint 使用本机回调");
+        }
+        URI endpointUri;
+        URI configuredUri;
+        try {
+            endpointUri = URI.create(requireText(endpoint.getBaseUrl(), "mock.baseUrl")).normalize();
+            configuredUri = URI.create(requireText(mockBaseUrl, "fileagent.action.mock.base-url")).normalize();
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("Mock base-url 无效", e);
+        }
+        if (!endpointUri.equals(configuredUri) || endpointUri.getHost() == null
+                || endpointUri.getUserInfo() != null || endpointUri.getQuery() != null || endpointUri.getFragment() != null
+                || (endpointUri.getPath() != null && !endpointUri.getPath().isEmpty() && !"/".equals(endpointUri.getPath()))) {
+            throw new IllegalStateException("Mock Endpoint 必须使用配置的根地址");
+        }
+        if ("http".equalsIgnoreCase(endpointUri.getScheme())) {
+            if (!"127.0.0.1".equals(endpointUri.getHost())) {
+                throw new IllegalStateException("HTTP Mock 只允许字面量 127.0.0.1");
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private String validateBaseUrl(String endpointId, String rawBaseUrl, String credentialRef, boolean mockLoopback) {
         String baseUrl = requireText(rawBaseUrl, endpointId + ".baseUrl");
         URI uri;
         try {
@@ -279,18 +321,13 @@ public class RegisteredHttpActionRegistry {
                 || uri.getUserInfo() != null || uri.getQuery() != null || uri.getFragment() != null) {
             throw new IllegalStateException(endpointId + ".baseUrl 必须是无 userinfo/query/fragment 的 HTTP(S) 地址");
         }
-        if (optionalText(credentialRef) != null && !"https".equals(scheme)) {
+        if (optionalText(credentialRef) != null && !"https".equals(scheme) && !mockLoopback) {
             throw new IllegalStateException(endpointId + " 带凭证的 Endpoint 必须使用 HTTPS");
         }
-        if (!"https".equals(scheme)
-                && !(allowInsecureLoopbackForTests && isLoopbackHost(uri.getHost()))) {
+        if (!"https".equals(scheme) && !mockLoopback) {
             throw new IllegalStateException(endpointId + ".baseUrl 生产配置必须使用 HTTPS");
         }
         return uri.normalize().toString();
-    }
-
-    private static boolean isLoopbackHost(String host) {
-        return "localhost".equalsIgnoreCase(host) || "::1".equals(host) || host.startsWith("127.");
     }
 
     private String writeJson(Object value) {
@@ -430,6 +467,8 @@ public class RegisteredHttpActionRegistry {
             int maxResponseBytes,
             Set<String> allowedContentTypes,
             String idempotencyHeader,
+            boolean mockLoopback,
+            boolean mockEndpoint,
             String configHash) {
     }
 }

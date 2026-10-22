@@ -66,6 +66,43 @@ class RegisteredHttpActionRegistryTest {
     }
 
     @Test
+    void shouldAllowOnlyExplicitlyEnabledFixedLoopbackMockRoute() {
+        Endpoint endpoint = validEndpoint("mock-create-expense-draft");
+        endpoint.setMockEndpoint(true);
+        endpoint.setBaseUrl("http://127.0.0.1:8080");
+        endpoint.setPathTemplate("/internal/action-mock/v1/expense-drafts");
+        endpoint.setCredentialRef("FILEAGENT_ACTION_MOCK_TOKEN");
+        endpoint.setResourceScope("mock:expense:draft");
+        assertThat(new RegisteredHttpActionRegistry(properties(endpoint), objectMapper, envelopeCrypto,
+                true, "http://127.0.0.1:8080").resolveDefinition(endpoint.getEndpointId())).isNotNull();
+
+        assertThatThrownBy(() -> new RegisteredHttpActionRegistry(properties(endpoint), objectMapper, envelopeCrypto,
+                false, "http://127.0.0.1:8080")).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> new RegisteredHttpActionRegistry(properties(endpoint), objectMapper, envelopeCrypto,
+                true, "http://127.0.0.1:8081")).isInstanceOf(IllegalStateException.class);
+
+        endpoint.setPathTemplate("/internal/action-mock/v1/another");
+        assertThatThrownBy(() -> new RegisteredHttpActionRegistry(properties(endpoint), objectMapper, envelopeCrypto,
+                true, "http://127.0.0.1:8080")).isInstanceOf(IllegalStateException.class);
+        endpoint.setPathTemplate("/internal/action-mock/v1/expense-drafts");
+        endpoint.setMethod("GET");
+        assertThatThrownBy(() -> new RegisteredHttpActionRegistry(properties(endpoint), objectMapper, envelopeCrypto,
+                true, "http://127.0.0.1:8080")).isInstanceOf(IllegalStateException.class);
+        endpoint.setMethod("POST");
+        endpoint.setRiskLevel(ActionRiskLevel.READ_ONLY);
+        assertThatThrownBy(() -> new RegisteredHttpActionRegistry(properties(endpoint), objectMapper, envelopeCrypto,
+                true, "http://127.0.0.1:8080")).isInstanceOf(IllegalStateException.class);
+        endpoint.setRiskLevel(ActionRiskLevel.LOW_RISK_WRITE);
+        endpoint.setBaseUrl("http://localhost:8080");
+        assertThatThrownBy(() -> new RegisteredHttpActionRegistry(properties(endpoint), objectMapper, envelopeCrypto,
+                true, "http://localhost:8080")).isInstanceOf(IllegalStateException.class);
+        endpoint.setBaseUrl("http://127.0.0.1:8080");
+        endpoint.setMockEndpoint(false);
+        assertThatThrownBy(() -> new RegisteredHttpActionRegistry(properties(endpoint), objectMapper, envelopeCrypto,
+                true, "http://127.0.0.1:8080")).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
     void shouldRejectWriteActionWithoutRemoteIdempotencyHeader() {
         Endpoint endpoint = validEndpoint("expense");
         endpoint.setIdempotencyHeader(null);
@@ -135,6 +172,19 @@ class RegisteredHttpActionRegistryTest {
         String secondHash = registry(properties(second)).resolveDefinition("expense").endpointConfigHash();
 
         assertThat(firstHash).isEqualTo(secondHash);
+        assertThat(firstHash).doesNotContain("mockEndpoint");
+    }
+
+    @Test
+    void shouldListOnlyDefinitionsWithinAuthorizedScopes() {
+        Endpoint allowed = validEndpoint("allowed");
+        Endpoint forbidden = validEndpoint("forbidden");
+        forbidden.setResourceScope("other:scope");
+        RegisteredHttpActionRegistry registry = registry(properties(allowed, forbidden));
+
+        assertThat(registry.listDefinitions(Set.of("expense:draft")))
+                .extracting(view -> view.actionId()).containsExactly("allowed");
+        assertThat(registry.listDefinitions(Set.of())).isEmpty();
     }
 
     @Test
@@ -173,7 +223,7 @@ class RegisteredHttpActionRegistryTest {
     }
 
     private RegisteredHttpActionRegistry registry(RegisteredHttpActionProperties properties) {
-        return new RegisteredHttpActionRegistry(properties, objectMapper, envelopeCrypto);
+        return new RegisteredHttpActionRegistry(properties, objectMapper, envelopeCrypto, false, "");
     }
 
     private static RegisteredHttpActionProperties properties(Endpoint... endpoints) {

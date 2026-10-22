@@ -65,11 +65,11 @@ public final class CallRegisteredHttpApiTool extends RunScopedActionTool {
                               Set<String> authorizedResourceScopes,
                               ActionExecutionPort actionExecutionPort,
                               ObjectMapper objectMapper,
-                              EnvelopeCrypto envelopeCrypto) {
+                              EnvelopeCrypto envelopeCrypto,
+                              List<ActionDefinitionView> definitions) {
         super(runId, ToolBase.builder()
                         .name(TOOL_NAME)
-                        .description("调用服务端预注册的 HTTP 业务动作。只能提交 endpointId 和 arguments；"
-                                + "外部地址、方法、请求头、凭证、身份和授权范围均由服务端固定。")
+                        .description(catalogDescription(definitions, objectMapper))
                         .inputSchema(inputSchema())
                         .readOnly(false)
                         .concurrencySafe(false),
@@ -80,6 +80,36 @@ public final class CallRegisteredHttpApiTool extends RunScopedActionTool {
         this.actionExecutionPort = Objects.requireNonNull(actionExecutionPort, "actionExecutionPort 不能为空");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper 不能为空");
         this.envelopeCrypto = Objects.requireNonNull(envelopeCrypto, "envelopeCrypto 不能为空");
+    }
+
+    private static String catalogDescription(List<ActionDefinitionView> definitions, ObjectMapper objectMapper) {
+        List<Map<String, Object>> catalog = definitions.stream().map(definition -> {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> schema = (Map<String, Object>) validationSchema(definition.argumentSchema());
+            if (schema.get("properties") instanceof Map<?, ?> properties) {
+                Map<String, Object> writable = new LinkedHashMap<>();
+                properties.forEach((name, value) -> {
+                    if (definition.modelWritableFields().contains(String.valueOf(name))) {
+                        writable.put(String.valueOf(name), value);
+                    }
+                });
+                schema.put("properties", writable);
+            }
+            if (schema.get("required") instanceof List<?> required) {
+                schema.put("required", required.stream()
+                        .filter(field -> definition.modelWritableFields().contains(String.valueOf(field))).toList());
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("endpointId", definition.actionId());
+            item.put("name", definition.displayName());
+            item.put("summary", definition.safeSummary());
+            item.put("impact", definition.expectedImpact());
+            item.put("riskLevel", definition.riskLevel().name());
+            item.put("argumentsSchema", schema);
+            return item;
+        }).toList();
+        return "调用服务端预注册的业务动作。只能提交 endpointId 和 arguments。已授权动作目录："
+                + objectMapper.writeValueAsString(catalog);
     }
 
     @Override
@@ -418,12 +448,18 @@ final class CallRegisteredHttpApiToolFactory implements AgentActionToolFactory {
     }
 
     @Override
+    public boolean available(AgentRunCommand command) {
+        return !actionExecutionPort.listDefinitions(properties.getAuthorizedActionResourceScopes()).isEmpty();
+    }
+
+    @Override
     public RunScopedActionTool create(AgentRunCommand command) {
         if (command == null || command.runId() == null || command.runId().isBlank()) {
             throw new IllegalArgumentException("Agent Run 命令不能为空");
         }
         return new CallRegisteredHttpApiTool(
                 command.runId(), LOCAL_OPERATOR, properties.getAuthorizedActionResourceScopes(),
-                actionExecutionPort, objectMapper, envelopeCrypto);
+                actionExecutionPort, objectMapper, envelopeCrypto,
+                actionExecutionPort.listDefinitions(properties.getAuthorizedActionResourceScopes()));
     }
 }

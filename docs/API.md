@@ -470,7 +470,7 @@ data:{"type":"error","code":"404","message":"会话不存在","traceId":"0123456
 - 请求头 `Accept: text/event-stream`，响应 `Content-Type: text/event-stream`；响应头 `X-Trace-Id` 返回本次运行的 `traceId`，`X-Agent-Run-Id` 返回已经持久化的 `runId`
 - 服务端先同步完成 prepare：校验会话与请求、读取历史、保存 USER 消息和 `PENDING` Run；事务提交后才由后台受限线程池入队执行。SSE 连接只是事件订阅，浏览器刷新或断连不会取消 Run。
 - 流程：`PENDING` → ReAct 循环（知识工具检索，或受控动作工具请求审批）→ 完整 ASSISTANT、FINALIZATION Step 与 `SUCCEEDED` 状态在一个事务中落库
-- 默认仅注册服务端固定的只读知识工具（检索文档 / 列知识文件 / 读文档上下文）。副作用工具必须显式开启 `fileagent.agent.actions-enabled`，并由服务端策略决定 `ALLOW / DENY / ASK`；当前没有内置写入型业务工具。
+- 默认仅注册服务端固定的只读知识工具。副作用工具必须显式开启，并由服务端策略决定 `ALLOW / DENY / ASK`；`action-mock` Profile 可注册仅供开发验收的测试报销动作。
 - 敏感配置（模型 apiKey/baseUrl）绝不进入任何事件；工具正文、思维链不外发
 
 Request:
@@ -580,7 +580,7 @@ Request：
 }
 ```
 
-- 只有 `fileagent.agent.actions-enabled=true` 与 `fileagent.action.http.enabled=true` 同时成立时，工具才会注册；任一开关默认均为 false。
+- 只有 `fileagent.agent.actions-enabled=true` 与 `fileagent.action.http.enabled=true` 同时成立且存在当前范围授权的 Endpoint 时，工具才会注册；任一开关默认均为 false。
 - URL、Method、Header、凭证引用、操作者身份、授权资源范围和风险等级全部来自服务端配置，HTTP 或模型请求不能覆盖。
 - 服务端先验证 Endpoint JSON Schema、模型可写字段、可信资源范围和风险策略。`READ_ONLY` 且不外发模型自由文本时可以自动执行；其他动作进入 4.7 的单次审批。
 - Approval 绑定工具版本、定义版本、Endpoint revision、配置 HMAC、策略版本、资源范围、规范化参数 HMAC 和 operationId。审批等待期间任一绑定变化都会拒绝旧批准。
@@ -589,6 +589,14 @@ Request：
 - 写请求可能已经到达远端但本地无法确认结果时，`tool.completed.code=OUTCOME_UNKNOWN`，`message` 只包含受控说明、`executionId`/`operationId` 和人工核对指引。前端与模型不得自动重试或声称执行成功。
 
 完整字段、只读与幂等写入示例见 [HTTP-ACTION-CONFIG.md](./HTTP-ACTION-CONFIG.md)。
+
+### 4.9 内置动作 Mock（默认关闭）
+
+这两个接口仅在 `fileagent.action.mock.enabled=true` 时存在，用于 `action-mock` 开发验收。均需 `Authorization: Bearer <FILEAGENT_ACTION_MOCK_TOKEN>`，Token 缺失或错误返回 HTTP 401；启用时 Token 为空则启动失败。接口响应采用 `ApiResult` 包装，返回 `X-Request-Id`，不包含账户原文、Token 或请求 HMAC。
+
+`POST /internal/action-mock/v1/expense-drafts`：必须带 `Idempotency-Key`，请求体为 `{"amount":100,"memo":"出差测试","bankAccount":"测试账号"}`；`bankAccount` 可省略。首次创建返回 HTTP 201 与 `data.draftId`、`data.idempotentReplay=false`；同 Key 同参数重放返回 HTTP 200 和同一 `draftId`、`idempotentReplay=true`；同 Key 不同参数返回 HTTP 409；无效参数返回 HTTP 400。
+
+`GET /internal/action-mock/v1/expense-drafts/{draftId}`：查询测试草稿，找到时返回 HTTP 200，不存在时返回 HTTP 404。测试接口自身不执行审批，只有通过 Agent 工具发起的写动作才走审批，不应在生产环境启用此 Profile。
 
 ---
 

@@ -13,6 +13,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -21,9 +22,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.Proxy;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -48,16 +52,19 @@ public class RegisteredHttpExecutor {
     private final ObjectMapper objectMapper;
     private final SafeHttpUriBuilder uriBuilder;
     private final ValidatedDns validatedDns;
+    private final String mockToken;
     private final Map<String, ActiveRequest> activeRequests = new ConcurrentHashMap<>();
 
     public RegisteredHttpExecutor(RegisteredHttpActionRegistry registry,
                                   ObjectMapper objectMapper,
                                   SafeHttpUriBuilder uriBuilder,
-                                  BlockedAddressPolicy blockedAddressPolicy) {
+                                  BlockedAddressPolicy blockedAddressPolicy,
+                                  @Value("${fileagent.action.mock.token:}") String mockToken) {
         this.registry = registry;
         this.objectMapper = objectMapper;
         this.uriBuilder = uriBuilder;
         this.validatedDns = new ValidatedDns(blockedAddressPolicy);
+        this.mockToken = mockToken;
     }
 
     /** 执行一次已注册动作；本方法不做网络重试，无法确认远端结果时返回 OUTCOME_UNKNOWN。 */
@@ -118,7 +125,7 @@ public class RegisteredHttpExecutor {
             request.header(endpoint.idempotencyHeader(), requireHeaderValue(operationId, "operationId"));
         }
         if (endpoint.credentialRef() != null) {
-            String credential = System.getenv(endpoint.credentialRef());
+            String credential = endpoint.mockEndpoint() ? mockToken : System.getenv(endpoint.credentialRef());
             if (credential == null || credential.isBlank()) {
                 throw new IllegalStateException("HTTP 凭证未配置");
             }
@@ -140,7 +147,12 @@ public class RegisteredHttpExecutor {
 
     private OkHttpClient client(RegisteredEndpoint endpoint, ActiveRequest active) {
         return new OkHttpClient.Builder()
-                .dns(validatedDns)
+                .dns(endpoint.mockLoopback() ? hostname -> {
+                    if (!"127.0.0.1".equals(hostname)) {
+                        throw new UnknownHostException("HTTP_SSRF_BLOCKED");
+                    }
+                    return List.of(InetAddress.getByAddress(new byte[]{127, 0, 0, 1}));
+                } : validatedDns)
                 .proxy(Proxy.NO_PROXY)
                 .followRedirects(false)
                 .followSslRedirects(false)

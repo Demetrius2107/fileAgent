@@ -23,6 +23,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -66,6 +67,11 @@ public class ActionExecutionService implements ActionExecutionPort {
     @Override
     public ActionDefinitionView resolveDefinition(String actionId) {
         return registry.resolveDefinition(actionId);
+    }
+
+    @Override
+    public List<ActionDefinitionView> listDefinitions(Set<String> authorizedResourceScopes) {
+        return registry.listDefinitions(authorizedResourceScopes);
     }
 
     @Override

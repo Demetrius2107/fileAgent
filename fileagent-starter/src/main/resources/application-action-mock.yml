@@ -1,0 +1,89 @@
+# 仅供本地或受控开发环境验收，不要在生产环境启用。
+fileagent:
+  agent:
+    enabled: true
+    actions-enabled: true
+    authorized-action-resource-scopes: [mock:expense:read, mock:expense:draft]
+  action:
+    mock:
+      enabled: true
+      base-url: ${FILEAGENT_ACTION_MOCK_BASE_URL:http://127.0.0.1:8080}
+      token: ${FILEAGENT_ACTION_MOCK_TOKEN:}
+    http:
+      enabled: true
+      endpoints:
+        - endpoint-id: mock-create-expense-draft
+          mock-endpoint: true
+          display-name: 创建测试报销草稿
+          definition-version: definition-v1
+          endpoint-revision: endpoint-v1
+          policy-version: policy-v1
+          method: POST
+          base-url: ${FILEAGENT_ACTION_MOCK_BASE_URL:http://127.0.0.1:8080}
+          path-template: /internal/action-mock/v1/expense-drafts
+          request-schema:
+            type: object
+            additionalProperties: false
+            properties:
+              amount:
+                type: number
+                exclusiveMinimum: 0
+                multipleOf: 0.01
+                x-location: body
+              memo:
+                type: string
+                minLength: 1
+                maxLength: 500
+                x-location: body
+              bankAccount:
+                type: string
+                maxLength: 100
+                sensitive: true
+                x-location: body
+            required: [amount, memo]
+          risk-level: LOW_RISK_WRITE
+          data-egress-policy:
+            model-writable-fields: [amount, memo, bankAccount]
+            externalizes-model-free-text: true
+          resource-scope: mock:expense:draft
+          safe-summary: 创建一条用于测试的报销草稿
+          expected-impact: Mock 系统将新增一条测试草稿，不是真实报销
+          credential-ref: FILEAGENT_ACTION_MOCK_TOKEN
+          idempotency-header: Idempotency-Key
+          connect-timeout: 3s
+          read-timeout: 8s
+          call-timeout: 10s
+          max-response-bytes: 65536
+          allowed-content-types: [application/json]
+        - endpoint-id: mock-get-expense-draft
+          mock-endpoint: true
+          display-name: 查询测试报销草稿
+          definition-version: definition-v1
+          endpoint-revision: endpoint-v1
+          policy-version: policy-v1
+          method: GET
+          base-url: ${FILEAGENT_ACTION_MOCK_BASE_URL:http://127.0.0.1:8080}
+          path-template: /internal/action-mock/v1/expense-drafts/{draftId}
+          request-schema:
+            type: object
+            additionalProperties: false
+            properties:
+              draftId:
+                type: string
+                minLength: 1
+                maxLength: 36
+                x-location: path
+            required: [draftId]
+          risk-level: READ_ONLY
+          data-egress-policy:
+            model-writable-fields: [draftId]
+            externalizes-model-free-text: false
+          resource-scope: mock:expense:read
+          safe-summary: 根据草稿 ID 查询测试报销草稿
+          expected-impact: 只读取 Mock 测试数据，不修改业务状态
+          credential-ref: FILEAGENT_ACTION_MOCK_TOKEN
+          connect-timeout: 3s
+          read-timeout: 8s
+          call-timeout: 10s
+          max-response-bytes: 65536
+          allowed-content-types: [application/json]

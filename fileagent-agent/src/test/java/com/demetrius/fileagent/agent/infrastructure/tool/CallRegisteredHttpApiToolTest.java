@@ -1,6 +1,8 @@
 package com.demetrius.fileagent.agent.infrastructure.tool;
 
 import com.demetrius.fileagent.api.dto.action.ActionDefinitionView;
+import com.demetrius.fileagent.api.dto.AgentRunCommand;
+import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.api.dto.action.ActionExecutionCommand;
 import com.demetrius.fileagent.api.dto.action.ActionExecutionView;
 import com.demetrius.fileagent.api.enums.ActionExecutionStatus;
@@ -61,7 +63,7 @@ class CallRegisteredHttpApiToolTest {
                 Instant.parse("2026-10-20T08:00:00Z"), Instant.parse("2026-10-20T08:00:01Z")));
         tool = new CallRegisteredHttpApiTool(
                 "run-1", "local-operator", Set.of("expense:draft"),
-                actionExecutionPort, new ObjectMapper(), envelopeCrypto);
+                actionExecutionPort, new ObjectMapper(), envelopeCrypto, List.of(definition("endpoint-v1")));
     }
 
     @Test
@@ -83,6 +85,25 @@ class CallRegisteredHttpApiToolTest {
         assertThat(tool.checkPermissions(injected, PermissionContextState.builder().build()).block()
                 .getBehavior()).isEqualTo(PermissionBehavior.DENY);
         verify(actionExecutionPort, never()).execute(any());
+    }
+
+    @Test
+    void factoryShouldExposeOnlyAuthorizedSafeCatalogAndSkipEmptyCatalog() {
+        AgentProperties properties = new AgentProperties();
+        properties.setAuthorizedActionResourceScopes(Set.of("expense:draft"));
+        when(actionExecutionPort.listDefinitions(Set.of("expense:draft"))).thenReturn(List.of(definition("endpoint-v1")));
+        var factory = new CallRegisteredHttpApiToolFactory(properties, actionExecutionPort, new ObjectMapper(), envelopeCrypto);
+        AgentRunCommand command = mock(AgentRunCommand.class);
+        when(command.runId()).thenReturn("run-1");
+
+        assertThat(factory.available(command)).isTrue();
+        String description = factory.create(command).getDescription();
+        assertThat(description).contains("create-expense-draft", "创建报销草稿", "cardNumber")
+                .doesNotContain("sensitive", "x-location", "config-hmac", "Authorization", "api.example.com");
+
+        properties.setAuthorizedActionResourceScopes(Set.of("other:scope"));
+        when(actionExecutionPort.listDefinitions(Set.of("other:scope"))).thenReturn(List.of());
+        assertThat(factory.available(command)).isFalse();
     }
 
     @Test

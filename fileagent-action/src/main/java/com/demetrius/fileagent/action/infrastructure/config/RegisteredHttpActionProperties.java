@@ -42,6 +42,7 @@ public class RegisteredHttpActionProperties {
     public static class Endpoint {
 
         private String endpointId;
+        private boolean mockEndpoint;
         private String displayName;
         private String definitionVersion;
         private String endpointRevision;

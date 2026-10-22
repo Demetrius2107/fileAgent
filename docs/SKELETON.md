@@ -57,10 +57,10 @@ fileAgent/
 │   └── infrastructure/               AgentScopeRuntimeAdapter（暂停/ConfirmResult 恢复）/ AgentPersistenceAdapter / DatabaseAgentStateStore / AgentRunExecutionCoordinator / AgentRunEventHub / 只读工具 / RunScopedActionTool / CallRegisteredHttpApiTool
 
 ├── fileagent-action/              ✅ 动作执行域（Phase 3C 注册式 HTTP）
-│   ├── interfaces/                   暂无公开 Controller；由 api Port 跨域调用
-│   ├── application/                  ActionExecutionService（定义复核、幂等执行、结果收敛）
-│   ├── domain/                       ActionToolExecutionEntity / ActionToolExecutionRepository（副作用账本）
-│   └── infrastructure/               Endpoint 注册与 Schema / 安全 URI / DNS-IP 策略 / 受限 OkHttp / JPA
+│   ├── interfaces/                   MockExpenseDraftController（默认关闭，仅开发环境验收）
+│   ├── application/                  ActionExecutionService（定义复核、幂等执行、结果收敛）/ MockExpenseDraftService
+│   ├── domain/                       ActionToolExecutionEntity / ActionToolExecutionRepository（副作用账本）/ MockExpenseDraftEntity
+│   └── infrastructure/               Endpoint 注册与 Schema / 安全 URI / DNS-IP 策略 / 受限 OkHttp / JPA（含 Mock 草稿存储）
 │
 ├── fileagent-evaluation/          ✅ RAG 端到端评测工具
 │   ├── evaluation/                   JSONL 加载 / Runner / 指标 / 报告 / 质量门禁

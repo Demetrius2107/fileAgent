@@ -12,6 +12,11 @@ import com.demetrius.fileagent.api.dto.AgentRunCommand;
 @FunctionalInterface
 public interface AgentActionToolFactory {
 
+    /** 当前 Run 没有可用动作时，不向模型注册该工具。 */
+    default boolean available(AgentRunCommand command) {
+        return true;
+    }
+
     /**
      * 为当前可信 Run 命令创建独立工具实例。
      *

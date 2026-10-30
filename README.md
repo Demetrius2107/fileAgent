@@ -5,7 +5,7 @@
 
 ## 架构
 
-**模块化单体（DDD）**：Maven 多模块聚合工程，一个 Spring Boot 进程，领域间用 Port 接口 + 领域事件解耦。
+**模块化单体（DDD）**：主应用是 Maven 多模块聚合的 Spring Boot 进程，领域间用 Port 接口 + 领域事件解耦。可选的 Python Sandbox 以独立 Worker 进程运行，不并入主应用 JVM。
 
 ```
 fileagent-common   通用支撑（统一响应/异常）
@@ -13,8 +13,9 @@ fileagent-api      契约层（DTO / 枚举 / 端口 / 领域事件）
 fileagent-session  会话域        fileagent-document  文档域
 fileagent-chat     对话/推理域(核心) fileagent-action    动作执行域
 fileagent-agent    Agent 运行域（Phase 1 最小 Agentic RAG）
+fileagent-sandbox-worker 独立 Python Sandbox Worker（rootless Podman）
 fileagent-evaluation RAG 评测集 / 内部评测接口 / baseline 门禁
-fileagent-starter  启动装配（唯一 Boot 入口）
+fileagent-starter  主应用启动装配（不装配独立 Sandbox Worker）
 ragflow-quickstart RAGFlow HTTP API 独立学习模块
 ```
 
@@ -44,13 +45,14 @@ RAGFlow 托管式 RAG 的独立调用工程位于 [`ragflow-quickstart`](ragflow
 
 自研 RAG 的评测框架和首批 30 题位于 [`fileagent-evaluation`](fileagent-evaluation/README.md)。
 
-## Agent 模式（Phase 1）
+## Agent 模式（Phase 1 至 Phase 3）
 
 > 最小 Agentic RAG：由 AI 自主检索知识库并分步作答。默认**关闭**，不影响既有 `/chat` 流程。
 
 - **启用**：`fileagent.agent.enabled=true`（默认 `false`）；模型沿用 chat 域启用配置（`spring.ai.deepseek.*`），不新增密钥配置。
 - **接口**：`POST /api/sessions/{id}/agent-runs`（SSE 流式）、`GET /api/agent-runs/{runId}`（快照）、`POST /api/agent-runs/{runId}/cancel`（取消），见 `docs/API.md` §4.2。
-- **运行限制**：每次运行 ≤4 步推理/工具调用、≤45 秒、单次工具结果 ≤12000 字符；Agent 仅拥有 `search_docs` / `list_knowledge_files` / `read_document_context` 三个只读工具。
+- **默认只读工具**：`search_docs`、`list_knowledge_files`、`read_document_context`、`get_document_outline`。默认运行上限为 8 步、4 次模型调用、45 秒；具体值可由 `fileagent.agent.*` 配置调整。
+- **可选 Python Sandbox**：`execute_python` 默认不注册。只有同时开启 Agent 动作和 Sandbox、授权 `sandbox:python` 范围，并由用户单次审批后，才会通过独立 loopback Worker 执行。当前仅支持 Python，不使用 GraalVM；部署前提、资源限制和威胁模型见 [`docs/SANDBOX.md`](docs/SANDBOX.md)。
 - **评测**：`./fileagent-evaluation/scripts/run-agent-evaluation.sh` 调用已部署实例，真实执行 AgentScope、检索和 Judge；通用知识可直接回答，企业事实才要求检索依据，见 `docs/TESTING.md` §7。
 
 打开 `http://localhost:8080/` 即可使用同源工作台：新建会话 → 右侧「知识库」上传 TXT/MD/PDF/DOCX/XLSX/CSV → 中间提问，回答流式输出并标明来源文件；刷新页面后会话与消息仍在（H2 落库，知识索引存于 Elasticsearch）。
@@ -69,6 +71,7 @@ RAGFlow 托管式 RAG 的独立调用工程位于 [`ragflow-quickstart`](ragflow
 | `docs/GIT-WORKFLOW.md` | Git 分支 / 提交 / PR 流程 |
 | `docs/TESTING.md` | 测试规范 |
 | `docs/SECURITY.md` | 安全与敏感信息规范 |
+| `docs/SANDBOX.md` | Python Sandbox Worker 的部署、边界与威胁模型 |
 | `docs/CICD.md` | CI/CD 流水线说明（GitHub Actions） |
 | `docs/M1-UPLOAD-SPLIT.md` | F1 上传模块两人分工方案 |
 | `AGENTS.md` | AI 编码代理协作规范（Cursor/Claude Code 等读取） |
@@ -83,7 +86,7 @@ RAGFlow 托管式 RAG 的独立调用工程位于 [`ragflow-quickstart`](ragflow
 - **M4** 历史上下文 + 业务库连接
 - **M5** 工程化：审计 / 可观测 / 简单前端
 
-**当前进度（2026-09）**：M1 ✅；M2 大部分 ✅（多格式解析、SSE 流式、RAG 工作台，知识库已重构为 ES 混合检索；导出/图表动作未完成）；M3 的模型多配置管理 ✅（Agent 规划与代码沙箱未做）；知识库文件删除 + 上传内容去重 ✅；M4 未开始。
+**当前进度（2026-10）**：M1 ✅；M2 大部分 ✅（多格式解析、SSE 流式、RAG 工作台，知识库已重构为 ES 混合检索；导出/图表动作未完成）；M3 已具备 Agent 运行时、持久化、审批和注册式 HTTP 动作。Python Sandbox 代码以默认关闭的独立 Worker 形式接入，真实模型攻击评测和浏览器审批验收需按 [`docs/SANDBOX.md`](docs/SANDBOX.md) 与测试文档在目标环境分别执行；M4 未开始。
 
 ## 仓库规范
 

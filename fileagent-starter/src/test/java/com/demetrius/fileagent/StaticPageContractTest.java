@@ -110,6 +110,24 @@ class StaticPageContractTest {
         assertThat(css).contains(".agent-tool-step-warning");
     }
 
+    @Test
+    void pythonSandboxShouldShowBoundedApprovalPreviewAndControlledOutcome() throws IOException {
+        String script = readResource("static/app.js");
+        String css = readResource("static/app.css");
+
+        assertThat(script)
+                .contains("execute_python: '在隔离环境运行 Python 代码'")
+                .contains("高风险 Python 脚本")
+                .contains("无网络 · 最长 10 秒 · 临时文件不持久化")
+                .contains("agent-approval-python-preview")
+                .contains("Python Sandbox 执行结果不确定")
+                .doesNotContain("重试 Python 脚本");
+        assertThat(css)
+                .contains(".agent-approval-python-preview")
+                .contains("max-height")
+                .contains("overflow: auto");
+    }
+
     private String readResource(String path) throws IOException {
         try (InputStream in = getClass().getClassLoader().getResourceAsStream(path)) {
             assertThat(in).as("资源应存在: %s", path).isNotNull();

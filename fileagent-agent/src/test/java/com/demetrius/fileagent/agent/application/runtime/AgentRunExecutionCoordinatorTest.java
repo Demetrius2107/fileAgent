@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.application.runtime;
 
 import com.demetrius.fileagent.agent.application.AgentRunFinalizationService;
+import com.demetrius.fileagent.agent.application.AgentApprovalService;
 import com.demetrius.fileagent.agent.domain.approval.AgentApprovalEntity;
 import com.demetrius.fileagent.agent.domain.approval.AgentApprovalRepository;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
@@ -9,6 +10,7 @@ import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentApprovalView;
 import com.demetrius.fileagent.api.dto.KnowledgeScope;
+import com.demetrius.fileagent.api.dto.action.PythonSandboxActionDefinition;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.ActionRiskLevel;
 import com.demetrius.fileagent.api.enums.ApprovalStatus;
@@ -33,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -228,15 +231,92 @@ class AgentRunExecutionCoordinatorTest {
         assertThat(resumed.await(1, TimeUnit.SECONDS)).isTrue();
     }
 
+    @Test
+    void shouldFailClosedApprovedPythonRunAfterRestartWithoutDecryptingOrResuming() {
+        AgentRunRepository repository = mock(AgentRunRepository.class);
+        AgentApprovalRepository approvalRepository = mock(AgentApprovalRepository.class);
+        AgentRunCommandCodec commandCodec = mock(AgentRunCommandCodec.class);
+        AgentExecutionEngine engine = mock(AgentExecutionEngine.class);
+        AgentApprovalService approvalService = mock(AgentApprovalService.class);
+        AgentRunExecutionCoordinator coordinator = coordinator(repository, approvalRepository, approvalService,
+                engine, commandCodec, 1, 1);
+        AgentRunEntity pending = pending("run-python-restart", 6L);
+        AgentApprovalEntity approval = approvedPythonApproval(pending.getRunId());
+        when(repository.findRecoverable(any(Instant.class))).thenReturn(List.of(pending));
+        when(approvalRepository.findLatestResolvedByRunId(pending.getRunId())).thenReturn(Optional.of(approval));
+        doAnswer(invocation -> {
+            pending.fail("PYTHON_RESTART_REJECTED", CLOCK.instant());
+            return pending;
+        }).when(approvalService).failApprovedPythonRecovery(pending.getRunId(), approval.getApprovalId());
+
+        coordinator.recoverNow();
+
+        assertThat(pending.getStatus()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(pending.getFailureCode()).isEqualTo("PYTHON_RESTART_REJECTED");
+        verify(approvalService).failApprovedPythonRecovery(pending.getRunId(), approval.getApprovalId());
+        verify(commandCodec, never()).decrypt(any());
+        verify(engine, never()).execute(any());
+        verify(engine, never()).resume(any(), any());
+    }
+
+    @Test
+    void shouldResumeFreshApprovedPythonRunWhenCurrentProcessAlreadyReservedCapacity() throws Exception {
+        AgentRunRepository repository = mock(AgentRunRepository.class);
+        AgentApprovalRepository approvalRepository = mock(AgentApprovalRepository.class);
+        AgentRunCommandCodec commandCodec = mock(AgentRunCommandCodec.class);
+        AgentApprovalService approvalService = mock(AgentApprovalService.class);
+        CountDownLatch resumed = new CountDownLatch(1);
+        AgentExecutionEngine engine = new AgentExecutionEngine() {
+            @Override
+            public Flux<com.demetrius.fileagent.api.dto.AgentRunEvent> execute(AgentRunCommand command) {
+                return Flux.error(new AssertionError("已批准 Python 工具不能从 execute 重新开始"));
+            }
+
+            @Override
+            public Flux<com.demetrius.fileagent.api.dto.AgentRunEvent> resume(
+                    AgentRunCommand command, AgentApprovalEntity approval) {
+                resumed.countDown();
+                return Flux.never();
+            }
+        };
+        AgentRunExecutionCoordinator coordinator = coordinator(repository, approvalRepository, approvalService,
+                engine, commandCodec, 1, 1);
+        AgentRunEntity pending = pending("run-python-fresh", 7L);
+        AgentApprovalEntity approval = approvedPythonApproval(pending.getRunId());
+        when(repository.findRecoverable(any(Instant.class))).thenReturn(List.of(pending));
+        when(approvalRepository.findLatestResolvedByRunId(pending.getRunId())).thenReturn(Optional.of(approval));
+        when(commandCodec.decrypt(pending)).thenReturn(command(pending.getRunId(), 7L));
+        when(repository.findByRunId(pending.getRunId())).thenReturn(Optional.of(pending));
+        when(repository.acquireLease(anyString(), anyLong(), anyString(), any(Instant.class), any(Instant.class)))
+                .thenReturn(true);
+        when(repository.save(any(AgentRunEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        assertThat(coordinator.tryReserveCapacity(pending.getRunId())).isTrue();
+        coordinator.recoverNow();
+
+        assertThat(resumed.await(1, TimeUnit.SECONDS)).isTrue();
+        verify(approvalService, never()).failApprovedPythonRecovery(anyString(), anyString());
+    }
+
     private AgentRunExecutionCoordinator coordinator(AgentRunRepository repository, AgentExecutionEngine engine,
                                                        AgentRunCommandCodec commandCodec,
                                                        int maxConcurrentRuns, int maxQueuedRuns) {
-        return coordinator(repository, mock(AgentApprovalRepository.class), engine, commandCodec,
+        return coordinator(repository, mock(AgentApprovalRepository.class), mock(AgentApprovalService.class), engine, commandCodec,
                 maxConcurrentRuns, maxQueuedRuns);
     }
 
     private AgentRunExecutionCoordinator coordinator(AgentRunRepository repository,
                                                        AgentApprovalRepository approvalRepository,
+                                                       AgentExecutionEngine engine,
+                                                       AgentRunCommandCodec commandCodec,
+                                                       int maxConcurrentRuns, int maxQueuedRuns) {
+        return coordinator(repository, approvalRepository, mock(AgentApprovalService.class), engine, commandCodec,
+                maxConcurrentRuns, maxQueuedRuns);
+    }
+
+    private AgentRunExecutionCoordinator coordinator(AgentRunRepository repository,
+                                                       AgentApprovalRepository approvalRepository,
+                                                       AgentApprovalService approvalService,
                                                        AgentExecutionEngine engine,
                                                        AgentRunCommandCodec commandCodec,
                                                        int maxConcurrentRuns, int maxQueuedRuns) {
@@ -250,7 +330,8 @@ class AgentRunExecutionCoordinatorTest {
         executor.initialize();
         executors.add(executor);
         return new AgentRunExecutionCoordinator(repository, approvalRepository, engine, commandCodec,
-                new AgentRunEventHub(properties), mock(AgentRunFinalizationService.class), properties, CLOCK, executor);
+                new AgentRunEventHub(properties), mock(AgentRunFinalizationService.class), approvalService,
+                properties, CLOCK, executor);
     }
 
     private ThreadPoolTaskExecutor executor() {
@@ -273,6 +354,19 @@ class AgentRunExecutionCoordinatorTest {
                 "schema-v1", "endpoint-v1", "endpoint-hash", "policy-v1", ActionRiskLevel.HIGH_RISK_WRITE,
                 "resource:demo", "input-hmac", "operation-1", "执行测试动作", "影响一条演示记录",
                 "{\"payload\":\"***\"}", CLOCK.instant().plusSeconds(300), CLOCK.instant());
+        approval.decide(ApprovalStatus.APPROVED, "local-operator", null, "USER_APPROVED", CLOCK.instant());
+        return approval;
+    }
+
+    private AgentApprovalEntity approvedPythonApproval(String runId) {
+        AgentApprovalEntity approval = AgentApprovalEntity.pending(
+                "approval-" + runId, runId, 10L, "tool-call-python", PythonSandboxActionDefinition.TOOL_NAME,
+                PythonSandboxActionDefinition.TOOL_VERSION, PythonSandboxActionDefinition.DEFINITION_VERSION,
+                PythonSandboxActionDefinition.ENDPOINT_REVISION, PythonSandboxActionDefinition.ENDPOINT_CONFIG_HASH,
+                PythonSandboxActionDefinition.POLICY_VERSION, ActionRiskLevel.HIGH_RISK_WRITE,
+                PythonSandboxActionDefinition.RESOURCE_SCOPE, "input-hmac", "operation-python",
+                "执行 Python 脚本", "隔离执行", "{\"code\":\"print(1)\",\"input\":{}}",
+                CLOCK.instant().plusSeconds(300), CLOCK.instant());
         approval.decide(ApprovalStatus.APPROVED, "local-operator", null, "USER_APPROVED", CLOCK.instant());
         return approval;
     }

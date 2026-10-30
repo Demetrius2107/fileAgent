@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.application.runtime;
 
 import com.demetrius.fileagent.agent.application.AgentRunFinalizationService;
+import com.demetrius.fileagent.agent.application.AgentApprovalService;
 import com.demetrius.fileagent.agent.domain.approval.AgentApprovalEntity;
 import com.demetrius.fileagent.agent.domain.approval.AgentApprovalRepository;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
@@ -10,6 +11,7 @@ import com.demetrius.fileagent.api.dto.AgentApprovalView;
 import com.demetrius.fileagent.api.dto.AgentCitation;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
+import com.demetrius.fileagent.api.dto.action.PythonSandboxActionDefinition;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -54,6 +56,7 @@ public class AgentRunExecutionCoordinator {
     private final AgentRunCommandCodec commandCodec;
     private final AgentRunEventHub eventHub;
     private final AgentRunFinalizationService finalizationService;
+    private final AgentApprovalService approvalService;
     private final AgentProperties properties;
     private final Clock clock;
     private final ThreadPoolTaskExecutor executor;
@@ -69,6 +72,7 @@ public class AgentRunExecutionCoordinator {
                                         AgentRunCommandCodec commandCodec,
                                         AgentRunEventHub eventHub,
                                         AgentRunFinalizationService finalizationService,
+                                        AgentApprovalService approvalService,
                                         AgentProperties properties,
                                         Clock clock,
                                         @Qualifier("agentRunTaskExecutor") ThreadPoolTaskExecutor executor) {
@@ -78,6 +82,7 @@ public class AgentRunExecutionCoordinator {
         this.commandCodec = commandCodec;
         this.eventHub = eventHub;
         this.finalizationService = finalizationService;
+        this.approvalService = approvalService;
         this.properties = properties;
         this.clock = clock;
         this.executor = executor;
@@ -167,6 +172,11 @@ public class AgentRunExecutionCoordinator {
             failRecovery(run, CODE_RUN_INTERRUPTED, now);
             return;
         }
+        AgentApprovalEntity approval = approvalRepository.findLatestResolvedByRunId(run.getRunId()).orElse(null);
+        if (isRestartedApprovedPythonRun(run, approval)) {
+            failApprovedPythonRecovery(run, approval, now);
+            return;
+        }
         if (!tryReserveCapacity(run.getRunId())) {
             failRecovery(run, CODE_RUN_INTERRUPTED, now);
             return;
@@ -178,6 +188,32 @@ public class AgentRunExecutionCoordinator {
             releaseCapacity(run.getRunId());
             failRecovery(run, CODE_RECOVERY_FAILED, now);
         }
+    }
+
+    /**
+     * 新近批准的 Run 已在当前 JVM 预留容量；只有重启后缺少该内存事实的旧批准必须失败关闭。
+     */
+    private boolean isRestartedApprovedPythonRun(AgentRunEntity run, AgentApprovalEntity approval) {
+        return !reservedRunIds.contains(run.getRunId())
+                && approval != null
+                && approval.getStatus() == com.demetrius.fileagent.api.enums.ApprovalStatus.APPROVED
+                && PythonSandboxActionDefinition.TOOL_NAME.equals(approval.getToolName());
+    }
+
+    private void failApprovedPythonRecovery(AgentRunEntity run, AgentApprovalEntity approval, Instant now) {
+        try {
+            AgentRunEntity failed = approvalService.failApprovedPythonRecovery(
+                    run.getRunId(), approval.getApprovalId());
+            String code = failed.getFailureCode();
+            eventHub.publish(AgentRunEvent.failed(failed.getRunId(), code,
+                    "Python Sandbox 批准因服务重启被安全撤销", failed.getTraceId()),
+                    Math.max(0L, failed.getVersion()));
+        } catch (RuntimeException e) {
+            log.warn("重启后失败关闭已批准 Python Sandbox 失败 runId={}: {}", run.getRunId(), e.getMessage());
+            failRecovery(run, CODE_RECOVERY_FAILED, now);
+            return;
+        }
+        releaseCapacity(run.getRunId());
     }
 
     /**

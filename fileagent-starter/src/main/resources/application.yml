@@ -65,9 +65,9 @@ fileagent:
     # 自适应检索子开关（Phase 2A）：默认关闭；不改变 Agent 总开关与固定 /chat 行为
     adaptive-retrieval-enabled: ${FILEAGENT_AGENT_ADAPTIVE_RETRIEVAL_ENABLED:false}
     # 副作用工具默认关闭；开启后每次高风险动作仍必须经过单次人工审批
-    actions-enabled: ${FILEAGENT_AGENT_ACTIONS_ENABLED:false}
+    actions-enabled: ${FILEAGENT_AGENT_ACTIONS_ENABLED:true}
     # 本地运行身份被允许操作的服务端资源范围，逗号分隔；默认空表示拒绝全部外部动作
-    authorized-action-resource-scopes: ${FILEAGENT_AGENT_AUTHORIZED_ACTION_RESOURCE_SCOPES:}
+    authorized-action-resource-scopes: ${FILEAGENT_AGENT_AUTHORIZED_ACTION_RESOURCE_SCOPES:sandbox:python}
     max-prompt-characters: ${FILEAGENT_AGENT_MAX_PROMPT_CHARACTERS:8000}
     max-history-characters: ${FILEAGENT_AGENT_MAX_HISTORY_CHARACTERS:8000}
     max-summary-characters: ${FILEAGENT_AGENT_MAX_SUMMARY_CHARACTERS:2000}
@@ -90,6 +90,13 @@ fileagent:
       # 注册式 HTTP 动作总开关；还需同时开启 fileagent.agent.actions-enabled
       enabled: ${FILEAGENT_ACTION_HTTP_ENABLED:false}
       endpoints: []
+  sandbox:
+    # 独立 Python Sandbox 总开关；开启后仍需要 Agent 动作开关、sandbox:python 授权范围和每次人工审批
+    enabled: ${FILEAGENT_SANDBOX_ENABLED:true}
+    # 仅允许本机 loopback Worker；客户端会拒绝远端、代理、重定向和非固定路径
+    base-url: ${FILEAGENT_SANDBOX_BASE_URL:http://127.0.0.1:8090}
+    token: ${FILEAGENT_SANDBOX_TOKEN:$FILEAGENT_SANDBOX_TOKEN}
+    call-timeout: ${FILEAGENT_SANDBOX_CALL_TIMEOUT:15s}
   chunk-size: 800
   chunk-overlap: 120
   elasticsearch:

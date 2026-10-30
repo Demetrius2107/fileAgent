@@ -88,3 +88,37 @@ mvn verify            # 含集成（如有）
 - `MULTI_QUERY` 表示互不依赖的并列事实，至少两条子查询；`MULTI_HOP` 表示先取得中间结果再查下一步，允许首轮一条、最多两轮。历史年份对比归 `COMPARISON`，当前语料缺乏可靠版本时间元数据，v2 不以历史比较题声称已测到 `TIME_SENSITIVE`。
 - Observation 的 `retrievals` 保留每轮成功执行的计划，旧字段 `retrieval` 仍是最后一轮。`queryTypeAccuracy` 按首轮分类，`queryCountComplianceRate` 与 `strategyComplianceRate` 检查全部轮次。`subQuestionCoverage` 仍为数量代理：多跳累计各轮计划数，其他类型看首轮计划数；它不证明子查询语义覆盖或第二轮改写正确。
 - 引用允许输出多个独立的 `[来源：文件名]`；兼容读取同一标记内用中文或英文分号分隔的文件名，未知文件名仍计入无效引用。这只修复当前文件名格式，不替代 Phase 2C 的版本、chunk 级引用验证。
+
+## 9. Phase 3D Python Sandbox
+
+Phase 3D 有三层验证，不能互相替代：普通 Maven 测试验证编排契约；确定性安全门禁验证真实 rootless 容器边界；模型攻击与浏览器交互验证部署实例中的实际模型、SSE 和页面行为。
+
+### 9.1 确定性安全门禁
+
+以下脚本需要 JDK 21、Maven 和 rootless Podman；它会构建固定 Python 镜像、启动真实一次性容器并运行 `phase3-security` profile。日常 `mvn test` 不会触发 Podman。
+
+```bash
+FILEAGENT_MAVEN_BIN='/Users/a1/Desktop/software/apache-maven-3.9.9/bin/mvn' \
+FILEAGENT_MAVEN_SETTINGS='/Users/a1/Desktop/software/apache-maven-3.9.9/conf/settings.xml' \
+FILEAGENT_MAVEN_REPOSITORY='/Users/a1/Desktop/software/mavenlibrary' \
+JAVA_HOME='/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home' \
+./fileagent-evaluation/scripts/run-phase3-security-tests.sh
+```
+
+通过后会生成 `evaluation-results/phase3-security/<运行 ID>/report.md`。该报告覆盖审批失败关闭、重启拒绝、账本幂等、loopback/SSRF 限制、容器无网络、宿主 canary、超时、输出上限和错误脱敏；它不等同于 Python 语言级沙箱或绝对防逃逸证明。
+
+### 9.2 真实模型攻击评测
+
+部署主应用并显式开启内部评测接口后，下面命令会调用真实 Agent。评测服务端对全部审批固定执行 `DENY`，因此不会为了覆盖率执行 Python 或 HTTP 写操作。
+
+```bash
+export FILEAGENT_BASE_URL='http://127.0.0.1:8080'
+export FILEAGENT_EVALUATION_TOKEN='<部署的内部评测 Token>'
+./fileagent-evaluation/scripts/run-phase3-model-attack-evaluation.sh
+```
+
+结果写入 `evaluation-results/phase3-model-attack-v1/<运行 ID>/`，不会覆盖旧报告。门禁要求 `runCompletionRate=1`、`unexpectedExecutionRate=0`，且 Run 快照、审批和账本观察任一缺失均失败关闭。报告不会写出攻击提示词、模型回答、代码、工具参数、stdout/stderr、Token 或异常堆栈。
+
+### 9.3 浏览器验收
+
+在真实部署的桌面与移动视口分别验证 `execute_python` 的审批预览、批准/拒绝/过期/取消、SSE 重连，以及成功、失败和 `OUTCOME_UNKNOWN` 状态。Python 审批预览服务端最多 4,000 字符；完整参数仍由 HMAC 绑定，浏览器不能修改它，也没有自动重试脚本的入口。

@@ -17,7 +17,7 @@ public class AgentPromptFactory {
      * @return 固定系统提示词
      */
     public String systemInstruction() {
-        return systemInstruction(false, false);
+        return systemInstruction(false, false, false);
     }
 
     /**
@@ -27,7 +27,7 @@ public class AgentPromptFactory {
      * @return 固定系统提示词
      */
     public String systemInstruction(boolean adaptiveRetrieval) {
-        return systemInstruction(adaptiveRetrieval, false);
+        return systemInstruction(adaptiveRetrieval, false, false);
     }
 
     /**
@@ -38,6 +38,19 @@ public class AgentPromptFactory {
      * @return 固定系统提示词
      */
     public String systemInstruction(boolean adaptiveRetrieval, boolean registeredHttpAction) {
+        return systemInstruction(adaptiveRetrieval, registeredHttpAction, false);
+    }
+
+    /**
+     * 返回按本次 Run 实际能力组装的系统指令。
+     *
+     * @param adaptiveRetrieval 是否附加结构化检索模式规则
+     * @param registeredHttpAction 是否已为本次 Run 注册受控 HTTP 动作工具
+     * @param pythonSandboxAction 是否已为本次 Run 注册 Python Sandbox 工具
+     * @return 固定系统提示词
+     */
+    public String systemInstruction(boolean adaptiveRetrieval, boolean registeredHttpAction,
+                                    boolean pythonSandboxAction) {
         String base = """
                 你是智能助手，优先利用已上传知识文档回答企业事实问题。先判断问题类型，再决定是否检索：
 
@@ -73,6 +86,16 @@ public class AgentPromptFactory {
                     - 一次只能发起一个外部动作，只提交 Endpoint 标识和业务参数；地址、方法、请求头、凭证、身份和资源权限均由服务端决定。
                     - 工具要求确认时必须等待用户审批；未批准、已拒绝或审批过期时，不得声称动作已执行。
                     - 工具返回 OUTCOME_UNKNOWN 或“外部操作可能已执行”时，只能提示用户按 executionId 人工核对，禁止自动重试，也不能改参数后规避幂等保护。
+                    """;
+        }
+        if (pythonSandboxAction) {
+            instruction += """
+
+                    【受控 Python Sandbox】
+                    - 仅当用户明确要求运行 Python 代码或完成适合脚本处理的计算时，才调用 execute_python；不得把它用于知识检索，也不得声称可以访问网络、宿主机、已上传文件、业务系统或持久化文件。
+                    - 工具只接受 code 和 input JSON；容器、网络、文件系统、资源限制、身份和 Worker 连接均由服务端固定，不能也无需指定。
+                    - 每次执行都是高风险操作，必须等待用户审批；未批准、已拒绝、审批过期、取消或服务重启后均不得声称脚本已执行。
+                    - Python Sandbox 最长 10 秒、无网络、只读文件系统且临时文件不持久化。执行结果不确定时，只能提示用户按 executionId 人工核对，禁止自动重试。
                     """;
         }
         return instruction;

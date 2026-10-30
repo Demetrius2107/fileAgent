@@ -602,18 +602,30 @@
             body.appendChild(panel);
         }
         const expired = isApprovalExpired(approval);
+        const pythonSandbox = approval.tool === 'execute_python';
         panel.replaceChildren();
         panel.dataset.status = approval.status || 'PENDING';
         panel.dataset.expired = String(expired);
 
         const title = el('div', 'agent-approval-title', approval.actionSummary || '需要确认的操作');
         panel.appendChild(title);
+        if (pythonSandbox) {
+            panel.appendChild(el('div', 'agent-approval-python-risk', '高风险 Python 脚本'));
+            panel.appendChild(el('div', 'agent-approval-python-note', '无网络 · 最长 10 秒 · 临时文件不持久化'));
+        }
         const details = el('dl', 'agent-approval-details');
         appendApprovalDetail(details, '影响', approval.expectedImpact);
         appendApprovalDetail(details, '资源', approval.resourceScope);
-        appendApprovalDetail(details, '参数', approval.parameterPreview);
+        if (!pythonSandbox) {
+            appendApprovalDetail(details, '参数', approval.parameterPreview);
+        }
         appendApprovalDetail(details, '指纹', approval.parameterFingerprint);
         panel.appendChild(details);
+        if (pythonSandbox) {
+            const preview = el('pre', 'agent-approval-python-preview');
+            preview.textContent = approval.parameterPreview || '-';
+            panel.appendChild(preview);
+        }
 
         const deadline = el('div', 'agent-approval-deadline', approvalDeadlineText(approval));
         panel.appendChild(deadline);
@@ -1140,7 +1152,8 @@
         list_knowledge_files: '列出知识文件',
         read_document_context: '读取文档上下文',
         get_document_outline: '读取文档目录',
-        call_registered_http_api: '调用受控外部接口'
+        call_registered_http_api: '调用受控外部接口',
+        execute_python: '在隔离环境运行 Python 代码'
     };
 
     function renderToolStatus(assistant, event) {
@@ -1160,12 +1173,16 @@
                 const steps = statusEl.querySelectorAll('.agent-tool-step');
                 const last = steps[steps.length - 1];
                 if (last) {
-                    if (event.tool === 'call_registered_http_api') {
+                    if ((event.tool === 'call_registered_http_api' || event.tool === 'execute_python') && event.code) {
                         const fallback = event.code === 'OUTCOME_UNKNOWN'
-                            ? '外部操作可能已执行，executionId 不可用，请人工核对'
-                            : `${TOOL_LABELS[event.tool]}${event.code === 'SUCCEEDED' ? '成功' : '已结束'}`;
+                            ? event.tool === 'execute_python'
+                                ? 'Python Sandbox 执行结果不确定，executionId 不可用，请人工核对'
+                                : '外部操作可能已执行，executionId 不可用，请人工核对'
+                            : event.code === 'SUCCEEDED'
+                                ? `${TOOL_LABELS[event.tool]}执行完成`
+                                : `${TOOL_LABELS[event.tool]}执行失败，结果码=${event.code}`;
                         last.textContent = `第 ${event.step} 步：${event.message || fallback}`;
-                        if (event.code === 'OUTCOME_UNKNOWN') {
+                        if (event.code === 'OUTCOME_UNKNOWN' || event.code !== 'SUCCEEDED') {
                             last.classList.add('agent-tool-step-warning');
                         }
                     } else {

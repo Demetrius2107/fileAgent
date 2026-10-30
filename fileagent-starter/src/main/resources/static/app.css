@@ -586,6 +586,21 @@ body {
     overflow-wrap: anywhere;
 }
 .agent-approval[data-expired="true"] .agent-approval-title { color: #991b1b; }
+.agent-approval-python-risk {
+    display: inline-flex;
+    margin-top: 7px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #991b1b;
+    background: #fee2e2;
+    font-size: 11px;
+    font-weight: 600;
+}
+.agent-approval-python-note {
+    margin-top: 6px;
+    color: #92400e;
+    font-size: 12px;
+}
 .agent-approval-details {
     display: grid;
     gap: 5px;
@@ -605,6 +620,19 @@ body {
     color: #44403c;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+}
+.agent-approval-python-preview {
+    max-width: 100%;
+    max-height: 280px;
+    margin: 8px 0 0;
+    padding: 8px;
+    overflow: auto;
+    border: 1px solid #e7d7b5;
+    border-radius: 4px;
+    background: #fff;
+    color: #292524;
+    font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    white-space: pre;
 }
 .agent-approval-deadline {
     font-size: 12px;

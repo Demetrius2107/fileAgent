@@ -3,6 +3,7 @@ package com.demetrius.fileagent.agent.infrastructure.runtime;
 import com.demetrius.fileagent.agent.application.prompt.AgentPromptFactory;
 import com.demetrius.fileagent.agent.application.AgentHistoryService;
 import com.demetrius.fileagent.agent.application.AgentApprovalService;
+import com.demetrius.fileagent.agent.domain.approval.AgentApprovalEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRun;
 import com.demetrius.fileagent.agent.infrastructure.config.AdaptiveRetrievalProperties;
 import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
@@ -13,8 +14,9 @@ import com.demetrius.fileagent.agent.infrastructure.tool.ListKnowledgeFilesTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
-import com.demetrius.fileagent.agent.infrastructure.tool.CallRegisteredHttpApiTool;
+import com.demetrius.fileagent.agent.infrastructure.tool.RunScopedActionTool;
 import com.demetrius.fileagent.api.dto.AgentRunEvent;
+import com.demetrius.fileagent.api.enums.ApprovalStatus;
 import com.demetrius.fileagent.api.port.KnowledgeCatalogPort;
 import com.demetrius.fileagent.api.port.KnowledgeContextPort;
 import com.demetrius.fileagent.api.port.KnowledgeSearchPort;
@@ -30,7 +32,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class AgentScopeRuntimeAdapterTest {
 
@@ -38,10 +42,12 @@ class AgentScopeRuntimeAdapterTest {
             Instant.parse("2026-09-16T10:00:00Z"), ZoneOffset.UTC);
 
     private AgentScopeRuntimeAdapter adapter;
+    private AgentApprovalService approvalService;
 
     @BeforeEach
     void setUp() {
         AgentProperties properties = new AgentProperties();
+        approvalService = mock(AgentApprovalService.class);
         adapter = new AgentScopeRuntimeAdapter(
                 properties,
                 new AdaptiveRetrievalProperties(),
@@ -59,7 +65,7 @@ class AgentScopeRuntimeAdapterTest {
                 mock(ReadDocumentContextTool.class),
                 mock(GetDocumentOutlineTool.class),
                 mock(AgentHistoryService.class),
-                mock(AgentApprovalService.class),
+                approvalService,
                 List.of(),
                 // 引用抽取走真实服务（正则逻辑所在），核验端口保持 mock
                 new com.demetrius.fileagent.agent.application.AgentCitationService(
@@ -97,7 +103,7 @@ class AgentScopeRuntimeAdapterTest {
         List<AgentRunEvent> events = adapter.handleToolResultEnd(
                 run, mock(ReActAgent.class), RuntimeContext.builder().sessionId("run-action").build(),
                 "call_registered_http_api", 2, 18L,
-                new CallRegisteredHttpApiTool.CompletionNotice(
+                new RunScopedActionTool.CompletionNotice(
                         "OUTCOME_UNKNOWN",
                         "外部操作可能已执行，executionId=execution-1。请人工核对。"))
                 .collectList().block();
@@ -108,6 +114,21 @@ class AgentScopeRuntimeAdapterTest {
             assertThat(event.code()).isEqualTo("OUTCOME_UNKNOWN");
             assertThat(event.message()).contains("executionId=execution-1", "人工核对");
         });
+    }
+
+    @Test
+    void outcomeUnknownActionMustFailApprovedStepInsteadOfMarkingItSuccessful() {
+        AgentRun run = AgentRun.pending("run-action-audit", 1L, "trace-action-audit");
+        AgentApprovalEntity approval = mock(AgentApprovalEntity.class);
+        when(approval.getStatus()).thenReturn(ApprovalStatus.APPROVED);
+        when(approval.getToolCallId()).thenReturn("tool-call-1");
+        when(approval.getApprovalId()).thenReturn("approval-1");
+
+        adapter.settleApprovedStepIfMatched(run, approval, "tool-call-1",
+                new RunScopedActionTool.CompletionNotice("OUTCOME_UNKNOWN", "执行结果不确定"));
+
+        verify(approvalService).failApprovedStep("run-action-audit", "approval-1", "tool-call-1");
+        verify(approvalService, never()).completeApprovedStep("run-action-audit", "approval-1", "tool-call-1");
     }
 
     @Test

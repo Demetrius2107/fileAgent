@@ -11,6 +11,7 @@ import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.state.StrictAgentStateLoader;
 import com.demetrius.fileagent.api.dto.AgentApprovalDecision;
 import com.demetrius.fileagent.api.dto.AgentApprovalView;
+import com.demetrius.fileagent.api.dto.action.PythonSandboxActionDefinition;
 import com.demetrius.fileagent.api.enums.ActionRiskLevel;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.ApprovalStatus;
@@ -200,6 +201,46 @@ class AgentApprovalServiceTest {
         verify(approvalRepository, never()).expirePending(anyString(), anyLong(), any(), anyString());
     }
 
+    @Test
+    void shouldFailClosedApprovedPythonStepWhenRecoveryCannotProveOriginalProcess() throws Exception {
+        AgentRunRepository runRepository = mock(AgentRunRepository.class);
+        AgentStepRepository stepRepository = mock(AgentStepRepository.class);
+        AgentApprovalRepository approvalRepository = mock(AgentApprovalRepository.class);
+        AgentRunEntity run = running("run-python-restart");
+        run.waitForApproval(NOW.minusSeconds(2));
+        run.resumeAfterApproval(NOW.minusSeconds(1));
+        AgentActionCandidate candidate = pythonCandidate(run.getRunId());
+        AgentStepEntity step = AgentStepEntity.waitingApproval(candidate, 1, "ciphertext", NOW.minusSeconds(2));
+        assignId(step, 10L);
+        step.resumeAfterApproval();
+        AgentApprovalEntity approval = AgentApprovalEntity.pending(
+                "approval-python", run.getRunId(), step.getId(), candidate.toolCallId(), candidate.toolName(),
+                candidate.toolVersion(), candidate.toolDefinitionVersion(), candidate.endpointRevision(),
+                candidate.endpointConfigHash(), candidate.policyVersion(), candidate.riskLevel(),
+                candidate.resourceScope(), candidate.canonicalInputHmac(), candidate.operationId(),
+                candidate.safeSummary(), candidate.expectedImpact(), candidate.parameterPreview(),
+                NOW.plusSeconds(300), NOW.minusSeconds(2));
+        approval.decide(ApprovalStatus.APPROVED, "local-operator", null, "USER_APPROVED", NOW.minusSeconds(1));
+        when(runRepository.findByRunId(run.getRunId())).thenReturn(Optional.of(run));
+        when(stepRepository.findById(step.getId())).thenReturn(Optional.of(step));
+        when(approvalRepository.findByApprovalId(approval.getApprovalId())).thenReturn(Optional.of(approval));
+        when(stepRepository.save(any(AgentStepEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(approvalRepository.save(any(AgentApprovalEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(runRepository.save(any(AgentRunEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        AgentApprovalService service = new AgentApprovalService(
+                runRepository, stepRepository, approvalRepository, mock(StrictAgentStateLoader.class),
+                mock(EnvelopeCrypto.class), new AgentProperties(), Clock.fixed(NOW, ZoneOffset.UTC));
+
+        AgentRunEntity failed = service.failApprovedPythonRecovery(run.getRunId(), approval.getApprovalId());
+
+        assertThat(failed.getStatus()).isEqualTo(AgentRunStatus.FAILED);
+        assertThat(failed.getFailureCode()).isEqualTo("PYTHON_RESTART_REJECTED");
+        assertThat(step.getStatus().name()).isEqualTo("FAILED");
+        assertThat(step.getResultCode()).isEqualTo("PYTHON_RESTART_REJECTED");
+        assertThat(approval.getStatus()).isEqualTo(ApprovalStatus.CANCELLED);
+        assertThat(approval.getResolutionReason()).isEqualTo("PYTHON_RESTART_REJECTED");
+    }
+
     private AgentRunEntity running(String runId) {
         AgentRunEntity run = AgentRunEntity.pending(
                 runId, 1L, "trace-1", "local-operator", "cipher", "hmac");
@@ -218,6 +259,18 @@ class AgentApprovalServiceTest {
                 "resource:demo", Set.of("resource:demo"), java.util.Map.of("payload", "demo"), false,
                 "{\"payload\":\"demo\"}", "input-hmac", "operation-1",
                 "执行测试动作", "影响一条演示记录", "{\"payload\":\"***\"}");
+    }
+
+    private AgentActionCandidate pythonCandidate(String runId) {
+        return new AgentActionCandidate(
+                runId, "tool-call-python", PythonSandboxActionDefinition.TOOL_NAME,
+                PythonSandboxActionDefinition.TOOL_VERSION, PythonSandboxActionDefinition.DEFINITION_VERSION,
+                PythonSandboxActionDefinition.ENDPOINT_REVISION, PythonSandboxActionDefinition.ENDPOINT_CONFIG_HASH,
+                PythonSandboxActionDefinition.POLICY_VERSION, ActionRiskLevel.HIGH_RISK_WRITE,
+                PythonSandboxActionDefinition.RESOURCE_SCOPE, Set.of(PythonSandboxActionDefinition.RESOURCE_SCOPE),
+                java.util.Map.of("code", "print(1)", "input", java.util.Map.of()),
+                false, "{\"code\":\"print(1)\",\"input\":{}}", "input-hmac-python", "operation-python",
+                "执行 Python 脚本", "隔离执行", "{\"code\":\"print(1)\",\"input\":{}}");
     }
 
     private AgentApprovalEntity pendingApproval(String runId, Long stepId) {

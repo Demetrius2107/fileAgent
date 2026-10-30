@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.agent.application.runtime;
 
 import com.demetrius.fileagent.agent.application.AgentRunFinalizationService;
+import com.demetrius.fileagent.agent.application.AgentApprovalService;
 import com.demetrius.fileagent.agent.domain.run.AgentRunEntity;
 import com.demetrius.fileagent.agent.domain.run.AgentRunRepository;
 import com.demetrius.fileagent.agent.domain.approval.AgentApprovalRepository;
@@ -188,6 +189,11 @@ class AgentRuntimeRestartIntegrationTest {
             return mock(AgentRunFinalizationService.class);
         }
 
+        @Bean
+        AgentApprovalService agentApprovalService() {
+            return mock(AgentApprovalService.class);
+        }
+
         @Bean("agentRunTaskExecutor")
         ThreadPoolTaskExecutor agentRunTaskExecutor() {
             ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
@@ -206,11 +212,12 @@ class AgentRuntimeRestartIntegrationTest {
                 AgentRunCommandCodec commandCodec,
                 AgentRunEventHub eventHub,
                 AgentRunFinalizationService finalizationService,
+                AgentApprovalService approvalService,
                 AgentProperties properties,
                 Clock clock,
                 ThreadPoolTaskExecutor executor) {
             return new AgentRunExecutionCoordinator(runRepository, approvalRepository, executionEngine, commandCodec,
-                    eventHub, finalizationService, properties, clock, executor);
+                    eventHub, finalizationService, approvalService, properties, clock, executor);
         }
     }
 }

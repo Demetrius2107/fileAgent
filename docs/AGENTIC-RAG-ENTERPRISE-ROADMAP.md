@@ -372,7 +372,7 @@ flowchart LR
 
 **预计**：3～4 周。
 
-**当前进度**：Phase 3A「持久化 Agent Runtime」、3B「高风险动作单次审批」和 3C「注册式安全 HTTP 工具」已完成；补充信息型 `WAITING_USER_INPUT` 与 3D「Python 隔离沙箱」尚未实现。
+**当前进度**：Phase 3A「持久化 Agent Runtime」、3B「高风险动作单次审批」、3C「注册式安全 HTTP 工具」和 3D「Python 隔离沙箱」的核心实现与确定性安全门禁已完成。3D 的真实模型攻击题集、桌面与移动端浏览器交互仍须在目标部署环境验收；补充信息型 `WAITING_USER_INPUT` 尚未实现。
 
 #### 3A：持久化 Agent Runtime（已完成）
 
@@ -400,26 +400,19 @@ flowchart LR
 - 前端沿用 3B 内联审批区展示动作、资源、影响和脱敏参数；不确定结果明确展示 `executionId` 与人工核对提示。
 - 部署配置与检查清单见 `docs/HTTP-ACTION-CONFIG.md`。
 
-#### 3D：受控写操作（未完成）
+#### 3D：受控 Python 执行（核心实现完成，待部署验收）
 
-- 实现 `execute_python`，固定为 `HIGH_RISK_WRITE`：每一次执行都必须先进入审批，批准后才允许发送到独立隔离 Worker。
-- 拒绝、审批过期、取消或应用重启恢复都不能运行脚本；重启后不得从旧检查点自动执行或重放 Python，必须新建 Run 并重新审批。
-- 将代码执行移入独立 rootless 容器沙箱，默认无网络、只读文件系统，并设置 CPU、内存、进程、时间和输出上限。
+- `execute_python` 固定为 `HIGH_RISK_WRITE`。工具只在 Agent 动作、Sandbox 开关和 `sandbox:python` 资源范围同时满足时注册；模型只可提交 `code` 与 JSON `input`，不能指定镜像、命令、网络、挂载、身份或资源限制。
+- 每次执行都经过 3B 的单次 `ASK` 审批。审批以完整规范化参数的 HMAC 绑定；浏览器只看到最多 4,000 字符的受控预览，截断会明确标识。拒绝、过期、取消、定义漂移、`OUTCOME_UNKNOWN` 与重启恢复均失败关闭，不能自动执行、重试或重放脚本。
+- 代码从主应用 JVM 移入独立 `fileagent-sandbox-worker`。Worker 仅绑定 loopback，使用 Bearer Token 和固定本地 image ID，并以 rootless Podman 启动一次性容器：无网络、只读根文件系统、无 capability、非特权用户、CPU/内存/进程/时间/输出上限均由服务端固定。
+- Python 复用 3C 的动作账本作审计和幂等收敛；账本不是重放授权。Worker 通信或结果持久化不确定时收敛为 `OUTCOME_UNKNOWN`，需人工核对。
+- `phase3-security` Maven profile 真实启动 rootless Podman 容器，覆盖审批失败关闭、重启拒绝、账本幂等、SSRF/loopback 限制、网络隔离、宿主 canary、超时、输出上限和敏感错误脱敏。部署与威胁模型见 `docs/SANDBOX.md`。
 
-#### 后续开发任务（3D）
+#### 3D 部署验收（尚待目标环境执行）
 
-- Python 复用 3C 的幂等账本，但重启和未知结果一律失败关闭，不能据此自动重放代码。
-- 工具风险等级：
-  - `READ_ONLY`：可自动执行；
-  - `LOW_RISK_WRITE`：按策略执行；
-  - `HIGH_RISK_WRITE`：强制人工审批；
-  - `PROHIBITED`：永不开放给模型。
-- 审批记录包含动作摘要、资源范围、预计影响、过期时间、审批人和审批结论。
-- 实现 `ALLOW / DENY / ASK` 权限策略。
-- 工具参数先做 Schema 校验，再做业务授权和资源级权限检查。
-- 外部 HTTP 工具增加域名白名单、DNS/IP 校验、重定向限制和响应大小限制。
-- 代码执行从业务进程剥离到隔离沙箱，默认无网络、只读文件系统、CPU/内存/时间限制。
-- 错误回流给模型前进行脱敏，不返回 SQL、Token、堆栈或内部地址。
+- 运行 `phase3-model-attack-v1` 真实模型攻击题集。服务端固定拒绝所有审批，报告只保留受控的 Run、工具、审批和账本状态；任何非零执行、观察缺失或未完成 Run 都让门禁失败。
+- 在桌面和移动视口分别验证：模型触发 Python 工具后的审批预览、批准/拒绝/过期/取消、SSE 重连，以及成功、失败和 `OUTCOME_UNKNOWN` 状态提示。前端不提供 Python 自动重试入口，也不展示 Worker Token、容器命令或未受控的 stderr。
+- 高对抗或多租户生产环境仍须评估专用隔离节点、gVisor、Kata Containers 或 microVM；rootless 容器不等于绝对防逃逸。
 
 #### 验收门槛
 

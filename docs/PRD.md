@@ -80,7 +80,7 @@
   - `search_docs`：检索文档片段
   - `search_history`：检索过往会话
   - `query_business_db`：查外部业务库
-  - `execute_script`：代码沙箱
+  - `execute_python`：Python 代码沙箱（当前已接入的高风险工具）
   - `call_external_api`：调外部 API
   - `export_file`：生成产物文件
   - `draw_chart`：生成图表
@@ -92,7 +92,7 @@
 - **F6.1** LLM 输出受 JSON Schema 约束的结构化动作：
   ```json
   {
-    "action": "export_file | answer | call_api | execute_script | draw_chart | ask_user",
+    "action": "export_file | answer | call_api | execute_python | draw_chart | ask_user",
     "params": { "...": "..." },
     "reasoning": "为什么这么做",
     "summary": "给用户看的说明"
@@ -109,16 +109,18 @@
   - `ExportFileHandler`：生成 Excel(POI)/PDF/报告，落产物目录。
   - `DrawChartHandler`：用 ECharts spec 或图片生成。
   - `CallApiHandler`：HTTP 调用外部系统（可配置端点 + 鉴权）。
-  - `ExecuteScriptHandler`：代码沙箱执行。
+  - `PythonSandboxActionExecutionService`：经独立 Worker 执行 Python 代码沙箱。
 - **F7.3** 执行结果回写会话（assistant 消息 + 产物引用）。
-- **F7.4** 失败处理：捕获异常 → 错误信息回流给 LLM → 自我修正重试（限制次数）。
+- **F7.4** 失败处理：捕获并收敛受控错误。只读推理可在预算内继续；带副作用动作不得因传输异常或结果不确定而自动重试，必须保留审计结果并由人工决定后续处理。
 
 ### 3.8 代码沙箱模块 (F8)
-- **F8.1** 支持语言：JS（GraalJS）/ Python（GraalVM Polyglot 或 subprocess）。
-- **F8.2** 资源限制：超时、内存、禁用文件/网络访问（MVP 用 GraalVM Polyglot 沙箱权限控制）。
-- **F8.3** 输入：LLM 生成的脚本 + 上下文数据（JSON 注入）。
-- **F8.4** 输出：stdout/结果对象/错误，回传 LLM。
-- **F8.5** 安全：白名单 API，禁止反射逃逸。
+- **F8.1 当前实现**：仅支持 Python 3。`execute_python` 不在主应用 JVM 中运行，而是经独立 Worker 驱动 rootless Podman 一次性容器；尚未接入 GraalVM、GraalJS 或 GraalPy。
+- **F8.2 资源限制**：Worker 固定容器的无网络、只读根文件系统、临时 `/tmp`、1 CPU、256 MiB 内存、64 个 PID、无 capability 和无新增特权限制；默认脚本超时 10 秒。
+- **F8.3 输入**：模型只能提供 `code` 与 JSON `input`；输入以只读 `input_data` 注入。镜像、命令、网络、挂载、身份和资源参数均由服务端固定，不能由模型或请求覆盖。
+- **F8.4 输出**：受控返回 stdout/stderr 和稳定错误码；Python runner 的输出预算为 64 KiB。通信或持久化结果不确定时进入 `OUTCOME_UNKNOWN`，禁止自动重放脚本。
+- **F8.5 审批与安全**：该工具固定为高风险动作，只有开启 Agent 动作与 Sandbox、授权 `sandbox:python` 且经单次人工审批后才会注册和执行。拒绝、过期、取消或应用重启恢复后不会执行旧脚本。
+
+完整部署前提、镜像固定方式、Token、威胁模型和残余风险见 [`SANDBOX.md`](SANDBOX.md)。本阶段代码接入不等同于真实模型攻击评测或浏览器审批验收已经通过。
 
 ### 3.9 会话与产物模块 (F9)
 - **F9.1** 对话 API：发送消息（流式 SSE 输出）。
@@ -175,16 +177,16 @@ business_db_connectors(id, name, type, jdbc_url, username, encrypted_pwd, query_
 | 文档解析 | Apache Tika（统一入口）+ PDFBox + EasyExcel + Tess4J(OCR) |
 | 向量库 | MVP: SimpleVectorStore；演进: Redis Stack / pgvector   |
 | Embedding | 可切换（OpenAI / 通义 / Ollama 本地）                        |
-| 代码沙箱 | GraalVM Polyglot（JS/Python）                         |
+| 代码沙箱 | 独立 Python Worker + rootless Podman 一次性容器；当前不使用 GraalVM |
 | 存储 | MySQL（元数据）+ MinIO（文件/产物）                            |
 | 构建 | Maven                                               |
-| Java | 21（虚拟线程 + GraalVM 友好）                               |
+| Java | 21（虚拟线程）                                           |
 
 ---
 
 ## 6.5 架构（DDD 模块化单体）
 
-**形态**：模块化单体 —— 一个 Spring Boot 进程，多 Maven 模块，领域间用 **Port 端口 + 领域事件** 解耦。后续可按需拆独立进程。
+**形态**：主业务为模块化单体 —— 一个 Spring Boot 主进程、多 Maven 模块，领域间用 **Port 端口 + 领域事件** 解耦。可选的 Python Sandbox 已按安全边界拆为独立 Worker 进程，其余能力后续可再按需拆分。
 
 **模块划分**（依赖方向：`api→common`，`session/document/chat/action→api`，`starter→全部`）：
 
@@ -195,8 +197,10 @@ business_db_connectors(id, name, type, jdbc_url, username, encrypted_pwd, query_
 | `fileagent-session` | 业务域 | 会话 / 消息 |
 | `fileagent-document` | 业务域 | 文档 / 解析 / 索引 |
 | `fileagent-chat` | 核心域 | 对话 / RAG / 推理编排 |
+| `fileagent-agent` | 业务域 | Agent Run、工具编排、审批与恢复 |
 | `fileagent-action` | 业务域 | 动作执行 / 产物 / 沙箱 |
-| `fileagent-starter` | 装配 | 唯一 Boot 入口，聚合各域 Bean |
+| `fileagent-sandbox-worker` | 独立进程 | 仅 loopback 的 Python 执行接口和 rootless Podman 容器运行时 |
+| `fileagent-starter` | 装配 | 主应用 Boot 入口，聚合主业务域 Bean |
 
 **域内四层**（`interfaces → application → domain ← infrastructure`）：
 
@@ -229,7 +233,7 @@ business_db_connectors(id, name, type, jdbc_url, username, encrypted_pwd, query_
 
 ### M3 — Agent 能力 + 沙箱
 - ReAct 多步规划 + 多工具调用
-- 代码沙箱（GraalJS）
+- Python 代码沙箱（独立 Worker + rootless Podman；默认关闭）
 - 外部 API 调用动作
 - 风险动作确认流程
 
@@ -249,7 +253,7 @@ business_db_connectors(id, name, type, jdbc_url, username, encrypted_pwd, query_
 ## 8. 风险与开放问题
 
 - **Java 文档解析生态弱于 Python**：用 Tika 兜底，复杂表格/扫描件可能需要调 Python 侧车。MVP 先覆盖文本型 PDF/Office。
-- **沙箱安全**：GraalVM Polyglot 需严格配权限，生产级沙箱应考虑容器隔离。
+- **沙箱安全**：当前 rootless Podman 容器与宿主机共享内核，只能降低而不能消除逃逸风险；高对抗、多租户场景应评估 gVisor、Kata Containers 或 microVM，并使用专用隔离节点。
 - **本地 LLM**：若用 Ollama，需本地有 GPU/够大内存；MVP 可先用云端 API。
 - **NL2SQL 准确性**：外部业务库查询初期用固定模板，避免幻觉。
 - **Token 成本**：长上下文 + 多轮工具调用消耗大，需做好预算与缓存。

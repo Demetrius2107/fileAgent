@@ -1,0 +1,22 @@
+server:
+  address: 127.0.0.1
+  port: ${FILEAGENT_SANDBOX_PORT:8090}
+  error:
+    include-message: never
+    include-stacktrace: never
+
+spring:
+  application:
+    name: fileagent-sandbox-worker
+
+fileagent:
+  sandbox:
+    worker:
+      bind-address: ${FILEAGENT_SANDBOX_BIND_ADDRESS:127.0.0.1}
+      token: ${FILEAGENT_SANDBOX_TOKEN:$FILEAGENT_SANDBOX_TOKEN}
+      execution-timeout: PT10S
+      cleanup-after: PT2M
+      cleanup-interval: PT1M
+      termination-timeout: PT2S
+      # 必填：podman image inspect --format '{{.Id}}' <构建后的本地镜像> 后加 sha256: 前缀
+      image-id: ${FILEAGENT_SANDBOX_IMAGE_ID:sha256:9b8d70c34da89228c9ec74ae9575a872a873844da5023d698538f30c37f26983}

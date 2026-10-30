@@ -91,4 +91,18 @@ class AgentPromptFactoryTest {
                 .contains("等待用户审批")
                 .contains("禁止自动重试");
     }
+
+    @Test
+    void pythonSandboxPromptShouldAppearOnlyWhenRunHasRegisteredSandboxTool() {
+        AgentPromptFactory factory = new AgentPromptFactory();
+
+        assertThat(factory.systemInstruction(false, false, false))
+                .doesNotContain("execute_python");
+        assertThat(factory.systemInstruction(false, false, true))
+                .contains("execute_python")
+                .contains("无网络")
+                .contains("最长 10 秒")
+                .contains("等待用户审批")
+                .contains("禁止自动重试");
+    }
 }

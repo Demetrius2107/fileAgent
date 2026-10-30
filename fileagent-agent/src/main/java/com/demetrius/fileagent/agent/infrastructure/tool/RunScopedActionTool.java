@@ -81,6 +81,13 @@ public abstract class RunScopedActionTool extends ToolBase {
      */
     protected abstract ToolResultBlock executeVerified(AgentActionCandidate candidate);
 
+    /**
+     * 返回并移除指定 ToolCall 的受控完成通知。默认没有额外通知，子类不得暴露原始外部响应。
+     */
+    public CompletionNotice takeCompletionNotice(String toolCallId) {
+        return null;
+    }
+
     protected final String runId() {
         return runId;
     }
@@ -194,6 +201,10 @@ public abstract class RunScopedActionTool extends ToolBase {
             case DENY -> PermissionDecision.deny("服务端策略拒绝本次操作");
             case ASK -> PermissionDecision.ask("本次操作需要用户确认");
         };
+    }
+
+    /** SSE 可公开的最小动作完成信息。 */
+    public record CompletionNotice(String code, String message) {
     }
 
     private record ActionBinding(String toolCallId, String toolVersion, String toolDefinitionVersion,

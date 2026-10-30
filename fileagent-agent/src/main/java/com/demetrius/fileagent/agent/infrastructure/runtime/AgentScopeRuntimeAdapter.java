@@ -19,9 +19,9 @@ import com.demetrius.fileagent.agent.infrastructure.tool.GetDocumentOutlineTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.ReadDocumentContextTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.SearchDocsTool;
 import com.demetrius.fileagent.api.dto.AgentCitation;
+import com.demetrius.fileagent.api.dto.action.PythonSandboxActionDefinition;
 import com.demetrius.fileagent.agent.infrastructure.tool.AgentActionToolFactory;
 import com.demetrius.fileagent.agent.infrastructure.tool.AgentApprovalBindingChangedException;
-import com.demetrius.fileagent.agent.infrastructure.tool.CallRegisteredHttpApiTool;
 import com.demetrius.fileagent.agent.infrastructure.tool.RunScopedActionTool;
 import com.demetrius.fileagent.api.dto.AgentRunCommand;
 import com.demetrius.fileagent.api.dto.AgentApprovalView;
@@ -331,7 +331,9 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
                 .defaultSessionId(command.runId())
                 .description("文件知识助手")
                 .sysPrompt(promptFactory.systemInstruction(
-                        properties.isAdaptiveRetrievalEnabled(), !actionTools.isEmpty()))
+                        properties.isAdaptiveRetrievalEnabled(),
+                        actionTools.containsKey("call_registered_http_api"),
+                        actionTools.containsKey(PythonSandboxActionDefinition.TOOL_NAME)))
                 .model(model)
                 .toolkit(toolkit)
                 .middleware(new AgentBudgetMiddleware())
@@ -448,10 +450,10 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
             case TOOL_RESULT_END -> {
                 ToolResultEndEvent end = (ToolResultEndEvent) event;
                 long durationMs = durationMs(toolStartNanos.remove(end.getToolCallId()));
-                completeApprovedStepIfMatched(run, resumedApproval, end.getToolCallId());
                 RunScopedActionTool actionTool = actionTools.get(end.getToolCallName());
-                CallRegisteredHttpApiTool.CompletionNotice notice = actionTool instanceof CallRegisteredHttpApiTool httpTool
-                        ? httpTool.takeCompletionNotice(end.getToolCallId()) : null;
+                RunScopedActionTool.CompletionNotice notice = actionTool == null
+                        ? null : actionTool.takeCompletionNotice(end.getToolCallId());
+                settleApprovedStepIfMatched(run, resumedApproval, end.getToolCallId(), notice);
                 return handleToolResultEnd(
                         run, agent, ctx, end.getToolCallName(), step.get(), durationMs, notice);
             }
@@ -511,7 +513,7 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
     Flux<AgentRunEvent> handleToolResultEnd(AgentRun run, ReActAgent agent,
                                             RuntimeContext context, String toolName,
                                             int step, long durationMs,
-                                            CallRegisteredHttpApiTool.CompletionNotice notice) {
+                                            RunScopedActionTool.CompletionNotice notice) {
         String failureCode = run.pendingToolFailureCode();
         if (failureCode != null) {
             agent.interrupt(context);
@@ -633,12 +635,17 @@ public class AgentScopeRuntimeAdapter implements AgentExecutionEngine {
         }
     }
 
-    private void completeApprovedStepIfMatched(AgentRun run, AgentApprovalEntity approval, String toolCallId) {
+    void settleApprovedStepIfMatched(AgentRun run, AgentApprovalEntity approval, String toolCallId,
+                                     RunScopedActionTool.CompletionNotice notice) {
         if (approval == null || approval.getStatus() != com.demetrius.fileagent.api.enums.ApprovalStatus.APPROVED
                 || !approval.getToolCallId().equals(toolCallId)) {
             return;
         }
-        approvalService.completeApprovedStep(run.runId(), approval.getApprovalId(), toolCallId);
+        if (notice == null || "SUCCEEDED".equals(notice.code())) {
+            approvalService.completeApprovedStep(run.runId(), approval.getApprovalId(), toolCallId);
+            return;
+        }
+        approvalService.failApprovedStep(run.runId(), approval.getApprovalId(), toolCallId);
     }
 
     private record PendingApproval(com.demetrius.fileagent.agent.domain.policy.AgentActionCandidate candidate) {

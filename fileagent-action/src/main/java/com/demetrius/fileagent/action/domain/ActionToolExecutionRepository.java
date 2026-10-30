@@ -1,6 +1,7 @@
 package com.demetrius.fileagent.action.domain;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -22,6 +23,9 @@ public interface ActionToolExecutionRepository {
 
     Optional<ActionToolExecutionEntity> findByRunIdAndOperationFingerprint(String runId,
                                                                            String operationFingerprint);
+
+    /** 查询某个 Agent Run 已落库的动作执行事实，仅供受控审计和安全评测读取。 */
+    List<ActionToolExecutionEntity> findByRunId(String runId);
 
     /**
      * 仅当记录仍为 PENDING 且版本匹配时原子进入 EXECUTING，返回值为 1 表示抢占成功。

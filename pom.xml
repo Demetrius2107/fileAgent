@@ -26,6 +26,7 @@
         <module>fileagent-chat</module>
         <module>fileagent-agent</module>
         <module>fileagent-action</module>
+        <module>fileagent-sandbox-worker</module>
         <module>fileagent-evaluation</module>
         <module>fileagent-starter</module>
         <module>ragflow-quickstart</module>
@@ -75,6 +76,11 @@
             <dependency>
                 <groupId>com.demetrius</groupId>
                 <artifactId>fileagent-action</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.demetrius</groupId>
+                <artifactId>fileagent-sandbox-worker</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -210,5 +216,33 @@
             </snapshots>
         </repository>
     </repositories>
+
+    <profiles>
+        <!--
+            Phase 3 安全门禁会启动真实 rootless Podman 容器，不能混入日常单元测试。
+            请通过 fileagent-evaluation/scripts/run-phase3-security-tests.sh 运行，它会先准备固定镜像。
+        -->
+        <profile>
+            <id>phase3-security</id>
+            <properties>
+                <fileagent.phase3.security.live>true</fileagent.phase3.security.live>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/Phase3*SecurityTest.java</include>
+                                <include>**/Phase3DeterministicSecuritySuite.java</include>
+                            </includes>
+                            <failIfNoTests>false</failIfNoTests>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

@@ -175,6 +175,7 @@ public final class CallRegisteredHttpApiTool extends RunScopedActionTool {
     }
 
     /** 返回并移除指定 ToolCall 的受控完成通知，防止重复事件再次展示动作结果。 */
+    @Override
     public CompletionNotice takeCompletionNotice(String toolCallId) {
         return toolCallId == null ? null : completionNotices.remove(toolCallId);
     }
@@ -408,10 +409,6 @@ public final class CallRegisteredHttpApiTool extends RunScopedActionTool {
     }
 
     private record CanonicalArguments(String json, String hmac) {
-    }
-
-    /** SSE 可公开的最小动作完成信息。 */
-    public record CompletionNotice(String code, String message) {
     }
 
     private static final class FieldCounter {

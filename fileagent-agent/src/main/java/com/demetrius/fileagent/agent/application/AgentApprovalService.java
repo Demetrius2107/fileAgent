@@ -11,6 +11,7 @@ import com.demetrius.fileagent.agent.infrastructure.config.AgentProperties;
 import com.demetrius.fileagent.agent.infrastructure.state.StrictAgentStateLoader;
 import com.demetrius.fileagent.api.dto.AgentApprovalDecision;
 import com.demetrius.fileagent.api.dto.AgentApprovalView;
+import com.demetrius.fileagent.api.dto.action.PythonSandboxActionDefinition;
 import com.demetrius.fileagent.api.enums.AgentRunStatus;
 import com.demetrius.fileagent.api.enums.ApprovalStatus;
 import com.demetrius.fileagent.common.exception.BizException;
@@ -41,6 +42,7 @@ import java.util.UUID;
 public class AgentApprovalService {
 
     private static final String REASON_APPROVAL_EXPIRED = "APPROVAL_EXPIRED";
+    private static final String REASON_PYTHON_RESTART_REJECTED = "PYTHON_RESTART_REJECTED";
 
     private final AgentRunRepository runRepository;
     private final AgentStepRepository stepRepository;
@@ -172,6 +174,36 @@ public class AgentApprovalService {
             stepRepository.save(step);
         }
         approvalRepository.save(approval);
+    }
+
+    /**
+     * 应用重启后无法证明原运行进程仍持有 Python Sandbox 上下文时，原子撤销旧批准并失败关闭。
+     */
+    @Transactional
+    public AgentRunEntity failApprovedPythonRecovery(String runId, String approvalId) {
+        AgentApprovalEntity approval = requireApproval(approvalId);
+        if (!runId.equals(approval.getRunId())) {
+            throw new BizException(409, "审批不属于当前 Agent Run");
+        }
+        if (!PythonSandboxActionDefinition.TOOL_NAME.equals(approval.getToolName())
+                || approval.getStatus() != ApprovalStatus.APPROVED) {
+            throw new IllegalStateException("当前审批不是可失败关闭的已批准 Python 操作");
+        }
+        AgentRunEntity run = requireRun(runId);
+        if (run.getStatus() != AgentRunStatus.PENDING && run.getStatus() != AgentRunStatus.RUNNING) {
+            throw new IllegalStateException("Python Sandbox Run 当前不能失败关闭: " + run.getStatus());
+        }
+        AgentStepEntity step = stepRepository.findById(approval.getStepId())
+                .filter(value -> runId.equals(value.getRunId())
+                        && approval.getToolCallId().equals(value.getToolCallId()))
+                .orElseThrow(() -> new BizException(409, "审批步骤不存在或不匹配"));
+        Instant now = clock.instant();
+        step.fail(REASON_PYTHON_RESTART_REJECTED, now);
+        approval.invalidateApproved(REASON_PYTHON_RESTART_REJECTED, now);
+        run.fail(REASON_PYTHON_RESTART_REJECTED, now);
+        stepRepository.save(step);
+        approvalRepository.save(approval);
+        return runRepository.save(run);
     }
 
     /**

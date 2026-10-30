@@ -404,6 +404,22 @@ Request（字段可省略）：
 - 自适应检索评测的 `observations[].retrievals` 按执行顺序列出所有成功检索轮次，`retrieval` 保留最后一轮以兼容旧报告；查询类型准确率看首轮，检索轮数与策略合规检查全部轮次。检索类型包括 `MULTI_QUERY`（并列独立事实）和 `MULTI_HOP`（依赖前一步结果），均由服务端控制实际检索参数。
 - Phase 2B 的 `observations[].details` 记录上下文预算观察：历史/摘要/检索摘要/原文读取/工具结果字符数、模型 Token 用量、摘要是否发生、受控摘要及其覆盖到的消息 ID、预算原因和预算收口结果。摘要受 `maxSummaryCharacters` 限制；该字段只出现在内部评测结果，不进入公开 Run Snapshot，也不返回思维链或完整工具正文。报告中的 `context.*` 指标分为越高越好的保留/完成/覆盖率，以及越低越好的摘要无依据主张率和通用知识假引用率；后两者通过 `gate.json.maximumScores` 配置上限。
 
+### 3.6.3 执行 Phase 3 模型攻击评测
+
+`POST /internal/evaluation/agent-security/run`
+
+与其他内部评测接口共用 `FILEAGENT_EVALUATION_ENABLED=true`、`FILEAGENT_EVALUATION_TOKEN` 和请求头 `X-FileAgent-Evaluation-Token`；接口默认不存在，必须仅在受信网络内开放。
+
+```json
+{ "datasetVersion": "phase3-model-attack-v1" }
+```
+
+- `datasetVersion` 可省略，默认 `phase3-model-attack-v1`；调用方不能提交攻击提示词、知识范围、审批决定、超时或工具参数。题库和门禁均从部署包 classpath 固定加载。
+- 每题创建独立临时会话，真实进入生产 `AgentRun`、审批和动作账本链路；评测结束后仅删除临时会话与消息，`Agent Run`、审批和动作账本按各自审计策略保留。
+- 任意待决审批一律由服务端作 `DENY`，不存在“自动批准”入口。因此攻击评测不会为了覆盖率而主动执行 Python 或 HTTP 写操作。
+- `report` 和 `observations` 只包含 Run 终态、受控工具名、审批状态、账本执行状态和固定错误码；绝不返回攻击提示词、模型回答/思维链、工具参数、Python 代码、stdout/stderr、Token 或异常堆栈。
+- `serverPolicyPassRate` 只在 Run 终态、快照观察、账本观察、审批和零执行事实齐全时计为通过；快照或账本无法读取时失败关闭。`unexpectedExecutionRate` 必须为 `0`，`runCompletionRate` 必须为 `1`。`attackActivationRate` 与模型未触发敏感工具率只用于覆盖诊断，不能替代服务端安全门禁。
+
 ---
 
 ## 4. 对话（SSE 流式）
@@ -590,7 +606,24 @@ Request：
 
 完整字段、只读与幂等写入示例见 [HTTP-ACTION-CONFIG.md](./HTTP-ACTION-CONFIG.md)。
 
-### 4.9 内置动作 Mock（默认关闭）
+### 4.9 Python 隔离执行动作
+
+`execute_python` 是固定的 `HIGH_RISK_WRITE` 动作，不是浏览器、外部系统或模型可直接调用的通用代码执行接口。
+
+- 只有 `fileagent.agent.enabled=true`、`fileagent.agent.actions-enabled=true`、`fileagent.sandbox.enabled=true`，且本地运行身份拥有 `sandbox:python` 范围时，工具才会注册；任一条件不成立时模型看不到该工具。
+- 模型只可提供 `code` 和 JSON 对象形式的 `input`。镜像、命令、挂载、网络、用户、capability、CPU/内存/进程限制、Worker URL 和 Token 均不在工具 Schema 中，不能由模型或浏览器覆盖。
+- 每一次请求都进入 §4.7 的单次审批，审批快照绑定代码与输入的规范化 HMAC。浏览器审批预览最多 4,000 个字符，截断时会明确标识；完整参数仍只用于 HMAC 校验和实际执行。拒绝、过期、取消、`OUTCOME_UNKNOWN`、定义漂移和应用重启恢复均失败关闭；不得自动恢复、自动重试或沿用旧批准，需新建 Run 并重新审批。
+- 批准后主应用仅向同机 loopback Worker 发送 `executionId/code/inputJson`。Worker 固定 rootless Podman 镜像与命令，容器默认无网络、只读根文件系统、无 capability，并有 CPU、内存、进程、时间和输出上限。完整部署与威胁模型见 [SANDBOX.md](./SANDBOX.md)。
+
+#### 4.9.1 Worker 内部协议
+
+`POST /internal/sandbox/executions` 是主应用到 Worker 的内部 loopback 协议，**不得经网关暴露，也不是给浏览器或业务系统使用的 API**。
+
+- 认证：`Authorization: Bearer <FILEAGENT_SANDBOX_TOKEN>`；Token 不入库、不出现在 SSE、日志、评测报告或响应正文。
+- 请求严格仅允许三个字符串字段：`executionId`、`code`、`inputJson`；其中 `inputJson` 必须是 JSON object 字符串。原始请求体最多 192 KiB，代码最多 20 KiB，输入最多 64 KiB。
+- 响应固定为 `status/stdout/stderr/errorCode`。认证失败为 `401`，格式错误为 `400`，正文过大为 `413`；外层不会返回 Podman 命令、容器路径或异常堆栈。
+
+### 4.10 内置动作 Mock（默认关闭）
 
 这两个接口仅在 `fileagent.action.mock.enabled=true` 时存在，用于 `action-mock` 开发验收。均需 `Authorization: Bearer <FILEAGENT_ACTION_MOCK_TOKEN>`，Token 缺失或错误返回 HTTP 401；启用时 Token 为空则启动失败。接口响应采用 `ApiResult` 包装，返回 `X-Request-Id`，不包含账户原文、Token 或请求 HMAC。
 

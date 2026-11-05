@@ -1,8 +1,13 @@
 package com.demetrius.fileagent.document.application;
 
 import com.demetrius.fileagent.api.dto.RagFileSummary;
+import com.demetrius.fileagent.api.dto.ContentLocation;
+import com.demetrius.fileagent.api.enums.DocumentAssetType;
 import com.demetrius.fileagent.api.enums.ParseStatus;
 import com.demetrius.fileagent.common.exception.BizException;
+import com.demetrius.fileagent.document.domain.DocumentAssetEntity;
+import com.demetrius.fileagent.document.domain.DocumentAssetRepository;
+import com.demetrius.fileagent.document.domain.DocumentRepository;
 import com.demetrius.fileagent.document.domain.KnowledgeChunk;
 import com.demetrius.fileagent.document.domain.KnowledgeIndexRepository;
 import com.demetrius.fileagent.document.domain.ParsedChunk;
@@ -10,6 +15,7 @@ import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import com.demetrius.fileagent.document.infrastructure.DocumentParser;
 import com.demetrius.fileagent.document.infrastructure.DocumentParserRegistry;
+import com.demetrius.fileagent.document.infrastructure.PdfPageAssetRenderer;
 import com.demetrius.fileagent.document.infrastructure.StorageService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,6 +66,15 @@ class RagFileAppServiceImplTest {
 
     @Mock
     private StorageService storageService;
+
+    @Mock
+    private DocumentAssetRepository documentAssetRepository;
+
+    @Mock
+    private DocumentRepository documentRepository;
+
+    @Mock
+    private PdfPageAssetRenderer pdfPageAssetRenderer;
 
     @InjectMocks
     private RagFileAppServiceImpl ragFileAppService;
@@ -176,7 +191,53 @@ class RagFileAppServiceImplTest {
                 .containsEntry("sheetName", "目标表")
                 .containsEntry("rowIndex", 2)
                 .containsEntry("sectionId", "sheet-0-section-0")
-                .doesNotContainKeys("person", "year", "contentType");
+                .containsEntry("contentType", "TABLE")
+                .containsEntry("contentUnitId", "100:0")
+                .containsEntry("parserVersion", "document-parser-v1")
+                .doesNotContainKeys("person", "year");
+    }
+
+    @Test
+    void storeRagFileShouldPersistPdfPageAssetAndAssociateChildChunk() {
+        stubSuccessSave();
+        stubDedupMiss();
+        stubStore();
+        stubResolve();
+        DocumentParser parser = mock(DocumentParser.class);
+        when(parser.parseChunks(any(Path.class), anyString())).thenReturn(List.of(
+                new ParsedChunk("第一页正文", Map.of("sourceType", "pdf", "page", 1))));
+        when(parserRegistry.findParser("application/pdf")).thenReturn(Optional.of(parser));
+        PdfPageAssetRenderer.RenderedPageAsset pageAsset = new PdfPageAssetRenderer.RenderedPageAsset(
+                "asset-1", 1, "assets/100/v1/asset-1.png", "image/png", "asset-sha", 2048,
+                1200, 1600, ContentLocation.pdfPage(1), "pdf-page-renderer-v1");
+        when(pdfPageAssetRenderer.render(any(Path.class), anyString(), any(), any(Integer.class)))
+                .thenReturn(List.of(pageAsset));
+        when(documentAssetRepository.save(any(DocumentAssetEntity.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ragFileAppService.storeRagFile("员工知识库", "制度",
+                List.of(new MockMultipartFile("files", "manual.pdf", null, "pdf".getBytes())));
+
+        ArgumentCaptor<DocumentAssetEntity> assetCaptor = ArgumentCaptor.forClass(DocumentAssetEntity.class);
+        verify(documentAssetRepository).save(assetCaptor.capture());
+        DocumentAssetEntity persisted = assetCaptor.getValue();
+        assertThat(persisted.getId()).isEqualTo("asset-1");
+        assertThat(persisted.getFileId()).isEqualTo(100L);
+        assertThat(persisted.getDocumentVersion()).isEqualTo(1);
+        assertThat(persisted.getAssetType()).isEqualTo(DocumentAssetType.PAGE);
+        assertThat(persisted.getAssetIndex()).isEqualTo(1);
+        assertThat(persisted.getLocationJson()).contains("\"page\":1");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<KnowledgeChunk>> chunksCaptor = ArgumentCaptor.forClass(List.class);
+        verify(knowledgeIndexRepository).saveAll(chunksCaptor.capture());
+        assertThat(chunksCaptor.getValue().getFirst().metadata())
+                .containsEntry("contentUnitId", "100:0")
+                .containsEntry("contentType", "TEXT")
+                .containsEntry("assetId", "asset-1")
+                .containsEntry("parserVersion", "document-parser-v1");
+        assertThat(chunksCaptor.getValue().getFirst().metadata().get("location"))
+                .isEqualTo(Map.of("page", 1));
     }
 
     @Test
@@ -212,7 +273,8 @@ class RagFileAppServiceImplTest {
         assertThat(indexed.get(2).content()).isEqualTo("目标一\n目标二");
         assertThat(indexed.get(2).metadata())
                 .containsEntry("chunkType", "PARENT")
-                .doesNotContainKey("parentId");
+                .containsEntry("contentType", "TABLE")
+                .doesNotContainKeys("parentId", "contentUnitId", "assetId", "location", "rowIndex", "page");
     }
 
     @Test
@@ -240,6 +302,36 @@ class RagFileAppServiceImplTest {
     }
 
     @Test
+    void storeRagFileShouldCleanupPersistedAssetsWhenIndexingFails() {
+        stubSuccessSave();
+        stubDedupMiss();
+        stubStore();
+        stubResolve();
+        DocumentParser parser = mock(DocumentParser.class);
+        when(parser.parseChunks(any(Path.class), anyString())).thenReturn(List.of(
+                new ParsedChunk("第一页正文", Map.of("sourceType", "pdf", "page", 1))));
+        when(parserRegistry.findParser("application/pdf")).thenReturn(Optional.of(parser));
+        when(pdfPageAssetRenderer.render(any(Path.class), anyString(), any(), any(Integer.class)))
+                .thenReturn(List.of(new PdfPageAssetRenderer.RenderedPageAsset(
+                        "asset-1", 1, "assets/100/v1/asset-1.png", "image/png", "asset-sha", 2048,
+                        1200, 1600, ContentLocation.pdfPage(1), "pdf-page-renderer-v1")));
+        when(documentAssetRepository.save(any(DocumentAssetEntity.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(documentAssetRepository.findOwned(100L, 1, "asset-1"))
+                .thenAnswer(invocation -> Optional.of(assetEntity(
+                        "asset-1", "assets/100/v1/asset-1.png")));
+        doThrow(new IllegalStateException("ES unavailable"))
+                .when(knowledgeIndexRepository).saveAll(any());
+
+        assertThatThrownBy(() -> ragFileAppService.storeRagFile("员工知识库", "制度",
+                List.of(new MockMultipartFile("files", "manual.pdf", null, "pdf".getBytes()))))
+                .isInstanceOf(BizException.class);
+
+        verify(storageService).delete("assets/100/v1/asset-1.png");
+        verify(documentAssetRepository).delete(any(DocumentAssetEntity.class));
+    }
+
+    @Test
     void deleteRagFileShouldDeleteIndexThenOriginalThenRecord() {
         RagFileEntity entity = entity(7L, "员工知识库", "制度", "手册.pdf",
                 ParseStatus.SUCCESS, 12, LocalDateTime.of(2026, 9, 1, 9, 0));
@@ -252,6 +344,42 @@ class RagFileAppServiceImplTest {
         order.verify(knowledgeIndexRepository).deleteByFileId(7L);
         order.verify(storageService).delete("2026/09/01/手册.pdf");
         order.verify(ragFileRepository).delete(entity);
+    }
+
+    @Test
+    void deleteRagFileShouldDeleteAssetsBeforeOriginalAndRecord() {
+        RagFileEntity entity = entity(7L, "员工知识库", "制度", "手册.pdf",
+                ParseStatus.SUCCESS, 12, LocalDateTime.of(2026, 9, 1, 9, 0));
+        entity.setStoragePath("originals/manual.pdf");
+        DocumentAssetEntity asset = new DocumentAssetEntity();
+        asset.setId("asset-1");
+        asset.setStorageKey("assets/7/v1/asset-1.png");
+        when(ragFileRepository.findById(7L)).thenReturn(Optional.of(entity));
+        when(documentAssetRepository.findAllByFileId(7L)).thenReturn(List.of(asset));
+
+        ragFileAppService.deleteRagFile(7L);
+
+        InOrder order = inOrder(knowledgeIndexRepository, storageService,
+                documentAssetRepository, ragFileRepository);
+        order.verify(knowledgeIndexRepository).deleteByFileId(7L);
+        order.verify(storageService).delete("assets/7/v1/asset-1.png");
+        order.verify(documentAssetRepository).delete(asset);
+        order.verify(storageService).delete("originals/manual.pdf");
+        order.verify(ragFileRepository).delete(entity);
+    }
+
+    @Test
+    void deleteRagFileShouldKeepOriginalStillReferencedByAnotherRecord() {
+        RagFileEntity entity = entity(7L, "员工知识库", "制度", "手册.pdf",
+                ParseStatus.SUCCESS, 12, LocalDateTime.of(2026, 9, 1, 9, 0));
+        entity.setStoragePath("legacy/shared/manual.pdf");
+        when(ragFileRepository.findById(7L)).thenReturn(Optional.of(entity));
+        when(ragFileRepository.existsByStoragePathAndIdNot("legacy/shared/manual.pdf", 7L)).thenReturn(true);
+
+        ragFileAppService.deleteRagFile(7L);
+
+        verify(storageService, never()).delete("legacy/shared/manual.pdf");
+        verify(ragFileRepository).delete(entity);
     }
 
     @Test
@@ -370,5 +498,12 @@ class RagFileAppServiceImplTest {
         entity.setChunkCount(chunkCount);
         entity.setCreatedAt(createdAt);
         return entity;
+    }
+
+    private DocumentAssetEntity assetEntity(String id, String storageKey) {
+        DocumentAssetEntity asset = new DocumentAssetEntity();
+        asset.setId(id);
+        asset.setStorageKey(storageKey);
+        return asset;
     }
 }

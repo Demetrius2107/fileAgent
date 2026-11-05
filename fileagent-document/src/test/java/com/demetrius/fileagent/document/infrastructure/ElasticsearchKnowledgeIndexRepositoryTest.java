@@ -86,7 +86,11 @@ class ElasticsearchKnowledgeIndexRepositoryTest {
                 .containsEntry("fileId", "7")
                 .containsEntry("content", "正文0")
                 .containsEntry("sheetName", "目标")
-                .containsEntry("sectionId", "sheet-0-section-0");
+                .containsEntry("sectionId", "sheet-0-section-0")
+                .containsEntry("contentUnitId", "7:0")
+                .containsEntry("contentType", "TABLE")
+                .containsEntry("assetId", "asset-1")
+                .containsEntry("parserVersion", "document-parser-v1");
         assertThat((float[]) source.get("embedding")).containsExactly(0.1F, 0.2F);
     }
 
@@ -214,7 +218,11 @@ class ElasticsearchKnowledgeIndexRepositoryTest {
                         "sourceType", "xlsx",
                         "sheetName", "目标",
                         "rowIndex", index + 2,
-                        "sectionId", "sheet-0-section-0"));
+                        "sectionId", "sheet-0-section-0",
+                        "contentUnitId", "7:" + index,
+                        "contentType", "TABLE",
+                        "assetId", "asset-1",
+                        "parserVersion", "document-parser-v1"));
     }
 
     @Test

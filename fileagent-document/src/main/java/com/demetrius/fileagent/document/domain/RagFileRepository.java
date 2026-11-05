@@ -28,6 +28,9 @@ public interface RagFileRepository {
     List<RagFileEntity> findByRagNameAndKnowledgeTagAndFilename(String ragName, String knowledgeTag,
                                                                 String filename);
 
+    /** 判断同一原件存储键是否仍被其他知识库记录引用。 */
+    boolean existsByStoragePathAndIdNot(String storagePath, Long id);
+
     /** 删除记录（索引失败回滚用） */
     void delete(RagFileEntity ragFile);
 }

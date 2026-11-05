@@ -22,4 +22,6 @@ public interface RagFileJpaRepository extends JpaRepository<RagFileEntity, Long>
 
     List<RagFileEntity> findByRagNameAndKnowledgeTagAndFilename(String ragName, String knowledgeTag,
                                                                 String filename);
+
+    boolean existsByStoragePathAndIdNot(String storagePath, Long id);
 }

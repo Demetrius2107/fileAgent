@@ -77,6 +77,11 @@ public class DocumentRepositoryImpl implements DocumentRepository {
         return jpa.existsById(id);
     }
 
+    @Override
+    public boolean existsByStoragePath(String storagePath) {
+        return jpa.existsByStoragePath(storagePath);
+    }
+
     /**
      * 按主键删除文档。
      *

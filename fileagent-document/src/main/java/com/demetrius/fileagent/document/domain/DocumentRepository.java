@@ -19,5 +19,8 @@ public interface DocumentRepository {
 
     boolean existsById(Long id);
 
+    /** 判断会话文档是否仍引用指定原件存储键。 */
+    boolean existsByStoragePath(String storagePath);
+
     void deleteById(Long id);
 }

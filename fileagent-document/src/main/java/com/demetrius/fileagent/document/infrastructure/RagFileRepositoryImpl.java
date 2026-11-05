@@ -51,6 +51,11 @@ public class RagFileRepositoryImpl implements RagFileRepository {
     }
 
     @Override
+    public boolean existsByStoragePathAndIdNot(String storagePath, Long id) {
+        return jpaRepository.existsByStoragePathAndIdNot(storagePath, id);
+    }
+
+    @Override
     public void delete(RagFileEntity ragFile) {
         jpaRepository.delete(ragFile);
     }

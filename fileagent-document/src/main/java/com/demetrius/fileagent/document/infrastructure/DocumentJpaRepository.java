@@ -15,4 +15,6 @@ public interface DocumentJpaRepository extends JpaRepository<DocumentEntity, Lon
     List<DocumentEntity> findBySessionId(Long sessionId);
 
     Optional<DocumentEntity> findBySha256(String sha256);
+
+    boolean existsByStoragePath(String storagePath);
 }

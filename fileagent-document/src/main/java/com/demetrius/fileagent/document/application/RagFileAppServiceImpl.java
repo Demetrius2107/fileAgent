@@ -1,10 +1,18 @@
 package com.demetrius.fileagent.document.application;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.demetrius.fileagent.api.dto.ContentLocation;
 import com.demetrius.fileagent.api.dto.KnowledgeChunkView;
 import com.demetrius.fileagent.api.dto.OriginalRagFile;
 import com.demetrius.fileagent.api.dto.RagFileSummary;
+import com.demetrius.fileagent.api.enums.ContentType;
+import com.demetrius.fileagent.api.enums.DocumentAssetType;
 import com.demetrius.fileagent.api.enums.ParseStatus;
 import com.demetrius.fileagent.common.exception.BizException;
+import com.demetrius.fileagent.document.domain.DocumentAssetEntity;
+import com.demetrius.fileagent.document.domain.DocumentAssetRepository;
+import com.demetrius.fileagent.document.domain.DocumentRepository;
 import com.demetrius.fileagent.document.domain.KnowledgeChunk;
 import com.demetrius.fileagent.document.domain.KnowledgeIndexRepository;
 import com.demetrius.fileagent.document.domain.ParsedChunk;
@@ -12,6 +20,7 @@ import com.demetrius.fileagent.document.domain.RagFileEntity;
 import com.demetrius.fileagent.document.domain.RagFileRepository;
 import com.demetrius.fileagent.document.infrastructure.DocumentParser;
 import com.demetrius.fileagent.document.infrastructure.DocumentParserRegistry;
+import com.demetrius.fileagent.document.infrastructure.PdfPageAssetRenderer;
 import com.demetrius.fileagent.document.infrastructure.StorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,12 +48,21 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RagFileAppServiceImpl implements RagFileAppService {
 
+    private static final JsonMapper JSON_MAPPER = JsonMapper.builder().build();
+    private static final String CONTENT_PARSER_VERSION = "document-parser-v1";
+
     private final DocumentParserRegistry parserRegistry;
     private final RagFileRepository ragFileRepository;
 
     private final KnowledgeIndexRepository knowledgeIndexRepository;
 
     private final StorageService storageService;
+
+    private final DocumentAssetRepository documentAssetRepository;
+
+    private final DocumentRepository documentRepository;
+
+    private final PdfPageAssetRenderer pdfPageAssetRenderer;
 
     @Override
     public void storeRagFile(String name, String tag, List<MultipartFile> files) {
@@ -85,9 +103,13 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             throw new BizException("文件正在索引中，请等待索引完成后再删除: " + entity.getFilename());
         }
         // 删除顺序约束：必须先删 ES 索引再删记录——记录先没了索引还在，会继续被召回且再无 fileId 可清理。
-        // ES 删除（delete-by-query 删不到不报错）与原件删除（文件不存在静默跳过）均幂等，中途失败重试本接口即可。
+        // 每个资产先删对象再删元数据，任何对象删除失败都保留数据库归属，便于重试和排障。
         knowledgeIndexRepository.deleteByFileId(id);
-        if (StringUtils.hasText(entity.getStoragePath())) {
+        for (DocumentAssetEntity asset : documentAssetRepository.findAllByFileId(id)) {
+            storageService.delete(asset.getStorageKey());
+            documentAssetRepository.delete(asset);
+        }
+        if (StringUtils.hasText(entity.getStoragePath()) && !isOriginalStillReferenced(entity)) {
             storageService.delete(entity.getStoragePath());
         }
         ragFileRepository.delete(entity);
@@ -141,6 +163,7 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         entity.setDocumentVersion(nextDocumentVersion(name, tag, filename));
         entity.setStatus(ParseStatus.PARSING);
         entity = ragFileRepository.save(entity);
+        List<PdfPageAssetRenderer.RenderedPageAsset> renderedAssets = List.of();
 
         try {
             // 原件先落盘再解析：解析失败不丢文件，storage_path/sha256 回填记录
@@ -153,12 +176,21 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             DocumentParser parser = parserRegistry.findParser(mimeType)
                     .orElseThrow(() -> new BizException("暂不支持的文件格式: " + mimeType + "（当前支持 TXT/MD，PDF/Office 随 M2 解析器扩展）"));
 
-            List<ParsedChunk> chunks = parser.parseChunks(storageService.resolve(stored.relativePath()), mimeType);
+            Path storedPath = storageService.resolve(stored.relativePath());
+            List<ParsedChunk> chunks = parser.parseChunks(storedPath, mimeType);
             if (chunks.isEmpty()) {
                 throw new BizException("文件内容为空，未能切分出有效 chunk: " + entity.getFilename());
             }
 
-            List<KnowledgeChunk> knowledgeChunks = toKnowledgeChunks(chunks, entity);
+            renderedAssets = pdfPageAssetRenderer.render(
+                    storedPath, mimeType,
+                    entity.getId(), entity.getDocumentVersion());
+            persistAssets(renderedAssets, entity);
+
+            Map<Integer, String> pageAssetIds = renderedAssets.stream().collect(Collectors.toMap(
+                    PdfPageAssetRenderer.RenderedPageAsset::page,
+                    PdfPageAssetRenderer.RenderedPageAsset::assetId));
+            List<KnowledgeChunk> knowledgeChunks = toKnowledgeChunks(chunks, entity, pageAssetIds);
             knowledgeIndexRepository.saveAll(knowledgeChunks);
 
             entity.setChunkCount(chunks.size());
@@ -168,11 +200,13 @@ public class RagFileAppServiceImpl implements RagFileAppService {
                     name, tag, entity.getFilename(), knowledgeChunks.size());
         } catch (BizException e) {
             cleanupIndex(entity.getId());
+            cleanupAssets(entity, renderedAssets);
             markFailed(entity, e);
             throw e;
         } catch (Exception e) {
             log.error("知识库文件索引失败: {}", entity.getFilename(), e);
             cleanupIndex(entity.getId());
+            cleanupAssets(entity, renderedAssets);
             BizException biz = new BizException("文件分块/索引失败: " + e.getMessage());
             markFailed(entity, biz);
             throw biz;
@@ -190,7 +224,8 @@ public class RagFileAppServiceImpl implements RagFileAppService {
                 .orElse(0) + 1;
     }
 
-    private List<KnowledgeChunk> toKnowledgeChunks(List<ParsedChunk> chunks, RagFileEntity entity) {
+    private List<KnowledgeChunk> toKnowledgeChunks(List<ParsedChunk> chunks, RagFileEntity entity,
+                                                    Map<Integer, String> pageAssetIds) {
         Map<String, List<Integer>> parentGroups = new LinkedHashMap<>();
         for (int i = 0; i < chunks.size(); i++) {
             Object parentId = chunks.get(i).metadata().get("parentId");
@@ -212,6 +247,17 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             Map<String, Object> metadata = new LinkedHashMap<>(chunk.metadata());
             metadata.put("chunkType", "CHILD");
             metadata.put("documentVersion", entity.getDocumentVersion());
+            metadata.put("contentUnitId", entity.getId() + ":" + i);
+            metadata.put("contentType", resolveContentType(metadata).name());
+            metadata.put("parserVersion", CONTENT_PARSER_VERSION);
+            Map<String, Object> location = resolveContentLocation(metadata);
+            if (!location.isEmpty()) {
+                metadata.put("location", location);
+            }
+            Integer page = integerMetadata(metadata, "page");
+            if (page != null && pageAssetIds.containsKey(page)) {
+                metadata.put("assetId", pageAssetIds.get(page));
+            }
             Object logicalParentId = metadata.get("parentId");
             if (logicalParentId != null) {
                 String physicalParentId = physicalParentIds.get(String.valueOf(logicalParentId));
@@ -236,8 +282,15 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             ParsedChunk firstChild = chunks.get(firstChildIndex);
             Map<String, Object> metadata = new LinkedHashMap<>(firstChild.metadata());
             metadata.remove("parentId");
+            metadata.remove("contentUnitId");
+            metadata.remove("assetId");
+            metadata.remove("location");
+            metadata.remove("rowIndex");
+            metadata.remove("page");
             metadata.put("chunkType", "PARENT");
             metadata.put("documentVersion", entity.getDocumentVersion());
+            metadata.put("contentType", resolveContentType(metadata).name());
+            metadata.put("parserVersion", CONTENT_PARSER_VERSION);
             String parentContent = group.getValue().stream()
                     .map(chunks::get)
                     .map(ParsedChunk::content)
@@ -255,11 +308,93 @@ public class RagFileAppServiceImpl implements RagFileAppService {
         return List.copyOf(knowledgeChunks);
     }
 
+    private void persistAssets(List<PdfPageAssetRenderer.RenderedPageAsset> renderedAssets,
+                               RagFileEntity file) {
+        for (PdfPageAssetRenderer.RenderedPageAsset rendered : renderedAssets) {
+            DocumentAssetEntity asset = new DocumentAssetEntity();
+            asset.setId(rendered.assetId());
+            asset.setFileId(file.getId());
+            asset.setDocumentVersion(file.getDocumentVersion());
+            asset.setAssetType(DocumentAssetType.PAGE);
+            asset.setAssetIndex(rendered.page());
+            asset.setStorageKey(rendered.storageKey());
+            asset.setMimeType(rendered.mimeType());
+            asset.setSha256(rendered.sha256());
+            asset.setByteSize(rendered.byteSize());
+            asset.setWidth(rendered.width());
+            asset.setHeight(rendered.height());
+            asset.setLocationJson(writeLocation(rendered.location()));
+            asset.setParserVersion(rendered.parserVersion());
+            documentAssetRepository.save(asset);
+        }
+    }
+
+    private String writeLocation(ContentLocation location) {
+        try {
+            return JSON_MAPPER.writeValueAsString(location);
+        } catch (JsonProcessingException exception) {
+            throw new BizException("文档资产位置序列化失败: " + exception.getMessage());
+        }
+    }
+
+    private ContentType resolveContentType(Map<String, Object> metadata) {
+        String sourceType = String.valueOf(metadata.getOrDefault("sourceType", "text"));
+        return switch (sourceType.toLowerCase(Locale.ROOT)) {
+            case "xlsx", "csv" -> ContentType.TABLE;
+            default -> ContentType.TEXT;
+        };
+    }
+
+    private Map<String, Object> resolveContentLocation(Map<String, Object> metadata) {
+        Map<String, Object> location = new LinkedHashMap<>();
+        copyLocationValue(metadata, location, "page");
+        copyLocationValue(metadata, location, "sheetName");
+        copyLocationValue(metadata, location, "cellRange");
+        copyLocationValue(metadata, location, "slide");
+        copyLocationValue(metadata, location, "anchorId");
+        return location;
+    }
+
+    private void copyLocationValue(Map<String, Object> metadata, Map<String, Object> location, String key) {
+        Object value = metadata.get(key);
+        if (value != null && (!(value instanceof String text) || StringUtils.hasText(text))) {
+            location.put(key, value);
+        }
+    }
+
+    private Integer integerMetadata(Map<String, Object> metadata, String key) {
+        Object value = metadata.get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return value == null ? null : Integer.valueOf(String.valueOf(value));
+    }
+
+    private boolean isOriginalStillReferenced(RagFileEntity entity) {
+        return ragFileRepository.existsByStoragePathAndIdNot(entity.getStoragePath(), entity.getId())
+                || documentRepository.existsByStoragePath(entity.getStoragePath());
+    }
+
     private void cleanupIndex(Long fileId) {
         try {
             knowledgeIndexRepository.deleteByFileId(fileId);
         } catch (Exception e) {
             log.warn("清理失败知识索引时出错: fileId={}", fileId, e);
+        }
+    }
+
+    private void cleanupAssets(RagFileEntity file,
+                               List<PdfPageAssetRenderer.RenderedPageAsset> renderedAssets) {
+        for (PdfPageAssetRenderer.RenderedPageAsset rendered : renderedAssets) {
+            try {
+                storageService.delete(rendered.storageKey());
+                documentAssetRepository.findOwned(
+                                file.getId(), file.getDocumentVersion(), rendered.assetId())
+                        .ifPresent(documentAssetRepository::delete);
+            } catch (RuntimeException exception) {
+                log.warn("清理失败的页面资产时出错: fileId={}, assetId={}",
+                        file.getId(), rendered.assetId(), exception);
+            }
         }
     }
 

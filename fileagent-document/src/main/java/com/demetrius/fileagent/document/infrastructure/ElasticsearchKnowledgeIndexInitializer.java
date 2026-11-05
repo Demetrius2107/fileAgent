@@ -69,6 +69,10 @@ public class ElasticsearchKnowledgeIndexInitializer {
                             .properties("rowIndex", field -> field.integer(integer -> integer))
                             .properties("page", field -> field.integer(integer -> integer))
                             .properties("documentVersion", field -> field.integer(integer -> integer))
+                            .properties("contentUnitId", field -> field.keyword(keyword -> keyword))
+                            .properties("contentType", field -> field.keyword(keyword -> keyword))
+                            .properties("assetId", field -> field.keyword(keyword -> keyword))
+                            .properties("parserVersion", field -> field.keyword(keyword -> keyword))
                             .properties("chunkIndex", field -> field.integer(integer -> integer))
                             .properties("content", field -> field.text(text -> text.analyzer("cjk")))
                             .properties("metadata", field -> field.flattened(flattened -> flattened))
@@ -84,7 +88,7 @@ public class ElasticsearchKnowledgeIndexInitializer {
     }
 
     /**
-     * 旧索引兼容迁移（Phase 2C）：只补充 page/documentVersion 的 mapping 声明，
+     * 旧索引兼容迁移：补充父子块、版本和多模态关联字段的 mapping 声明，
      * 旧文档缺失这两个字段时读取为 null，不伪造定位信息。
      */
     private void ensureParentChildMapping(String index) throws Exception {
@@ -93,6 +97,10 @@ public class ElasticsearchKnowledgeIndexInitializer {
                 .properties("parentId", field -> field.keyword(keyword -> keyword))
                 .properties("chunkType", field -> field.keyword(keyword -> keyword))
                 .properties("page", field -> field.integer(integer -> integer))
-                .properties("documentVersion", field -> field.integer(integer -> integer)));
+                .properties("documentVersion", field -> field.integer(integer -> integer))
+                .properties("contentUnitId", field -> field.keyword(keyword -> keyword))
+                .properties("contentType", field -> field.keyword(keyword -> keyword))
+                .properties("assetId", field -> field.keyword(keyword -> keyword))
+                .properties("parserVersion", field -> field.keyword(keyword -> keyword)));
     }
 }

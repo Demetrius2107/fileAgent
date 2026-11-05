@@ -3,6 +3,8 @@ package com.demetrius.fileagent.document.application;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.demetrius.fileagent.api.dto.ContentLocation;
+import com.demetrius.fileagent.api.dto.DocumentAssetPage;
+import com.demetrius.fileagent.api.dto.DocumentAssetSummary;
 import com.demetrius.fileagent.api.dto.KnowledgeChunkView;
 import com.demetrius.fileagent.api.dto.OriginalRagFile;
 import com.demetrius.fileagent.api.dto.RagFileSummary;
@@ -29,6 +31,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -91,7 +94,8 @@ public class RagFileAppServiceImpl implements RagFileAppService {
                 entity.getFilename(),
                 entity.getStatus(),
                 entity.getChunkCount(),
-                entity.getCreatedAt().toString()))
+                entity.getCreatedAt().toString(),
+                entity.getDocumentVersion()))
             .toList();
     }
 
@@ -145,6 +149,44 @@ public class RagFileAppServiceImpl implements RagFileAppService {
                         chunk.content(),
                         chunk.metadata()))
                 .toList();
+    }
+
+    @Override
+    public DocumentAssetPage listAssets(Long fileId, int documentVersion,
+                                        int afterAssetIndex, int limit) {
+        validateAssetPage(documentVersion, afterAssetIndex, limit);
+        requireSuccessfulFileVersion(fileId, documentVersion);
+        List<DocumentAssetEntity> fetched = documentAssetRepository.findPage(
+                fileId, documentVersion, afterAssetIndex, limit + 1);
+        boolean hasMore = fetched.size() > limit;
+        List<DocumentAssetSummary> items = fetched.stream()
+                .limit(limit)
+                .map(this::toAssetSummary)
+                .toList();
+        Integer nextAssetIndex = hasMore && !items.isEmpty()
+                ? items.getLast().assetIndex()
+                : null;
+        return new DocumentAssetPage(items, nextAssetIndex);
+    }
+
+    @Override
+    public DocumentAssetContent loadAsset(Long fileId, int documentVersion, String assetId) {
+        if (!StringUtils.hasText(assetId) || documentVersion <= 0) {
+            throw new BizException("文档资产参数非法");
+        }
+        requireSuccessfulFileVersion(fileId, documentVersion);
+        DocumentAssetEntity asset = documentAssetRepository
+                .findOwned(fileId, documentVersion, assetId)
+                .orElseThrow(() -> new BizException(404, "文档资产不存在"));
+        if (!"image/png".equals(asset.getMimeType())) {
+            throw new BizException("不支持的文档资产类型: " + asset.getMimeType());
+        }
+        long actualSize = storageService.size(asset.getStorageKey());
+        if (asset.getByteSize() == null || actualSize != asset.getByteSize()) {
+            throw new BizException("文档资产大小校验失败: " + assetId);
+        }
+        InputStream inputStream = storageService.open(asset.getStorageKey());
+        return new DocumentAssetContent(asset.getMimeType(), actualSize, inputStream);
     }
 
     private void storeOne(String name, String tag, MultipartFile file) {
@@ -326,6 +368,44 @@ public class RagFileAppServiceImpl implements RagFileAppService {
             asset.setLocationJson(writeLocation(rendered.location()));
             asset.setParserVersion(rendered.parserVersion());
             documentAssetRepository.save(asset);
+        }
+    }
+
+    private void validateAssetPage(int documentVersion, int afterAssetIndex, int limit) {
+        if (documentVersion <= 0 || afterAssetIndex < -1 || limit <= 0 || limit > 50) {
+            throw new BizException("资产分页参数非法：documentVersion 必须为正数，afterAssetIndex 不小于 -1，limit 范围为 1-50");
+        }
+    }
+
+    private RagFileEntity requireSuccessfulFileVersion(Long fileId, int documentVersion) {
+        RagFileEntity file = ragFileRepository.findById(fileId)
+                .orElseThrow(() -> new BizException(404, "知识库文件不存在: " + fileId));
+        if (file.getStatus() != ParseStatus.SUCCESS
+                || file.getDocumentVersion() == null
+                || file.getDocumentVersion() != documentVersion) {
+            throw new BizException(404, "知识库文件版本不存在");
+        }
+        return file;
+    }
+
+    private DocumentAssetSummary toAssetSummary(DocumentAssetEntity asset) {
+        return new DocumentAssetSummary(
+                asset.getId(),
+                asset.getDocumentVersion(),
+                asset.getAssetType(),
+                asset.getAssetIndex(),
+                readLocation(asset.getLocationJson()),
+                asset.getMimeType(),
+                asset.getWidth(),
+                asset.getHeight(),
+                asset.getByteSize());
+    }
+
+    private ContentLocation readLocation(String locationJson) {
+        try {
+            return JSON_MAPPER.readValue(locationJson, ContentLocation.class);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("文档资产位置数据损坏", exception);
         }
     }
 

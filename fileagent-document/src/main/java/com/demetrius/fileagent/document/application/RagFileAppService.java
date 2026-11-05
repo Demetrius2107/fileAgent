@@ -1,10 +1,12 @@
 package com.demetrius.fileagent.document.application;
 
+import com.demetrius.fileagent.api.dto.DocumentAssetPage;
 import com.demetrius.fileagent.api.dto.KnowledgeChunkView;
 import com.demetrius.fileagent.api.dto.OriginalRagFile;
 import com.demetrius.fileagent.api.dto.RagFileSummary;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
 import java.util.List;
 
 /**
@@ -26,7 +28,7 @@ public interface RagFileAppService {
     List<RagFileSummary> list();
 
     /**
-     * 删除知识库文件：按「查记录 → 删 ES 索引 → 删原件 → 删记录」顺序执行。
+     * 删除知识库文件：按「查记录 → 删 ES 索引 → 删视觉资产 → 删原件 → 删记录」顺序执行。
      * <p>必须先删 ES 索引：记录先没了索引还在，会继续被召回且再无 fileId 可清理。
      * ES 索引与原件删除均幂等，中途失败可直接重试本接口。
      *
@@ -49,4 +51,14 @@ public interface RagFileAppService {
      * @return 分块视图列表
      */
     List<KnowledgeChunkView> listChunks(Long id);
+
+    /** 按排他游标读取指定文件版本的视觉资产摘要。 */
+    DocumentAssetPage listAssets(Long fileId, int documentVersion, int afterAssetIndex, int limit);
+
+    /** 读取归属于指定文件版本的视觉资产内容。 */
+    DocumentAssetContent loadAsset(Long fileId, int documentVersion, String assetId);
+
+    /** 仅供接口层流式输出的受控资产内容。 */
+    record DocumentAssetContent(String mimeType, long byteSize, InputStream inputStream) {
+    }
 }

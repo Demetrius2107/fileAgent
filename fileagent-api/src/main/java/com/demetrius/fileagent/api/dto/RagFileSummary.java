@@ -16,6 +16,13 @@ public record RagFileSummary(
         String filename,
         ParseStatus status,
         Integer chunkCount,
-        String createdAt
+        String createdAt,
+        Integer documentVersion
 ) {
+
+    /** 兼容不需要文档版本的旧调用方。 */
+    public RagFileSummary(Long id, String ragName, String knowledgeTag, String filename,
+                          ParseStatus status, Integer chunkCount, String createdAt) {
+        this(id, ragName, knowledgeTag, filename, status, chunkCount, createdAt, null);
+    }
 }

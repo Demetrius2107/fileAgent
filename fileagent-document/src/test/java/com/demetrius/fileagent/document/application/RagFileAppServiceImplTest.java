@@ -2,6 +2,7 @@ package com.demetrius.fileagent.document.application;
 
 import com.demetrius.fileagent.api.dto.RagFileSummary;
 import com.demetrius.fileagent.api.dto.ContentLocation;
+import com.demetrius.fileagent.api.dto.DocumentAssetPage;
 import com.demetrius.fileagent.api.enums.DocumentAssetType;
 import com.demetrius.fileagent.api.enums.ParseStatus;
 import com.demetrius.fileagent.common.exception.BizException;
@@ -456,6 +457,69 @@ class RagFileAppServiceImplTest {
         assertThat(result.get(0).status()).isEqualTo(ParseStatus.SUCCESS);
         assertThat(result.get(0).chunkCount()).isEqualTo(12);
         assertThat(result.get(0).createdAt()).isEqualTo("2026-08-26T09:00");
+        assertThat(result.get(0).documentVersion()).isEqualTo(1);
+    }
+
+    @Test
+    void listAssetsShouldUseExclusiveCursorAndFetchOneExtraItem() {
+        RagFileEntity file = entity(7L, "员工知识库", "制度", "手册.pdf",
+                ParseStatus.SUCCESS, 21, LocalDateTime.of(2026, 9, 1, 9, 0));
+        file.setDocumentVersion(3);
+        when(ragFileRepository.findById(7L)).thenReturn(Optional.of(file));
+        List<DocumentAssetEntity> assets = java.util.stream.IntStream.rangeClosed(1, 21)
+                .mapToObj(index -> completeAsset("asset-" + index, 7L, 3, index))
+                .toList();
+        when(documentAssetRepository.findPage(7L, 3, -1, 21)).thenReturn(assets);
+        when(documentAssetRepository.findPage(7L, 3, 20, 21)).thenReturn(List.of(assets.getLast()));
+
+        DocumentAssetPage firstPage = ragFileAppService.listAssets(7L, 3, -1, 20);
+        DocumentAssetPage secondPage = ragFileAppService.listAssets(7L, 3, 20, 20);
+
+        assertThat(firstPage.items()).hasSize(20);
+        assertThat(firstPage.items()).extracting(item -> item.assetIndex())
+                .containsExactlyElementsOf(java.util.stream.IntStream.rangeClosed(1, 20).boxed().toList());
+        assertThat(firstPage.nextAssetIndex()).isEqualTo(20);
+        assertThat(secondPage.items()).extracting(item -> item.assetIndex()).containsExactly(21);
+        assertThat(secondPage.nextAssetIndex()).isNull();
+        verify(documentAssetRepository).findPage(7L, 3, -1, 21);
+        verify(documentAssetRepository).findPage(7L, 3, 20, 21);
+    }
+
+    @Test
+    void loadAssetShouldOpenOwnedAssetAfterSizeValidation() throws Exception {
+        RagFileEntity file = entity(7L, "员工知识库", "制度", "手册.pdf",
+                ParseStatus.SUCCESS, 2, LocalDateTime.of(2026, 9, 1, 9, 0));
+        file.setDocumentVersion(3);
+        DocumentAssetEntity asset = completeAsset("asset-1", 7L, 3, 1);
+        byte[] content = new byte[2048];
+        when(ragFileRepository.findById(7L)).thenReturn(Optional.of(file));
+        when(documentAssetRepository.findOwned(7L, 3, "asset-1")).thenReturn(Optional.of(asset));
+        when(storageService.size(asset.getStorageKey())).thenReturn(2048L);
+        when(storageService.open(asset.getStorageKey()))
+                .thenReturn(new java.io.ByteArrayInputStream(content));
+
+        RagFileAppService.DocumentAssetContent result = ragFileAppService.loadAsset(7L, 3, "asset-1");
+        try (var inputStream = result.inputStream()) {
+            assertThat(result.mimeType()).isEqualTo("image/png");
+            assertThat(result.byteSize()).isEqualTo(2048L);
+            assertThat(inputStream.readAllBytes()).isEqualTo(content);
+        }
+    }
+
+    @Test
+    void loadAssetShouldRejectFileOrVersionMismatchBeforeOpeningStorage() {
+        RagFileEntity file = entity(7L, "员工知识库", "制度", "手册.pdf",
+                ParseStatus.SUCCESS, 2, LocalDateTime.of(2026, 9, 1, 9, 0));
+        file.setDocumentVersion(3);
+        when(ragFileRepository.findById(7L)).thenReturn(Optional.of(file));
+
+        assertThatThrownBy(() -> ragFileAppService.loadAsset(7L, 2, "asset-1"))
+                .isInstanceOf(BizException.class)
+                .extracting(exception -> ((BizException) exception).getCode())
+                .isEqualTo(404);
+
+        verify(documentAssetRepository, never()).findOwned(any(), any(Integer.class), anyString());
+        verify(storageService, never()).open(anyString());
     }
 
     private void stubSuccessSave() {
@@ -497,6 +561,7 @@ class RagFileAppServiceImplTest {
         entity.setStatus(status);
         entity.setChunkCount(chunkCount);
         entity.setCreatedAt(createdAt);
+        entity.setDocumentVersion(1);
         return entity;
     }
 
@@ -506,4 +571,19 @@ class RagFileAppServiceImplTest {
         asset.setStorageKey(storageKey);
         return asset;
     }
+
+    private DocumentAssetEntity completeAsset(String id, Long fileId, int version, int index) {
+        DocumentAssetEntity asset = assetEntity(id, "assets/" + fileId + "/v" + version + "/" + id + ".png");
+        asset.setFileId(fileId);
+        asset.setDocumentVersion(version);
+        asset.setAssetType(DocumentAssetType.PAGE);
+        asset.setAssetIndex(index);
+        asset.setLocationJson("{\"page\":" + index + ",\"boundingBox\":{\"x\":0,\"y\":0,\"width\":1,\"height\":1}}");
+        asset.setMimeType("image/png");
+        asset.setWidth(1200);
+        asset.setHeight(1600);
+        asset.setByteSize(2048L);
+        return asset;
+    }
+
 }

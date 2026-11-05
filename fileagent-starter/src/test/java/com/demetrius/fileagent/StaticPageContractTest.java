@@ -26,7 +26,9 @@ class StaticPageContractTest {
             "upload-dialog", "upload-form", "upload-name", "upload-tag", "upload-files",
             "toggle-model-settings", "model-settings-dialog", "model-settings-form",
             "model-config-list", "provider-select", "base-url-input", "api-key-input",
-            "model-name-input", "model-config-error", "model-config-cancel", "model-config-save"
+            "model-name-input", "model-config-error", "model-config-cancel", "model-config-save",
+            "doc-view-assets", "doc-view-asset-status", "doc-view-assets-more",
+            "doc-asset-dialog", "doc-asset-image", "doc-asset-close"
     );
 
     @Test
@@ -126,6 +128,31 @@ class StaticPageContractTest {
                 .contains(".agent-approval-python-preview")
                 .contains("max-height")
                 .contains("overflow: auto");
+    }
+
+    @Test
+    void documentViewShouldPageVisualAssetsUsingRealDocumentVersion() throws IOException {
+        String html = readResource("static/index.html");
+        String script = readResource("static/app.js");
+        String css = readResource("static/app.css");
+
+        assertThat(html)
+                .contains("id=\"doc-view-assets\"")
+                .contains("id=\"doc-view-assets-more\"")
+                .contains("暂无页面图片");
+        assertThat(script)
+                .contains("file.documentVersion == null")
+                .contains("documentVersion=${file.documentVersion}")
+                .contains("afterAssetIndex=${afterAssetIndex}")
+                .contains("limit=20")
+                .contains("/assets/${encodeURIComponent(assetId)}/content")
+                .contains("chunk.metadata?.assetId")
+                .contains("chunk.metadata?.contentType");
+        assertThat(css)
+                .contains(".doc-view-assets")
+                .contains(".doc-asset-card")
+                .contains("aspect-ratio")
+                .contains("@media (max-width: 900px)");
     }
 
     private String readResource(String path) throws IOException {

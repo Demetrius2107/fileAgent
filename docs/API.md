@@ -155,7 +155,8 @@ Response `data`:
 
 - 同步处理：sha256 内容去重校验 → 原件落盘（`fileagent.storage-dir`，回填 `storage_path` + `sha256`）→ 解析 → 分块（`fileagent.chunk-size` / `chunk-overlap`）→ embedding → 写入 Elasticsearch 知识索引（`fileagent.elasticsearch.index-alias`），并落库 `rag_file` 记录
 - 上传去重：同一 `name` + `tag` 下存在 `sha256` 相同且索引成功的文件时直接拒绝（`code=400`），不落盘不落库；如需替换内容请先删除原文件
-- 文件本体持久化：原件保存到 `storage/files/日期/文件名`，`rag_file` 表回填 `storage_path`/`sha256`；解析/索引失败时记录保留为 `FAILED`（不进列表），已写入 ES 的数据被清理，原件保留便于排查
+- 文件本体持久化：原件使用 `originals/yyyy/MM/dd/{uuid}/{文件名}` 唯一键保存到 `fileagent.storage-dir`，同名上传不会覆盖；`rag_file` 表回填 `storage_path`/`sha256`。解析/索引失败时记录保留为 `FAILED`（不进列表），已写入 ES 和页面资产会被清理，原件保留便于排查
+- `fileagent.multimodal.enabled=true` 时，PDF 会按受控页数、像素和总字节限制逐页生成 PNG 页面资产；默认关闭，不影响原有文本 RAG
 - chunk 元数据：`knowledge`=tag、`ragName`=name、`fileId`、`filename`、`chunkIndex`；检索为全局范围，不按标签过滤
 
 Response:
@@ -180,7 +181,8 @@ Response `data`: `RagFileSummary[]`
     "filename": "员工手册.pdf",
     "status": "SUCCESS",
     "chunkCount": 12,
-    "createdAt": "2026-08-26T09:00:00"
+    "createdAt": "2026-08-26T09:00:00",
+    "documentVersion": 1
   }
 ]
 ```
@@ -188,7 +190,7 @@ Response `data`: `RagFileSummary[]`
 ### 3.3 删除知识库文件
 `DELETE /api/rag-files/{id}`
 
-删除顺序：查 `rag_file` 记录 → 按 `fileId` 删除 ES 索引 → 删除原件（`storage_path`）→ 删除 H2 记录。
+删除顺序：查 `rag_file` 记录 → 按 `fileId` 删除 ES 索引 → 逐项删除页面资产对象和元数据 → 删除无其他引用的原件 → 删除 H2 文件记录。
 
 - **必须先删 ES**：记录先没了索引还在，残留数据会继续被召回，且再无 fileId 可清理
 - ES 索引删除（delete-by-query 删不到不报错）与原件删除（文件不存在静默跳过）均幂等，中途失败可直接重试本接口
@@ -220,6 +222,44 @@ Response `data`:
 ```
 
 记录不存在或文件正在索引中时返回 `code=400` + 原因。
+
+### 页面视觉资产列表（Phase 4A）
+
+`GET /api/rag-files/{fileId}/assets?documentVersion=1&afterAssetIndex=-1&limit=20`
+
+- `documentVersion` 必填，必须使用知识文件列表返回的真实版本；旧记录版本为空时客户端不应请求本接口
+- `afterAssetIndex` 是排他游标，默认 `-1`；`limit` 默认 20，范围 1～50
+- 文件不存在、状态不是 `SUCCESS` 或版本不匹配返回 HTTP 404；参数非法返回 HTTP 400
+- 摘要不返回 `storageKey`、绝对路径或任意外部 URL
+
+Response `data`:
+```json
+{
+  "items": [
+    {
+      "assetId": "8bd0bb12-ff0f-4fa2-bd96-2c460708caba",
+      "documentVersion": 1,
+      "assetType": "PAGE",
+      "assetIndex": 1,
+      "location": { "page": 1, "boundingBox": { "x": 0, "y": 0, "width": 1, "height": 1 } },
+      "mimeType": "image/png",
+      "width": 992,
+      "height": 1403,
+      "byteSize": 48132
+    }
+  ],
+  "nextAssetIndex": null
+}
+```
+
+### 页面视觉资产内容（Phase 4A）
+
+`GET /api/rag-files/{fileId}/assets/{assetId}/content?documentVersion=1`
+
+- 同时校验 `fileId + documentVersion + assetId` 归属；跨文件、跨版本或不存在统一返回 HTTP 404
+- 返回受控 `image/png` 二进制流，不使用 `ApiResult` 包装
+- 响应包含真实 `Content-Length` 和 `X-Content-Type-Options: nosniff`
+- 4A 的页面图仅用于来源查看，不表示扫描文字已经 OCR，也不会直接进入视觉模型
 
 ---
 

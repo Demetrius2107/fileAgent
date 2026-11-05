@@ -122,3 +122,19 @@ export FILEAGENT_EVALUATION_TOKEN='<部署的内部评测 Token>'
 ### 9.3 浏览器验收
 
 在真实部署的桌面与移动视口分别验证 `execute_python` 的审批预览、批准/拒绝/过期/取消、SSE 重连，以及成功、失败和 `OUTCOME_UNKNOWN` 状态。Python 审批预览服务端最多 4,000 字符；完整参数仍由 HMAC 绑定，浏览器不能修改它，也没有自动重试脚本的入口。
+
+## 10. Phase 4A 页面资产基础
+
+自动化验证覆盖内容位置约束、唯一原件键、PDFBox 真实页面渲染、资源硬限制、资产归属、游标分页、失败清理、ES metadata 和前端静态契约：
+
+```bash
+JAVA_HOME='/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home' \
+/Users/a1/Desktop/software/apache-maven-3.9.9/bin/mvn \
+  -s /Users/a1/Desktop/software/apache-maven-3.9.9/conf/settings.xml \
+  -Dmaven.repo.local=/Users/a1/Desktop/software/mavenlibrary \
+  -pl fileagent-starter -am test
+
+node --check fileagent-starter/src/main/resources/static/app.js
+```
+
+部署验收时显式设置 `FILEAGENT_MULTIMODAL_ENABLED=true`，上传至少两页的文本型 PDF，确认：同名不同内容原件互不覆盖；页面图片分页和大图可读；分块能跳到关联页；刷新后资产仍存在；删除后 ES、页面资产、原件和文件记录按顺序收敛。再关闭开关上传文本文件，确认原有文本 RAG 不创建页面资产且问答行为不变。纯扫描 PDF 的 OCR 与问答属于 Phase 4B，不在 4A 验收中宣称完成。

@@ -28,8 +28,8 @@ fileAgent/
 │   └── common/{result,exception}      ApiResult / BizException / GlobalExceptionHandler
 │
 ├── fileagent-api/                 ✅ 契约层（跨域共享，只声明不实现）
-│   ├── api/dto/                       8 个 DTO（record，含 ChatStreamEvent / RagFileSummary）
-│   ├── api/enums/                     3 个枚举
+│   ├── api/dto/                       跨域 DTO（含 ChatStreamEvent / RagFileSummary / ContentLocation / DocumentAssetPage）
+│   ├── api/enums/                     跨域枚举（含 ContentType / DocumentAssetType）
 │   ├── api/event/                     DomainEvent / MessageCreatedEvent / DocumentParsedEvent
 │   └── api/port/                      SessionQueryPort / SessionMessagePort / DocumentQueryPort / KnowledgeSearchPort / ChatExecutionPort(流式) / PythonSandboxExecutionPort
 │
@@ -42,8 +42,8 @@ fileAgent/
 ├── fileagent-document/            ✅ 文档域
 │   ├── interfaces/                   FileController / RagFileController（已实现）
 │   ├── application/                  DocumentAppService（接口）/ RagFileAppService + RagFileAppServiceImpl（已实现）
-│   ├── domain/                       DocumentEntity / RagFileEntity / KnowledgeChunk / KnowledgeIndexRepository
-│   └── infrastructure/               JPA 实现 / Elasticsearch 索引与混合检索 / 解析器（TXT/MD/PDF/Word/Excel/CSV）
+│   ├── domain/                       DocumentEntity / RagFileEntity / DocumentAssetEntity / KnowledgeChunk / Repository 契约
+│   └── infrastructure/               JPA / Elasticsearch 混合检索 / 本地对象存储 / 解析器 / PDF 页面资产渲染
 │
 ├── fileagent-chat/                ✅ 对话/推理域（核心域，M2 RAG 流式闭环已实现）
 │   ├── interfaces/                   ChatController（SSE 流式，已实现）
@@ -158,6 +158,7 @@ ragflow-quickstart → Spring Boot WebFlux（不依赖 fileagent-* 业务模块�
 | `spring.ai.openai.base-url` | `${FILEAGENT_AI_BASE_URL}` | ❌ 按需 |
 | `spring.datasource.url` | H2 文件库 `./storage/db` | ✅ |
 | `fileagent.storage-dir` | 上传文件目录 | ✅ 目录在 .gitignore |
+| `fileagent.multimodal.enabled` / `render-dpi` / `max-pages` / `max-page-pixels` / `max-total-asset-bytes` | PDF 页面资产开关、渲染精度与资源硬限制；默认关闭 | ✅ |
 | `spring.elasticsearch.*` | Elasticsearch 地址与凭证（环境变量注入） | ❌ 凭证严禁提交 |
 | `fileagent.elasticsearch.*` | 索引别名、BM25/KNN/RRF 与结果数量 | ✅ |
 | `fileagent.chat-history-limit` | 对话注入的历史条数（取最后 N 条） | ✅ |

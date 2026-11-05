@@ -1169,6 +1169,107 @@ dialog.doc-view-dialog::backdrop {
     font-size: 12px;
     color: var(--danger);
 }
+.doc-view-asset-status {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.doc-view-assets {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 10px;
+    max-height: 370px;
+    overflow-y: auto;
+}
+.doc-view-assets > .doc-view-note,
+.doc-view-assets > .doc-view-error {
+    grid-column: 1 / -1;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+}
+.doc-asset-card {
+    min-width: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+.doc-asset-card:hover,
+.doc-asset-card:focus-visible {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-md);
+    outline: none;
+}
+.doc-asset-thumbnail {
+    display: block;
+    width: 100%;
+    aspect-ratio: 3 / 4;
+    object-fit: contain;
+    background: #f1f3f5;
+}
+.doc-asset-label {
+    display: block;
+    padding: 7px 8px;
+    overflow: hidden;
+    font-size: 12px;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.doc-view-assets-more {
+    display: block;
+    margin: 10px auto 0;
+}
+.doc-view-assets-more[hidden] { display: none; }
+.chunk-metadata {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px 8px;
+    background: var(--panel-bg);
+}
+.chunk-metadata-item,
+.chunk-asset-button {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    background: var(--bg);
+}
+.chunk-asset-button {
+    color: var(--accent);
+    cursor: pointer;
+}
+.chunk-asset-button:hover { border-color: var(--accent); }
+.doc-asset-dialog {
+    border: none;
+    border-radius: var(--radius-lg);
+    padding: 0;
+    width: min(960px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    box-shadow: var(--shadow-lg);
+}
+.doc-asset-dialog::backdrop { background: rgba(0,0,0,0.52); }
+.doc-asset-image-wrap {
+    display: flex;
+    justify-content: center;
+    padding: 16px;
+    overflow: auto;
+    max-height: calc(100vh - 100px);
+    background: #eef0f3;
+}
+.doc-asset-image-wrap img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    background: #fff;
+    box-shadow: var(--shadow-sm);
+}
 .doc-view-chunk-count { font-size: 12px; color: var(--text-muted); }
 .doc-view-chunks {
     border: 1px solid var(--border);
@@ -1220,6 +1321,16 @@ dialog.doc-view-dialog::backdrop {
     color: var(--text);
     background: var(--panel-bg);
     border-top: 1px dashed var(--border);
+}
+
+@media (max-width: 900px) {
+    dialog.doc-view-dialog,
+    dialog.doc-asset-dialog { width: calc(100vw - 16px); }
+    .doc-view-head { padding: 14px 16px 10px; }
+    .doc-view-body { padding: 12px 16px 18px; }
+    .doc-view-assets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .chunk-summary { align-items: flex-start; flex-wrap: wrap; }
+    .chunk-preview { flex-basis: 100%; }
 }
 
 /* ===== 轻提示 toast ===== */

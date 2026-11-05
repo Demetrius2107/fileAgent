@@ -57,6 +57,12 @@
     const docViewChunks = $('doc-view-chunks');
     const docViewChunkCount = $('doc-view-chunk-count');
     const docViewDownload = $('doc-view-download');
+    const docViewAssets = $('doc-view-assets');
+    const docViewAssetStatus = $('doc-view-asset-status');
+    const docViewAssetsMore = $('doc-view-assets-more');
+    const docAssetDialog = $('doc-asset-dialog');
+    const docAssetImage = $('doc-asset-image');
+    const docAssetTitle = $('doc-asset-title');
 
     let currentSessionId = null;
     let abortController = null;
@@ -73,6 +79,11 @@
     const AGENT_POLL_INTERVAL_MS = 3000;
     /* 当前正在重命名的会话 id；null 表示重命名弹窗未在编辑会话 */
     let renamingSessionId = null;
+    let docViewCurrentFile = null;
+    let docAssetNextIndex = null;
+    let docAssetCount = 0;
+    let docAssetsLoading = false;
+    let docAssetViewGeneration = 0;
 
     /* ---------- 通用 ---------- */
 
@@ -1267,19 +1278,123 @@
     }
 
     function openDocView(file) {
+        docAssetViewGeneration += 1;
+        docViewCurrentFile = file;
         docViewTitle.textContent = file.filename;
         docViewOriginal.replaceChildren();
         docViewChunks.replaceChildren();
         docViewChunkCount.textContent = '';
+        docViewAssets.replaceChildren();
+        docViewAssetStatus.textContent = '';
+        docViewAssetsMore.hidden = true;
+        docAssetNextIndex = null;
+        docAssetCount = 0;
+        docAssetsLoading = false;
         const contentUrl = `/api/rag-files/${file.id}/content`;
         docViewDownload.href = contentUrl;
         docViewDownload.setAttribute('download', file.filename);
         docViewDialog.showModal();
         loadOriginalPreview(file, contentUrl);
+        loadDocAssets(file, -1);
         loadDocChunks(file);
     }
 
     $('doc-view-close').addEventListener('click', () => { docViewDialog.close(); });
+    docViewDialog.addEventListener('close', () => {
+        docAssetViewGeneration += 1;
+        docViewCurrentFile = null;
+        docAssetNextIndex = null;
+        docAssetsLoading = false;
+    });
+    $('doc-asset-close').addEventListener('click', () => { docAssetDialog.close(); });
+    docAssetDialog.addEventListener('close', () => {
+        docAssetImage.removeAttribute('src');
+    });
+
+    async function loadDocAssets(file, afterAssetIndex) {
+        if (file.documentVersion == null) {
+            renderNoDocAssets();
+            return;
+        }
+        if (docAssetsLoading) { return; }
+        const viewGeneration = docAssetViewGeneration;
+        docAssetsLoading = true;
+        docViewAssetsMore.disabled = true;
+        if (afterAssetIndex < 0) {
+            docViewAssets.replaceChildren(el('div', 'doc-view-note', '正在加载页面图片…'));
+        }
+        try {
+            const page = await api(`/api/rag-files/${file.id}/assets?documentVersion=${file.documentVersion}&afterAssetIndex=${afterAssetIndex}&limit=20`);
+            if (!isCurrentDocView(file)) { return; }
+            const items = page?.items || [];
+            if (afterAssetIndex < 0) { docViewAssets.replaceChildren(); }
+            for (const asset of items) {
+                docViewAssets.appendChild(renderDocAsset(file, asset));
+            }
+            docAssetCount += items.length;
+            docAssetNextIndex = page?.nextAssetIndex ?? null;
+            docViewAssetStatus.textContent = docAssetCount === 0 ? '暂无页面图片' : `已加载 ${docAssetCount} 张`;
+            docViewAssetsMore.hidden = docAssetNextIndex == null;
+            if (docAssetCount === 0) {
+                renderNoDocAssets();
+            }
+        } catch (e) {
+            if (!isCurrentDocView(file)) { return; }
+            if (afterAssetIndex < 0) { docViewAssets.replaceChildren(); }
+            docViewAssets.appendChild(el('div', 'doc-view-error', `页面图片加载失败：${e.message}`));
+            docViewAssetStatus.textContent = '加载失败';
+            docViewAssetsMore.hidden = true;
+        } finally {
+            if (viewGeneration === docAssetViewGeneration) {
+                docAssetsLoading = false;
+                docViewAssetsMore.disabled = false;
+            }
+        }
+    }
+
+    function isCurrentDocView(file) {
+        return docViewCurrentFile?.id === file.id
+            && docViewCurrentFile?.documentVersion === file.documentVersion;
+    }
+
+    function renderNoDocAssets() {
+        docViewAssets.replaceChildren(el('div', 'doc-view-note', '暂无页面图片'));
+        docViewAssetStatus.textContent = '暂无页面图片';
+        docViewAssetsMore.hidden = true;
+    }
+
+    function renderDocAsset(file, asset) {
+        const pageNumber = asset.location?.page ?? asset.assetIndex;
+        const button = el('button', 'doc-asset-card');
+        button.type = 'button';
+        button.dataset.assetId = asset.assetId;
+        button.title = `查看第 ${pageNumber} 页大图`;
+        const image = el('img', 'doc-asset-thumbnail');
+        image.loading = 'lazy';
+        image.src = assetContentUrl(file, asset.assetId);
+        image.alt = `${file.filename} 第 ${pageNumber} 页`;
+        button.appendChild(image);
+        button.appendChild(el('span', 'doc-asset-label', `第 ${pageNumber} 页`));
+        button.addEventListener('click', () => openAssetPreview(file, asset.assetId, pageNumber));
+        return button;
+    }
+
+    function assetContentUrl(file, assetId) {
+        return `/api/rag-files/${file.id}/assets/${encodeURIComponent(assetId)}/content?documentVersion=${file.documentVersion}`;
+    }
+
+    function openAssetPreview(file, assetId, pageNumber) {
+        docAssetTitle.textContent = `${file.filename} · 第 ${pageNumber} 页`;
+        docAssetImage.alt = `${file.filename} 第 ${pageNumber} 页大图`;
+        docAssetImage.src = assetContentUrl(file, assetId);
+        if (!docAssetDialog.open) { docAssetDialog.showModal(); }
+    }
+
+    docViewAssetsMore.addEventListener('click', () => {
+        if (docViewCurrentFile && docAssetNextIndex != null) {
+            loadDocAssets(docViewCurrentFile, docAssetNextIndex);
+        }
+    });
 
     async function loadOriginalPreview(file, contentUrl) {
         const ext = fileExt(file.filename);
@@ -1310,14 +1425,14 @@
     async function loadDocChunks(file) {
         try {
             const chunks = await api(`/api/rag-files/${file.id}/chunks`);
-            renderChunks(chunks);
+            renderChunks(chunks, file);
         } catch (e) {
             docViewChunkCount.textContent = '';
             docViewChunks.appendChild(el('div', 'doc-view-error', `分块加载失败：${e.message}`));
         }
     }
 
-    function renderChunks(chunks) {
+    function renderChunks(chunks, file) {
         if (!chunks || chunks.length === 0) {
             docViewChunkCount.textContent = '共 0 块';
             docViewChunks.appendChild(el('div', 'doc-view-note', '该文件暂无索引分块（可能尚未解析完成或解析失败）。'));
@@ -1325,19 +1440,35 @@
         }
         docViewChunkCount.textContent = `共 ${chunks.length} 块`;
         for (const chunk of chunks) {
-            docViewChunks.appendChild(renderChunkItem(chunk));
+            docViewChunks.appendChild(renderChunkItem(chunk, file));
         }
     }
 
-    function renderChunkItem(chunk) {
+    function renderChunkItem(chunk, file) {
         const details = el('details', 'chunk-item');
         const summary = el('summary', 'chunk-summary');
         const isParent = chunk.chunkType === 'PARENT';
-        summary.appendChild(el('span', `chunk-type-${isParent ? 'parent' : 'child'}`, isParent ? '父块' : '子块'));
+        summary.appendChild(el('span', `chunk-type chunk-type-${isParent ? 'parent' : 'child'}`, isParent ? '父块' : '子块'));
         summary.appendChild(el('span', 'chunk-index', `#${chunk.chunkIndex}`));
         const preview = String(chunk.content || '').replace(/\s+/g, ' ').trim();
         summary.appendChild(el('span', 'chunk-preview', preview ? preview.slice(0, 80) : '（空内容）'));
         details.appendChild(summary);
+        const metadata = el('div', 'chunk-metadata');
+        const contentType = chunk.metadata?.contentType;
+        if (contentType) {
+            metadata.appendChild(el('span', 'chunk-metadata-item', contentType));
+        }
+        const page = chunk.metadata?.location?.page ?? chunk.metadata?.page;
+        const assetId = chunk.metadata?.assetId;
+        if (assetId && page != null && file.documentVersion != null) {
+            const pageButton = el('button', 'chunk-asset-button', `第 ${page} 页`);
+            pageButton.type = 'button';
+            pageButton.addEventListener('click', () => openAssetPreview(file, assetId, page));
+            metadata.appendChild(pageButton);
+        } else if (page != null) {
+            metadata.appendChild(el('span', 'chunk-metadata-item', `第 ${page} 页`));
+        }
+        if (metadata.childElementCount > 0) { details.appendChild(metadata); }
         details.appendChild(el('pre', 'chunk-content', chunk.content || ''));
         return details;
     }

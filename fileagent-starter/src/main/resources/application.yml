@@ -59,6 +59,13 @@ fileagent:
   storage-dir: ./storage/files
   secret-key-path: ./storage/secret.key
   chat-history-limit: 10
+  multimodal:
+    # Phase 4A 页面图片基础默认关闭；开启后仍受页数、像素和累计字节硬限制。
+    enabled: ${FILEAGENT_MULTIMODAL_ENABLED:false}
+    render-dpi: ${FILEAGENT_MULTIMODAL_RENDER_DPI:120}
+    max-pages: ${FILEAGENT_MULTIMODAL_MAX_PAGES:100}
+    max-page-pixels: ${FILEAGENT_MULTIMODAL_MAX_PAGE_PIXELS:4000000}
+    max-total-asset-bytes: ${FILEAGENT_MULTIMODAL_MAX_TOTAL_ASSET_BYTES:67108864}
   # Agent 模式（Phase 1）：默认关闭，本地测试可设 FILEAGENT_AGENT_ENABLED=true 开启
   agent:
     enabled: ${FILEAGENT_AGENT_ENABLED:false}

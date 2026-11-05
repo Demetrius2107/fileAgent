@@ -19,6 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(properties = {
         "fileagent.action.mock.enabled=false",
         "fileagent.action.http.enabled=false",
+        "fileagent.sandbox.enabled=false",
         "fileagent.agent.actions-enabled=false",
         "spring.datasource.url=jdbc:h2:mem:action_mock_disabled;DB_CLOSE_DELAY=-1",
         "spring.jpa.hibernate.ddl-auto=create-drop",

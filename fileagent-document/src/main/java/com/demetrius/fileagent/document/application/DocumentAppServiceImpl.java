@@ -62,6 +62,8 @@ public class DocumentAppServiceImpl implements DocumentAppService {
         var existing = documentRepository.findBySha256(stored.sha256());
         if (existing.isPresent()) {
             DocumentEntity doc = existing.get();
+            // 唯一键存储会先产生新对象，去重复用旧记录时必须清掉无人引用的副本。
+            storageService.delete(stored.relativePath());
             log.info("文件命中 sha256 去重，复用 documentId={}", doc.getId());
             return toResp(doc, 0);
         }

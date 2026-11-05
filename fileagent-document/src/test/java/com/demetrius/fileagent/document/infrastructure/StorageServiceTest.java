@@ -5,7 +5,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.web.MockMultipartFile;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -58,6 +61,54 @@ class StorageServiceTest {
         StorageService.StoredFile stored = newStorageService().store(file);
 
         assertThat(newStorageService().resolve(stored.relativePath())).startsWith(tempDir.toAbsolutePath());
+    }
+
+    @Test
+    void storeShouldNotOverwriteFilesWithSameName() throws Exception {
+        StorageService storageService = newStorageService();
+        StorageService.StoredFile first = storageService.store(
+                new MockMultipartFile("files", "same.pdf", null, "first".getBytes(StandardCharsets.UTF_8)));
+        StorageService.StoredFile second = storageService.store(
+                new MockMultipartFile("files", "same.pdf", null, "second".getBytes(StandardCharsets.UTF_8)));
+
+        assertThat(first.relativePath()).isNotEqualTo(second.relativePath());
+        assertThat(Files.readString(storageService.resolve(first.relativePath()))).isEqualTo("first");
+        assertThat(Files.readString(storageService.resolve(second.relativePath()))).isEqualTo("second");
+        assertThat(first.relativePath()).startsWith("originals/");
+    }
+
+    @Test
+    void assetShouldRoundTripThroughServerGeneratedStorageKey() throws Exception {
+        StorageService storageService = newStorageService();
+        String assetId = UUID.randomUUID().toString();
+
+        StorageService.StoredAsset stored = storageService.storeAsset(
+                12L, 3, assetId, "png", output -> output.write("image".getBytes(StandardCharsets.UTF_8)));
+
+        assertThat(stored.storageKey()).isEqualTo("assets/12/v3/" + assetId + ".png");
+        assertThat(stored.byteSize()).isEqualTo(5);
+        assertThat(storageService.size(stored.storageKey())).isEqualTo(5);
+        assertThat(new String(storageService.open(stored.storageKey()).readAllBytes(), StandardCharsets.UTF_8))
+                .isEqualTo("image");
+
+        storageService.delete(stored.storageKey());
+        assertThat(storageService.resolve(stored.storageKey())).doesNotExist();
+    }
+
+    @Test
+    void resolveShouldRejectExistingSymbolicLinkEscape() throws Exception {
+        StorageService storageService = newStorageService();
+        Path outside = Files.createTempFile(tempDir.getParent(), "outside-", ".txt");
+        Path link = tempDir.resolve("escaped-link.txt");
+        try {
+            Files.createSymbolicLink(link, outside);
+        } catch (UnsupportedOperationException | java.nio.file.FileSystemException exception) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "当前文件系统不支持符号链接测试");
+        }
+
+        assertThatThrownBy(() -> storageService.resolve("escaped-link.txt"))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("非法存储路径");
     }
 
     @Test

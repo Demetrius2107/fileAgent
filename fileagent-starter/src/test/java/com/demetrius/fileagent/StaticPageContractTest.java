@@ -27,7 +27,7 @@ class StaticPageContractTest {
             "toggle-model-settings", "model-settings-dialog", "model-settings-form",
             "model-config-list", "provider-select", "base-url-input", "api-key-input",
             "model-name-input", "model-config-error", "model-config-cancel", "model-config-save",
-            "doc-view-assets", "doc-view-asset-status", "doc-view-assets-more",
+            "doc-view-close", "doc-view-assets", "doc-view-asset-status", "doc-view-assets-more",
             "doc-asset-dialog", "doc-asset-image", "doc-asset-close"
     );
 
@@ -151,6 +151,7 @@ class StaticPageContractTest {
         assertThat(css)
                 .contains(".doc-view-assets")
                 .contains(".doc-asset-card")
+                .contains(".doc-view-head .icon-button")
                 .contains("aspect-ratio")
                 .contains("@media (max-width: 900px)");
     }

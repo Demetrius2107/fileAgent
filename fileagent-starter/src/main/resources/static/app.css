@@ -1112,6 +1112,13 @@ dialog.doc-view-dialog::backdrop {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* 文档弹窗不属于窄屏侧栏，关闭按钮在所有视口都必须可见。 */
+.doc-view-head .icon-button {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+}
 .doc-view-body {
     padding: 16px 24px 24px;
     overflow-y: auto;
